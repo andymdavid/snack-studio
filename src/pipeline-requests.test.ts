@@ -75,7 +75,7 @@ describe("episode pipeline lifecycle", () => {
     }, database);
 
     expect(request.inputTranscriptSha256).toBe("digest-1");
-    expect(request.promptSuiteVersion).toBe("v5-intelligence-snacks-source-character");
+    expect(request.promptSuiteVersion).toBe("v3-intelligence-snacks-natural-prose");
     expect(getPipelineRequestContext(request.id, database)?.transcript).toMatchObject({ id: "revision-1", sha256: "digest-1" });
     expect(getPipelineRequestTranscript(request.id, database)).toMatchObject({
       requestId: request.id,

@@ -39,7 +39,7 @@ describe("episode Autopilot trigger", () => {
     });
   });
 
-  test("pins the Snack Studio definition route to the requested pipeline version", () => {
+  test("pins the production Snack Studio definition route to the accepted v3 baseline", () => {
     const trigger = buildEpisodePipelineTriggerRequest({
       autopilotUrl: "https://autopilot.example/",
       pipelineName: "snack-studio-transcript-to-snacks",
@@ -49,8 +49,8 @@ describe("episode Autopilot trigger", () => {
       operation: "transcript-to-snacks",
       userNpub: "npub1editor",
       inputRevisionId: "revision-3",
-      pipelineVersion: "5",
-      promptSuiteVersion: "v5-intelligence-snacks-source-character",
+      pipelineVersion: "3",
+      promptSuiteVersion: "v3-intelligence-snacks-natural-prose",
       resultSchemaVersion: "1",
       contextUrl: "https://studio.example/context",
       transcriptUrl: "https://studio.example/transcript",
@@ -58,7 +58,7 @@ describe("episode Autopilot trigger", () => {
       webhookToken: "run-secret",
     });
 
-    expect(trigger.url).toBe("https://autopilot.example/api/pipelines/triggers/http/snack-studio-transcript-to-snacks.v5");
-    expect(trigger.body.input.pipelineVersion).toBe("5");
+    expect(trigger.url).toBe("https://autopilot.example/api/pipelines/triggers/http/snack-studio-transcript-to-snacks.v3");
+    expect(trigger.body.input.pipelineVersion).toBe("3");
   });
 });

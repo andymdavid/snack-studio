@@ -160,7 +160,7 @@ export function createPipelineRequest(input: {
     input.autopilotTargetId,
     input.pipelineName,
     input.pipelineVersion ?? null,
-    input.promptSuiteVersion || "v5-intelligence-snacks-source-character",
+    input.promptSuiteVersion || "v3-intelligence-snacks-natural-prose",
     input.resultSchemaVersion || "1",
     input.idempotencyKey || crypto.randomUUID(),
     now,

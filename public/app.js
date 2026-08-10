@@ -3,8 +3,8 @@ import { derivePubkeyFromNsec, signEventWithNsec, signLoginChallengeWithNsec } f
 const PROFILE_CACHE_KEY = "snack_studio_profiles_v1";
 const PIPELINES_CACHE_KEY = "snack_studio_pipelines_v1";
 const PROFILE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const CURRENT_SNACK_PROMPT_SUITE = "v5-intelligence-snacks-source-character";
-const CURRENT_SNACK_PIPELINE_VERSION = "5";
+const CURRENT_SNACK_PROMPT_SUITE = "v3-intelligence-snacks-natural-prose";
+const CURRENT_SNACK_PIPELINE_VERSION = "3";
 const PROFILE_RELAYS = [
   "wss://relay.damus.io",
   "wss://nos.lol",
