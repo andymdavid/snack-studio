@@ -12,9 +12,9 @@ import {
   pubkeyToNpub,
   removeAccessRule,
   verifyLoginEvent,
-  verifyNip98Request,
 } from "./auth.ts";
-import { PIPELINE_NAME, PORT, PUBLIC_ORIGIN, WINGMAN_URL } from "./config.ts";
+import { verifyNip98Request } from "./nip98.ts";
+import { PIPELINE_NAME, PIPELINE_TIMEOUT_MS, PORT, PUBLIC_ORIGIN, WINGMAN_URL } from "./config.ts";
 import {
   db,
   deleteAutopilotTarget,
@@ -32,7 +32,55 @@ import {
   type Message,
 } from "./db.ts";
 import { clearPendingImport, exportSnapshot, getDbStatus, snapshotPath, stageSnapshotImport, stageUploadedImport } from "./db-admin.ts";
-import { buildPipelineTriggerRequest, startPreparedChatPipeline, type PipelineTriggerRequest } from "./pipeline.ts";
+import { validateEpisodeInput } from "./episode-input.ts";
+import { validateCandidateRevision, validateReviewDecision } from "./candidate-input.ts";
+import { activateCandidateRevision, createCandidateRevision, generateFixtureCandidates, getCandidate, listCandidates, updateCandidateDecision } from "./candidates.ts";
+import { createFixtureRelationshipSuggestions, createRelationship, deleteRelationship, getCuration, RELATIONSHIP_TYPES, setNewsletterItems, updateRelationshipState } from "./curation.ts";
+import { normalizeTranscriptText, validateEpisodeMetadata, validateTranscriptUpload } from "./transcript-input.ts";
+import {
+  activateTranscriptRevision,
+  createEpisode,
+  createPastedTranscriptRevision,
+  createUploadedTranscriptRevision,
+  deleteEpisodeWorkspace,
+  findEpisodeByNumber,
+  getActiveTranscriptRevision,
+  getEpisode,
+  listEpisodeAuditEvents,
+  listEpisodes,
+  listTranscriptRevisions,
+  recordAuditEvent,
+  updateEpisodeMetadata,
+} from "./episodes.ts";
+import {
+  buildEpisodePipelineTriggerRequest,
+  buildPipelineTriggerRequest,
+  startPreparedChatPipeline,
+  startPreparedEpisodePipeline,
+  type EpisodePipelineTriggerRequest,
+  type PipelineTriggerRequest,
+} from "./pipeline.ts";
+import {
+  createPipelineRun,
+  createPipelineRequest,
+  cancelUnstartedPipelineRuns,
+  getPipelineRequest,
+  getPipelineRequestContext,
+  getPipelineRequestTranscript,
+  getPipelineRun,
+  findPipelineRunForCallback,
+  listEpisodePipelineRequests,
+  markPipelineRunFailed,
+  markPipelineRunStarted,
+  markPipelineResultRejected,
+  markStalePipelineRunsTimedOut,
+  PIPELINE_OPERATIONS,
+  type PipelineOperation,
+  verifyPreparedPipelineTrigger,
+  updatePipelineRunProgress,
+} from "./pipeline-requests.ts";
+import { validateSuccessfulPipelineResult } from "./pipeline-result-input.ts";
+import { applySuccessfulPipelineResult } from "./pipeline-results.ts";
 
 const PUBLIC_DIR = join(import.meta.dir, "..", "public");
 
@@ -167,11 +215,41 @@ function webhookOrigin(req: Request): string {
   return PUBLIC_ORIGIN || new URL(req.url).origin;
 }
 
+function prepareEpisodePipelineRun(req: Request, pipelineRequest: NonNullable<ReturnType<typeof getPipelineRequest>>, userNpub: string, retryOfRunId?: string | null) {
+  const target = getAutopilotTarget(pipelineRequest.autopilotTargetId);
+  if (!target) throw new Error("configured Autopilot target no longer exists");
+  const contextUrl = `${webhookOrigin(req)}/api/nip98/pipeline-requests/${encodeURIComponent(pipelineRequest.id)}/context`;
+  const transcriptUrl = `${webhookOrigin(req)}/api/nip98/pipeline-requests/${encodeURIComponent(pipelineRequest.id)}/transcript`;
+  const callbackUrl = `${webhookOrigin(req)}/api/pipeline-webhook`;
+  const autopilotUrl = resolveAutopilotServerUrl(target.url);
+  return createPipelineRun({
+    requestId: pipelineRequest.id,
+    retryOfRunId: retryOfRunId ?? null,
+    buildTriggerPayload: (callbackToken, attemptId) => buildEpisodePipelineTriggerRequest({
+      autopilotUrl,
+      pipelineName: pipelineRequest.pipelineName,
+      requestId: pipelineRequest.id,
+      attemptId,
+      episodeId: pipelineRequest.episodeId,
+      operation: pipelineRequest.operation,
+      userNpub,
+      inputRevisionId: pipelineRequest.inputTranscriptRevisionId,
+      pipelineVersion: pipelineRequest.pipelineVersion,
+      promptSuiteVersion: pipelineRequest.promptSuiteVersion,
+      resultSchemaVersion: pipelineRequest.resultSchemaVersion,
+      contextUrl,
+      transcriptUrl,
+      webhookUrl: callbackUrl,
+      webhookToken: callbackToken,
+    }) as unknown as Record<string, unknown>,
+  });
+}
+
 async function handleApi(req: Request, url: URL): Promise<Response | null> {
   const { pathname } = url;
 
   if (pathname === "/api/health" && req.method === "GET") {
-    return json({ ok: true, now: new Date().toISOString() });
+    return json({ ok: true, app: "snack-studio", now: new Date().toISOString() });
   }
 
   if (pathname === "/api/auth/challenge" && req.method === "POST") {
@@ -230,7 +308,441 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       defaultPipeline: defaultPipeline || existingTarget.defaultPipeline,
     });
     setSetting("currentAutopilotTargetId", updated.id);
+    recordAuditEvent({
+      actorPubkey: session.pubkey,
+      action: "settings.autopilot.updated",
+      entityType: "autopilot-target",
+      entityId: updated.id,
+      detail: { label: updated.label, defaultPipeline: updated.defaultPipeline },
+    });
     return json({ settings: getAppSettings() });
+  }
+
+  if (pathname === "/api/episodes" && req.method === "GET") {
+    const session = requireSession(req);
+    if (!session) return json({ error: "unauthorized" }, 401);
+    if (!hasAccess(session.pubkey, "read")) return json({ error: "read access required" }, 403);
+    return json({ episodes: listEpisodes() });
+  }
+
+  if (pathname === "/api/episodes" && req.method === "POST") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const body = await readJson(req);
+    const validated = validateEpisodeInput(body);
+    if (!validated.ok) return json({ error: validated.error }, 400);
+    const { episodeNumber, workingTitle } = validated.value;
+    if (episodeNumber !== null && findEpisodeByNumber(episodeNumber)) {
+      return json({ error: `Episode ${episodeNumber} already has a workspace` }, 409);
+    }
+    return json({ episode: createEpisode({ episodeNumber, workingTitle, ownerPubkey: session.pubkey }) }, 201);
+  }
+
+  const episodeMatch = pathname.match(/^\/api\/episodes\/([^/]+)$/);
+  if (episodeMatch && req.method === "GET") {
+    const session = requireSession(req);
+    if (!session) return json({ error: "unauthorized" }, 401);
+    if (!hasAccess(session.pubkey, "read")) return json({ error: "read access required" }, 403);
+    const episode = getEpisode(decodeURIComponent(episodeMatch[1]!));
+    if (!episode) return json({ error: "episode not found" }, 404);
+    return json({
+      episode,
+      transcript: getActiveTranscriptRevision(episode.id),
+      transcriptRevisions: listTranscriptRevisions(episode.id),
+      auditEvents: listEpisodeAuditEvents(episode.id),
+    });
+  }
+
+  if (episodeMatch && req.method === "PATCH") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const episodeId = decodeURIComponent(episodeMatch[1]!);
+    if (!getEpisode(episodeId)) return json({ error: "episode not found" }, 404);
+    const validated = validateEpisodeMetadata(await readJson(req));
+    if (!validated.ok) return json({ error: validated.error }, 400);
+    if (validated.value.episodeNumber !== null) {
+      const duplicate = findEpisodeByNumber(validated.value.episodeNumber);
+      if (duplicate && duplicate.id !== episodeId) {
+        return json({ error: `Episode ${validated.value.episodeNumber} already has a workspace` }, 409);
+      }
+    }
+    const episode = updateEpisodeMetadata(episodeId, { ...validated.value, actorPubkey: session.pubkey });
+    return json({ episode });
+  }
+
+  if (episodeMatch && req.method === "DELETE") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const episodeId = decodeURIComponent(episodeMatch[1]!);
+    const result = deleteEpisodeWorkspace(episodeId);
+    if (result === "not-found") return json({ error: "episode not found" }, 404);
+    if (result === "pipeline-active") {
+      return json({ error: "This workspace cannot be deleted while generation is running" }, 409);
+    }
+    return json({ ok: true, episodeId });
+  }
+
+  const transcriptRevisionMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/transcript-revisions$/);
+  if (transcriptRevisionMatch && req.method === "POST") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const episodeId = decodeURIComponent(transcriptRevisionMatch[1]!);
+    if (!getEpisode(episodeId)) return json({ error: "episode not found" }, 404);
+    const contentType = req.headers.get("content-type") || "";
+    if (contentType.includes("multipart/form-data")) {
+      const form = await req.formData();
+      const file = form.get("file");
+      if (!(file instanceof File)) return json({ error: "file is required" }, 400);
+      const validatedFile = validateTranscriptUpload(file);
+      if (!validatedFile.ok) return json({ error: validatedFile.error }, 400);
+      const sourceBytes = new Uint8Array(await file.arrayBuffer());
+      let decoded: string;
+      try {
+        decoded = new TextDecoder("utf-8", { fatal: true }).decode(sourceBytes);
+      } catch {
+        return json({ error: "Transcript uploads must contain valid UTF-8 text" }, 400);
+      }
+      if (decoded.includes("\u0000")) return json({ error: "Transcript uploads cannot contain null bytes" }, 400);
+      const normalized = normalizeTranscriptText(decoded);
+      if (!normalized.ok) return json({ error: normalized.error }, 400);
+      const rawNote = form.get("changeNote");
+      const changeNote = typeof rawNote === "string" && rawNote.trim() ? rawNote.trim().slice(0, 500) : null;
+      const originalFilename = file.name.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 255) || "transcript.txt";
+      const transcript = createUploadedTranscriptRevision({
+        episodeId,
+        originalFilename,
+        mediaType: file.type || "text/plain",
+        sourceBytes,
+        transcriptText: normalized.text,
+        changeNote,
+        actorPubkey: session.pubkey,
+      });
+      return json({
+        episode: getEpisode(episodeId),
+        transcript,
+        transcriptRevisions: listTranscriptRevisions(episodeId),
+        auditEvents: listEpisodeAuditEvents(episodeId),
+      }, 201);
+    }
+    const body = await readJson(req);
+    const normalized = normalizeTranscriptText(body.transcriptText);
+    if (!normalized.ok) return json({ error: normalized.error }, 400);
+    const changeNote = typeof body.changeNote === "string" && body.changeNote.trim()
+      ? body.changeNote.trim().slice(0, 500)
+      : null;
+    const transcript = createPastedTranscriptRevision({
+      episodeId,
+      transcriptText: normalized.text,
+      sizeBytes: normalized.sizeBytes,
+      changeNote,
+      actorPubkey: session.pubkey,
+    });
+    return json({
+      episode: getEpisode(episodeId),
+      transcript,
+      transcriptRevisions: listTranscriptRevisions(episodeId),
+      auditEvents: listEpisodeAuditEvents(episodeId),
+    }, 201);
+  }
+
+  const activateTranscriptMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/transcript-revisions\/([^/]+)\/active$/);
+  if (activateTranscriptMatch && req.method === "PUT") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const episodeId = decodeURIComponent(activateTranscriptMatch[1]!);
+    const revisionId = decodeURIComponent(activateTranscriptMatch[2]!);
+    if (!getEpisode(episodeId)) return json({ error: "episode not found" }, 404);
+    const transcript = activateTranscriptRevision({ episodeId, revisionId, actorPubkey: session.pubkey });
+    if (!transcript) return json({ error: "transcript revision not found for this episode" }, 404);
+    return json({
+      episode: getEpisode(episodeId),
+      transcript,
+      transcriptRevisions: listTranscriptRevisions(episodeId),
+      auditEvents: listEpisodeAuditEvents(episodeId),
+    });
+  }
+
+  const episodeCandidatesMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/candidates$/);
+  if (episodeCandidatesMatch && req.method === "GET") {
+    const session = requireSession(req);
+    if (!session) return json({ error: "unauthorized" }, 401);
+    if (!hasAccess(session.pubkey, "read")) return json({ error: "read access required" }, 403);
+    const episodeId = decodeURIComponent(episodeCandidatesMatch[1]!);
+    if (!getEpisode(episodeId)) return json({ error: "episode not found" }, 404);
+    return json({ candidates: listCandidates(episodeId) });
+  }
+
+  const fixtureCandidatesMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/fixture-candidates$/);
+  if (fixtureCandidatesMatch && req.method === "POST") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const episodeId = decodeURIComponent(fixtureCandidatesMatch[1]!);
+    const episode = getEpisode(episodeId);
+    if (!episode) return json({ error: "episode not found" }, 404);
+    if (!episode.activeTranscriptRevisionId) return json({ error: "an active transcript is required" }, 409);
+    if (listCandidates(episodeId).length) return json({ error: "candidate set already exists" }, 409);
+    return json({ candidates: generateFixtureCandidates(episodeId, session.pubkey), episode: getEpisode(episodeId) }, 201);
+  }
+
+  const episodePipelineRequestsMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/pipeline-requests$/);
+  if (episodePipelineRequestsMatch && req.method === "GET") {
+    const session = requireSession(req);
+    if (!session) return json({ error: "unauthorized" }, 401);
+    if (!hasAccess(session.pubkey, "read")) return json({ error: "read access required" }, 403);
+    const episodeId = decodeURIComponent(episodePipelineRequestsMatch[1]!);
+    const episode = getEpisode(episodeId);
+    if (!episode) return json({ error: "episode not found" }, 404);
+    markStalePipelineRunsTimedOut({ episodeId, timeoutMs: PIPELINE_TIMEOUT_MS });
+    return json({
+      timeoutMs: PIPELINE_TIMEOUT_MS,
+      pipelineRequests: listEpisodePipelineRequests(episodeId).map((request) => ({
+        ...request,
+        staleInput: request.inputTranscriptRevisionId !== episode.activeTranscriptRevisionId,
+      })),
+    });
+  }
+
+  if (episodePipelineRequestsMatch && req.method === "POST") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const episodeId = decodeURIComponent(episodePipelineRequestsMatch[1]!);
+    const episode = getEpisode(episodeId);
+    if (!episode) return json({ error: "episode not found" }, 404);
+    const transcript = getActiveTranscriptRevision(episodeId);
+    if (!transcript) return json({ error: "an active transcript revision is required" }, 409);
+    const body = await readJson(req);
+    const operation = String(body.operation || "transcript-to-snacks") as PipelineOperation;
+    if (!PIPELINE_OPERATIONS.includes(operation)) return json({ error: "unsupported pipeline operation" }, 400);
+    const target = getRequestedAutopilotTarget(body.autopilotTargetId);
+    const pipelineName = normalizePipelineName(body.pipelineName) || target.defaultPipeline;
+    const pipelineRequest = createPipelineRequest({
+      episodeId,
+      operation,
+      actorPubkey: session.pubkey,
+      transcriptRevisionId: transcript.id,
+      autopilotTargetId: target.id,
+      pipelineName,
+      pipelineVersion: typeof body.pipelineVersion === "string" ? body.pipelineVersion.trim() || null : null,
+      promptSuiteVersion: typeof body.promptSuiteVersion === "string" ? body.promptSuiteVersion.trim() || undefined : undefined,
+      resultSchemaVersion: typeof body.resultSchemaVersion === "string" ? body.resultSchemaVersion.trim() || undefined : undefined,
+      idempotencyKey: typeof body.idempotencyKey === "string" ? body.idempotencyKey.trim() || undefined : undefined,
+    });
+    recordAuditEvent({
+      actorPubkey: session.pubkey,
+      action: "pipeline.request.created",
+      entityType: "episode",
+      entityId: episodeId,
+      detail: {
+        requestId: pipelineRequest.id,
+        operation: pipelineRequest.operation,
+        transcriptRevisionId: pipelineRequest.inputTranscriptRevisionId,
+        transcriptSha256: pipelineRequest.inputTranscriptSha256,
+        pipelineName: pipelineRequest.pipelineName,
+        promptSuiteVersion: pipelineRequest.promptSuiteVersion,
+      },
+    });
+    const prepared = prepareEpisodePipelineRun(req, pipelineRequest, pubkeyToNpub(session.pubkey));
+    return json({
+      pipelineRequest: { ...getPipelineRequest(pipelineRequest.id), runs: [prepared.run] },
+      runId: prepared.run.id,
+      requiresAutopilotAuth: true,
+      triggerRequest: prepared.triggerPayload,
+    }, 201);
+  }
+
+  const episodePipelineRetryMatch = pathname.match(/^\/api\/pipeline-requests\/([^/]+)\/retry$/);
+  if (episodePipelineRetryMatch && req.method === "POST") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const requestId = decodeURIComponent(episodePipelineRetryMatch[1]!);
+    const pipelineRequest = getPipelineRequest(requestId);
+    if (!pipelineRequest) return json({ error: "pipeline request not found" }, 404);
+    if (pipelineRequest.status === "completed") return json({ error: "completed pipeline requests cannot be retried" }, 409);
+    if (["queued", "running", "applying-result"].includes(pipelineRequest.status)) {
+      return json({ error: `pipeline request cannot be retried from ${pipelineRequest.status}` }, 409);
+    }
+    const previousRun = listEpisodePipelineRequests(pipelineRequest.episodeId)
+      .find((item) => item.id === requestId)?.runs[0] || null;
+    cancelUnstartedPipelineRuns(requestId);
+    let prepared;
+    try {
+      prepared = prepareEpisodePipelineRun(req, pipelineRequest, pubkeyToNpub(session.pubkey), previousRun?.id || null);
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
+    recordAuditEvent({
+      actorPubkey: session.pubkey,
+      action: "pipeline.request.retried",
+      entityType: "episode",
+      entityId: pipelineRequest.episodeId,
+      detail: { requestId, runId: prepared.run.id, retryOfRunId: previousRun?.id || null, attemptNumber: prepared.run.attemptNumber },
+    });
+    return json({
+      pipelineRequest: { ...getPipelineRequest(requestId), runs: listEpisodePipelineRequests(pipelineRequest.episodeId).find((item) => item.id === requestId)?.runs || [prepared.run] },
+      runId: prepared.run.id,
+      requiresAutopilotAuth: true,
+      triggerRequest: prepared.triggerPayload,
+    }, 201);
+  }
+
+  const episodePipelineStartMatch = pathname.match(/^\/api\/episode-pipeline-runs\/([^/]+)\/start$/);
+  if (episodePipelineStartMatch && req.method === "POST") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const runId = decodeURIComponent(episodePipelineStartMatch[1]!);
+    const run = getPipelineRun(runId);
+    if (!run) return json({ error: "pipeline run not found" }, 404);
+    const pipelineRequest = getPipelineRequest(run.requestId);
+    if (!pipelineRequest) return json({ error: "pipeline request not found" }, 404);
+    if (!["awaiting-authorization", "prepared"].includes(run.status)) {
+      return json({ error: `pipeline run cannot start from ${run.status}` }, 409);
+    }
+    const body = await readJson(req);
+    const autopilotAuthorization = String(body.autopilotAuthorization || "").trim();
+    const triggerRequest = body.triggerRequest;
+    if (!autopilotAuthorization) return json({ error: "autopilotAuthorization is required" }, 400);
+    if (!triggerRequest || typeof triggerRequest !== "object" || Array.isArray(triggerRequest)) {
+      return json({ error: "triggerRequest is required" }, 400);
+    }
+    if (!verifyPreparedPipelineTrigger(run.id, triggerRequest as Record<string, unknown>)) {
+      return json({ error: "prepared pipeline trigger does not match this run" }, 409);
+    }
+    const triggerInput = (triggerRequest as EpisodePipelineTriggerRequest).body.input;
+    if (triggerInput.attemptId !== run.id) return json({ error: "prepared pipeline attempt does not match this run" }, 409);
+    try {
+      const result = await startPreparedEpisodePipeline(triggerRequest as unknown as EpisodePipelineTriggerRequest, autopilotAuthorization);
+      const updatedRun = markPipelineRunStarted({ runId: run.id, autopilotRunId: result.runId, remoteStatus: result.status });
+      recordAuditEvent({
+        actorPubkey: session.pubkey,
+        action: "pipeline.run.started",
+        entityType: "episode",
+        entityId: pipelineRequest.episodeId,
+        detail: { requestId: pipelineRequest.id, runId: run.id, autopilotRunId: result.runId, pipelineName: pipelineRequest.pipelineName },
+      });
+      return json({ pipelineRequest: { ...getPipelineRequest(pipelineRequest.id), runs: listEpisodePipelineRequests(pipelineRequest.episodeId).find((item) => item.id === pipelineRequest.id)?.runs || [updatedRun] } }, 202);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const failedRun = markPipelineRunFailed({ runId: run.id, category: "trigger-failed", summary: message });
+      recordAuditEvent({
+        actorPubkey: session.pubkey,
+        action: "pipeline.run.failed",
+        entityType: "episode",
+        entityId: pipelineRequest.episodeId,
+        detail: { requestId: pipelineRequest.id, runId: run.id, category: "trigger-failed", summary: message.slice(0, 500) },
+      });
+      return json({ error: message, pipelineRequest: { ...getPipelineRequest(pipelineRequest.id), runs: [failedRun] } }, 502);
+    }
+  }
+
+  const candidateMatch = pathname.match(/^\/api\/candidates\/([^/]+)$/);
+  if (candidateMatch && req.method === "GET") {
+    const session = requireSession(req);
+    if (!session) return json({ error: "unauthorized" }, 401);
+    if (!hasAccess(session.pubkey, "read")) return json({ error: "read access required" }, 403);
+    const candidate = getCandidate(decodeURIComponent(candidateMatch[1]!));
+    return candidate ? json({ candidate }) : json({ error: "candidate not found" }, 404);
+  }
+
+  if (candidateMatch && req.method === "PATCH") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const candidateId = decodeURIComponent(candidateMatch[1]!);
+    const body = await readJson(req);
+    if (body.reviewDecision !== undefined) {
+      const decision = validateReviewDecision(body.reviewDecision);
+      if (!decision) return json({ error: "invalid reviewDecision" }, 400);
+      const candidate = updateCandidateDecision(candidateId, decision, session.pubkey);
+      return candidate ? json({ candidate }) : json({ error: "candidate not found" }, 404);
+    }
+    const validated = validateCandidateRevision(body);
+    if (!validated.ok) return json({ error: validated.error }, 400);
+    const candidate = createCandidateRevision(candidateId, validated.value, session.pubkey);
+    return candidate ? json({ candidate }, 201) : json({ error: "candidate not found" }, 404);
+  }
+
+  const activateCandidateRevisionMatch = pathname.match(/^\/api\/candidates\/([^/]+)\/revisions\/([^/]+)\/active$/);
+  if (activateCandidateRevisionMatch && req.method === "PUT") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const candidate = activateCandidateRevision(
+      decodeURIComponent(activateCandidateRevisionMatch[1]!),
+      decodeURIComponent(activateCandidateRevisionMatch[2]!),
+      session.pubkey,
+    );
+    return candidate ? json({ candidate }) : json({ error: "candidate revision not found" }, 404);
+  }
+
+  const curationMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/curation$/);
+  if (curationMatch && req.method === "GET") {
+    const session = requireSession(req);
+    if (!session) return json({ error: "unauthorized" }, 401);
+    if (!hasAccess(session.pubkey, "read")) return json({ error: "read access required" }, 403);
+    const episodeId = decodeURIComponent(curationMatch[1]!);
+    if (!getEpisode(episodeId)) return json({ error: "episode not found" }, 404);
+    return json(getCuration(episodeId));
+  }
+
+  const newsletterMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/newsletter-items$/);
+  if (newsletterMatch && req.method === "PUT") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const episodeId = decodeURIComponent(newsletterMatch[1]!);
+    if (!getEpisode(episodeId)) return json({ error: "episode not found" }, 404);
+    const body = await readJson(req);
+    if (!Array.isArray(body.candidateIds)) return json({ error: "candidateIds must be an array" }, 400);
+    try {
+      return json({ newsletterItems: setNewsletterItems(episodeId, body.candidateIds.map(String), session.pubkey), validation: getCuration(episodeId).validation });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  }
+
+  const fixtureRelationshipsMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/fixture-relationships$/);
+  if (fixtureRelationshipsMatch && req.method === "POST") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const episodeId = decodeURIComponent(fixtureRelationshipsMatch[1]!);
+    try {
+      return json({ relationships: createFixtureRelationshipSuggestions(episodeId, session.pubkey), validation: getCuration(episodeId).validation }, 201);
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  }
+
+  if (pathname === "/api/relationships" && req.method === "POST") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const body = await readJson(req);
+    const relationshipType = typeof body.relationshipType === "string" && RELATIONSHIP_TYPES.includes(body.relationshipType as never) ? body.relationshipType as typeof RELATIONSHIP_TYPES[number] : null;
+    if (!relationshipType) return json({ error: "invalid relationshipType" }, 400);
+    try {
+      const relationship = createRelationship({
+        episodeId: String(body.episodeId || ""), sourceCandidateId: String(body.sourceCandidateId || ""),
+        targetCandidateId: String(body.targetCandidateId || ""), relationshipType,
+        explanation: typeof body.explanation === "string" && body.explanation.trim() ? body.explanation.trim().slice(0, 1000) : null,
+        origin: "manual", reviewState: "approved", actorPubkey: session.pubkey,
+      });
+      return json({ relationship }, 201);
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  }
+
+  const relationshipMatch = pathname.match(/^\/api\/relationships\/([^/]+)$/);
+  if (relationshipMatch && req.method === "PATCH") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const body = await readJson(req);
+    const state = ["draft", "approved", "rejected"].includes(String(body.reviewState)) ? String(body.reviewState) as "draft" | "approved" | "rejected" : null;
+    if (!state) return json({ error: "invalid reviewState" }, 400);
+    const relationship = updateRelationshipState(decodeURIComponent(relationshipMatch[1]!), state, session.pubkey);
+    return relationship ? json({ relationship }) : json({ error: "relationship not found" }, 404);
+  }
+
+  if (relationshipMatch && req.method === "DELETE") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    return deleteRelationship(decodeURIComponent(relationshipMatch[1]!), session.pubkey) ? json({ ok: true }) : json({ error: "relationship not found" }, 404);
   }
 
   if (pathname === "/api/autopilot-targets" && req.method === "POST") {
@@ -244,6 +756,13 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     if (!defaultPipeline) return json({ error: "defaultPipeline is required" }, 400);
     const target = upsertAutopilotTarget({ label, url, defaultPipeline });
     setSetting("currentAutopilotTargetId", target.id);
+    recordAuditEvent({
+      actorPubkey: session.pubkey,
+      action: "settings.autopilot.created",
+      entityType: "autopilot-target",
+      entityId: target.id,
+      detail: { label: target.label, defaultPipeline: target.defaultPipeline },
+    });
     return json({ target, settings: getAppSettings() }, 201);
   }
 
@@ -254,6 +773,12 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const id = decodeURIComponent(autopilotTargetMatch[1]!);
     if (listAutopilotTargets().length <= 1) return json({ error: "at least one Autopilot target is required" }, 409);
     deleteAutopilotTarget(id);
+    recordAuditEvent({
+      actorPubkey: session.pubkey,
+      action: "settings.autopilot.deleted",
+      entityType: "autopilot-target",
+      entityId: id,
+    });
     return json({ ok: true, settings: getAppSettings() });
   }
 
@@ -282,7 +807,15 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const role = normalizeAccessRole(body.role);
     if (!pubkey) return json({ error: "npub or pubkey is required" }, 400);
     if (!role) return json({ error: "role must be read or edit" }, 400);
-    return json({ accessRule: addAccessRule(pubkey, role), accessRules: getAccessRules() }, 201);
+    const accessRule = addAccessRule(pubkey, role);
+    recordAuditEvent({
+      actorPubkey: session.pubkey,
+      action: "access.granted",
+      entityType: "access-rule",
+      entityId: `${pubkey}:${role}`,
+      detail: { pubkey, role },
+    });
+    return json({ accessRule, accessRules: getAccessRules() }, 201);
   }
 
   const accessRuleMatch = pathname.match(/^\/api\/access-rules\/(read|edit)\/([^/]+)$/);
@@ -293,6 +826,13 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const pubkey = normalizePubkey(decodeURIComponent(accessRuleMatch[2]!));
     if (!role || !pubkey) return json({ error: "valid role and npub/pubkey are required" }, 400);
     removeAccessRule(pubkey, role);
+    recordAuditEvent({
+      actorPubkey: session.pubkey,
+      action: "access.revoked",
+      entityType: "access-rule",
+      entityId: `${pubkey}:${role}`,
+      detail: { pubkey, role },
+    });
     return json({ ok: true, accessRules: getAccessRules() });
   }
 
@@ -335,7 +875,15 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const session = requireEditSession(req);
     if (!session) return json({ error: "edit access required" }, 403);
     const body = await readJson(req);
-    return json({ snapshot: exportSnapshot(String(body.note ?? "")), status: getDbStatus() }, 201);
+    const snapshot = exportSnapshot(String(body.note ?? ""));
+    recordAuditEvent({
+      actorPubkey: session.pubkey,
+      action: "database.snapshot.exported",
+      entityType: "database-snapshot",
+      entityId: snapshot.id,
+      detail: { filename: snapshot.filename },
+    });
+    return json({ snapshot, status: getDbStatus() }, 201);
   }
 
   const snapshotDownloadMatch = pathname.match(/^\/api\/db\/snapshots\/([^/]+)\/download$/);
@@ -457,7 +1005,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       pipelineName,
     });
     db.query(`
-      INSERT INTO pipeline_runs(
+      INSERT INTO chat_pipeline_runs(
         id,
         chat_id,
         user_message_id,
@@ -497,12 +1045,12 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
 
     try {
       const result = await startPreparedChatPipeline(triggerRequest, autopilotAuthorization);
-      db.query("UPDATE pipeline_runs SET trigger_status = ?1, autopilot_run_id = ?2, updated_at = ?3 WHERE id = ?4")
+      db.query("UPDATE chat_pipeline_runs SET trigger_status = ?1, autopilot_run_id = ?2, updated_at = ?3 WHERE id = ?4")
         .run(result.mode, result.runId, Date.now(), localRunId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       db.query("UPDATE messages SET status = 'error', content = ?1 WHERE id = ?2").run(message, assistantMessageId);
-      db.query("UPDATE pipeline_runs SET trigger_status = 'error', error = ?1, updated_at = ?2 WHERE id = ?3")
+      db.query("UPDATE chat_pipeline_runs SET trigger_status = 'error', error = ?1, updated_at = ?2 WHERE id = ?3")
         .run(message, Date.now(), localRunId);
     }
 
@@ -519,7 +1067,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     if (!autopilotAuthorization) return json({ error: "autopilotAuthorization is required" }, 400);
     const run = db.query(`
       SELECT pr.*, c.pubkey
-      FROM pipeline_runs pr
+      FROM chat_pipeline_runs pr
       JOIN chats c ON c.id = pr.chat_id
       WHERE pr.id = ?1 AND c.pubkey = ?2
     `).get(runId, session.pubkey) as Record<string, unknown> | null;
@@ -537,12 +1085,12 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     }
     try {
       const result = await startPreparedChatPipeline(triggerRequest, autopilotAuthorization);
-      db.query("UPDATE pipeline_runs SET trigger_status = ?1, autopilot_run_id = ?2, updated_at = ?3 WHERE id = ?4")
+      db.query("UPDATE chat_pipeline_runs SET trigger_status = ?1, autopilot_run_id = ?2, updated_at = ?3 WHERE id = ?4")
         .run(result.mode, result.runId, Date.now(), runId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       db.query("UPDATE messages SET status = 'error', content = ?1 WHERE id = ?2").run(message, String(run.assistant_message_id));
-      db.query("UPDATE pipeline_runs SET trigger_status = 'error', error = ?1, updated_at = ?2 WHERE id = ?3")
+      db.query("UPDATE chat_pipeline_runs SET trigger_status = 'error', error = ?1, updated_at = ?2 WHERE id = ?3")
         .run(message, Date.now(), runId);
     }
     return json({ messages: listMessages(String(run.chat_id), session.pubkey), runId });
@@ -550,18 +1098,95 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
 
   if (pathname === "/api/pipeline-webhook" && req.method === "POST") {
     const body = await readJson(req);
-    const token = req.headers.get("x-chat-wapp-token") || String(body.token ?? "");
+    const token = req.headers.get("x-snack-studio-token") || req.headers.get("x-chat-wapp-token") || String(body.token ?? "");
+    const requestId = String(body.requestId ?? "").trim();
+    if (requestId) {
+      const callbackToken = req.headers.get("x-snack-studio-token") || "";
+      if (!callbackToken) return json({ error: "x-snack-studio-token is required" }, 401);
+      const run = findPipelineRunForCallback(requestId, callbackToken);
+      if (!run) return json({ error: "pipeline callback credential is invalid" }, 401);
+      const pipelineRequest = getPipelineRequest(requestId);
+      if (!pipelineRequest) return json({ error: "pipeline request not found" }, 404);
+      if (pipelineRequest.status === "completed" && pipelineRequest.resultAppliedAt) {
+        const count = db.query("SELECT COUNT(*) AS count FROM snack_candidates WHERE pipeline_request_id = ?1").get(requestId) as { count: number };
+        return json({ ok: true, requestId, status: "completed", replay: true, candidateCount: Number(count.count) });
+      }
+
+      if (body.status === "progress") {
+        const attemptId = String(body.attemptId || "").trim();
+        if (attemptId !== run.id) return json({ error: "pipeline progress attempt mismatch" }, 409);
+        const updated = updatePipelineRunProgress({
+          runId: run.id,
+          percent: Number(body.percent || 0),
+          label: String(body.label || "Autopilot is working"),
+        });
+        return json({ ok: true, requestId, status: "running", progressPercent: updated.progressPercent });
+      }
+
+      if (body.status === "error" || body.status === "failed") {
+        const remoteRunId = String(body.runId || "").trim();
+        if (run.autopilotRunId && remoteRunId && run.autopilotRunId !== remoteRunId) {
+          return json({ error: "pipeline callback Autopilot run mismatch" }, 409);
+        }
+        const failure = String(body.error || body.message || "Autopilot pipeline failed").trim().slice(0, 1000);
+        markPipelineRunFailed({ runId: run.id, category: "pipeline-failed", summary: failure });
+        recordAuditEvent({
+          action: "pipeline.callback.failed",
+          entityType: "episode",
+          entityId: pipelineRequest.episodeId,
+          detail: { requestId, runId: run.id, autopilotRunId: remoteRunId || run.autopilotRunId, summary: failure.slice(0, 500) },
+        });
+        return json({ ok: true, requestId, status: "failed" });
+      }
+
+      const validation = validateSuccessfulPipelineResult(body);
+      if (!validation.ok) {
+        markPipelineResultRejected({ runId: run.id, summary: validation.error });
+        recordAuditEvent({
+          action: "pipeline.callback.rejected",
+          entityType: "episode",
+          entityId: pipelineRequest.episodeId,
+          detail: { requestId, runId: run.id, reason: validation.error },
+        });
+        return json({ error: validation.error, requestId, status: "needs-review" }, 422);
+      }
+      try {
+        if (validation.value.attemptId !== run.id) return json({ error: "pipeline callback attempt mismatch" }, 409);
+        const applied = applySuccessfulPipelineResult({ localRunId: run.id, result: validation.value });
+        if (!applied.replay) {
+          recordAuditEvent({
+            action: "pipeline.callback.applied",
+            entityType: "episode",
+            entityId: pipelineRequest.episodeId,
+            detail: {
+              requestId,
+              runId: run.id,
+              autopilotRunId: validation.value.runId,
+              candidateCount: applied.candidateCount,
+              promptSuiteVersion: validation.value.promptSuiteVersion,
+              pipelineVersion: validation.value.pipelineVersion,
+              resultSchemaVersion: validation.value.resultSchemaVersion,
+            },
+          });
+        }
+        return json({ ok: true, requestId, status: "completed", replay: applied.replay, candidateCount: applied.candidateCount });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        markPipelineResultRejected({ runId: run.id, summary: message });
+        return json({ error: message, requestId, status: "needs-review" }, 409);
+      }
+    }
     const chatId = String(body.chatId ?? "");
     const response = String(body.response ?? body.message ?? "").trim();
     const runId = String(body.runId ?? "");
     if (!chatId || !token || !response) return json({ error: "chatId, token, and response are required" }, 400);
-    const run = db.query("SELECT * FROM pipeline_runs WHERE chat_id = ?1 AND webhook_token = ?2 ORDER BY created_at DESC LIMIT 1")
+    const run = db.query("SELECT * FROM chat_pipeline_runs WHERE chat_id = ?1 AND webhook_token = ?2 ORDER BY created_at DESC LIMIT 1")
       .get(chatId, token) as Record<string, unknown> | null;
     if (!run) return json({ error: "webhook target not found" }, 404);
     const now = Date.now();
     db.query("UPDATE messages SET content = ?1, status = 'complete', run_id = ?2 WHERE id = ?3")
       .run(response, runId || String(run.id), String(run.assistant_message_id));
-    db.query("UPDATE pipeline_runs SET trigger_status = 'complete', autopilot_run_id = COALESCE(?1, autopilot_run_id), updated_at = ?2 WHERE id = ?3")
+    db.query("UPDATE chat_pipeline_runs SET trigger_status = 'complete', autopilot_run_id = COALESCE(?1, autopilot_run_id), updated_at = ?2 WHERE id = ?3")
       .run(runId || null, now, String(run.id));
     db.query("UPDATE chats SET updated_at = ?1 WHERE id = ?2").run(now, chatId);
     return json({ ok: true });
@@ -579,6 +1204,32 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
         edit: hasAccess(verified.pubkey, "edit"),
       },
     });
+  }
+
+  const nip98PipelineContextMatch = pathname.match(/^\/api\/nip98\/pipeline-requests\/([^/]+)\/context$/);
+  if (nip98PipelineContextMatch && req.method === "GET") {
+    const verified = await verifyNip98Request(req, url);
+    if (!verified.ok) return json({ error: verified.error }, 401);
+    if (!hasAccess(verified.pubkey, "read")) return json({ error: "read access required" }, 403);
+    const requestId = decodeURIComponent(nip98PipelineContextMatch[1]!);
+    const context = getPipelineRequestContext(requestId);
+    if (!context) return json({ error: "pipeline request not found" }, 404);
+    const transcriptUrl = new URL(`/api/nip98/pipeline-requests/${encodeURIComponent(requestId)}/transcript`, url.origin).toString();
+    return json({
+      ...context,
+      transcript: { ...context.transcript, contentUrl: transcriptUrl },
+    });
+  }
+
+  const nip98PipelineTranscriptMatch = pathname.match(/^\/api\/nip98\/pipeline-requests\/([^/]+)\/transcript$/);
+  if (nip98PipelineTranscriptMatch && req.method === "GET") {
+    const verified = await verifyNip98Request(req, url);
+    if (!verified.ok) return json({ error: verified.error }, 401);
+    if (!hasAccess(verified.pubkey, "read")) return json({ error: "read access required" }, 403);
+    const requestId = decodeURIComponent(nip98PipelineTranscriptMatch[1]!);
+    const transcript = getPipelineRequestTranscript(requestId);
+    if (!transcript) return json({ error: "pipeline request not found" }, 404);
+    return json({ transcript });
   }
 
   if (pathname === "/api/nip98/chats" && req.method === "GET") {
@@ -659,4 +1310,4 @@ const server = Bun.serve({
   },
 });
 
-console.log(`chat-wapp listening on ${server.url}`);
+console.log(`snack-studio listening on ${server.url}`);
