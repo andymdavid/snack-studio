@@ -31,7 +31,7 @@ export function signLoginChallengeWithNsec(input: string, challenge: { nonce: st
     {
       kind: 22242,
       created_at: Math.floor(Date.now() / 1000),
-      tags: [["challenge", challenge.nonce], ["client", "chat-wapp"]],
+      tags: [["challenge", challenge.nonce], ["client", "snack-studio"]],
       content: challenge.content,
     },
     decodeNsec(input),

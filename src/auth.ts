@@ -1,12 +1,8 @@
-import { sha256 } from "@noble/hashes/sha256";
-import { bytesToHex } from "@noble/hashes/utils";
 import { nip19, verifyEvent, type Event } from "nostr-tools";
 import { CHALLENGE_TTL_MS, SESSION_TTL_MS, WAPP_ALLOWED_NPUBS_JSON, WAPP_OWNER_NPUB } from "./config.ts";
 import { db, mapAccessRule, type AccessRole, type AccessRule, type Session } from "./db.ts";
 
 const HEX_PUBKEY = /^[0-9a-f]{64}$/;
-const NIP98_KIND = 27235;
-const NIP98_MAX_AGE_SECONDS = 5 * 60;
 
 export function normalizePubkey(value: string): string | null {
   const trimmed = value.trim();
@@ -93,7 +89,7 @@ export function createChallenge(pubkey: string) {
     VALUES (?1, ?2, ?3, ?4)
     ON CONFLICT(pubkey) DO UPDATE SET nonce = excluded.nonce, expires_at = excluded.expires_at, created_at = excluded.created_at
   `).run(pubkey, nonce, expiresAt, now);
-  return { nonce, expiresAt, content: `chat-wapp-login:${nonce}` };
+  return { nonce, expiresAt, content: `snack-studio-login:${nonce}` };
 }
 
 export function verifyLoginEvent(event: Event) {
@@ -104,7 +100,7 @@ export function verifyLoginEvent(event: Event) {
     | null;
   if (!row) return { ok: false as const, error: "Challenge not found" };
   if (row.expires_at < Date.now()) return { ok: false as const, error: "Challenge expired" };
-  if (event.content !== `chat-wapp-login:${row.nonce}`) return { ok: false as const, error: "Challenge mismatch" };
+  if (event.content !== `snack-studio-login:${row.nonce}`) return { ok: false as const, error: "Challenge mismatch" };
   if (Math.abs(event.created_at * 1000 - Date.now()) > CHALLENGE_TTL_MS) {
     return { ok: false as const, error: "Event timestamp out of range" };
   }
@@ -127,54 +123,6 @@ export function verifyLoginEvent(event: Event) {
     .run(token, event.pubkey, expiresAt, now);
 
   return { ok: true as const, token, pubkey: event.pubkey, npub, expiresAt };
-}
-
-function decodeNip98Token(raw: string | null): Event | null {
-  if (!raw) return null;
-  const [scheme, token] = raw.split(" ");
-  if (scheme !== "Nostr" || !token) return null;
-  try {
-    return JSON.parse(atob(token)) as Event;
-  } catch {
-    return null;
-  }
-}
-
-function sha256Hex(value: string): string {
-  return bytesToHex(sha256(new TextEncoder().encode(value)));
-}
-
-function normaliseUrlForNip98(value: string): string | null {
-  try {
-    const url = new URL(value);
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
-export async function verifyNip98Request(req: Request, url: URL): Promise<{ ok: true; pubkey: string; npub: string } | { ok: false; error: string }> {
-  const event = decodeNip98Token(req.headers.get("authorization"));
-  if (!event) return { ok: false, error: "NIP-98 authorization required" };
-  if (event.kind !== NIP98_KIND) return { ok: false, error: "Invalid NIP-98 event kind" };
-  if (!normalizePubkey(event.pubkey)) return { ok: false, error: "Invalid NIP-98 pubkey" };
-  if (!verifyEvent(event)) return { ok: false, error: "Invalid NIP-98 signature" };
-
-  const eventUrl = event.tags.find((tag) => tag[0] === "u")?.[1];
-  const eventMethod = event.tags.find((tag) => tag[0] === "method")?.[1];
-  if (!eventUrl || normaliseUrlForNip98(eventUrl) !== url.toString()) return { ok: false, error: "NIP-98 URL mismatch" };
-  if (!eventMethod || eventMethod.toUpperCase() !== req.method.toUpperCase()) return { ok: false, error: "NIP-98 method mismatch" };
-  if (Math.abs(Math.floor(Date.now() / 1000) - Number(event.created_at)) > NIP98_MAX_AGE_SECONDS) {
-    return { ok: false, error: "NIP-98 event expired" };
-  }
-
-  if (["POST", "PUT", "PATCH"].includes(req.method.toUpperCase())) {
-    const payload = event.tags.find((tag) => tag[0] === "payload")?.[1];
-    const expected = sha256Hex(await req.clone().text());
-    if (!payload || payload !== expected) return { ok: false, error: "NIP-98 payload mismatch" };
-  }
-
-  return { ok: true, pubkey: event.pubkey, npub: pubkeyToNpub(event.pubkey) };
 }
 
 export function getBearerToken(req: Request): string | null {
