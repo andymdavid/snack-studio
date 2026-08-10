@@ -33,6 +33,7 @@ docs/private/
 # Local pipeline inspection and callback payloads
 /.pipeline-callback.json
 /callback-payload.json
+/callback.js
 /grounding-result.json
 /pipeline-callback.json
 /pipeline-result.json
