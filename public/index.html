@@ -3,15 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Pipeline Chat WApp</title>
+    <title>Snack Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main id="app">
       <section class="login" id="login">
         <div>
-          <h1>Pipeline Chat</h1>
-          <p>Sign in with Nostr to start a local chat backed by a Wingmen pipeline webhook.</p>
+          <h1>Snack Studio</h1>
+          <p>Sign in with Nostr to prepare, review, and publish Intelligence Snacks.</p>
         </div>
         <div class="loginActions">
           <button id="loginButton" type="button">Sign in with Extension</button>
@@ -27,92 +30,174 @@
         <p class="error" id="loginError"></p>
       </section>
 
-      <section class="home hidden" id="home">
-        <div class="homeInner">
-          <h1>What would you like to do today?</h1>
-          <div class="homeActions">
-            <button id="homeActButton" type="button">Act</button>
-            <button id="homeChatButton" type="button">Chat</button>
-            <button id="homeSettingsButton" type="button">Settings</button>
+      <section class="studioShell hidden" id="home">
+        <aside class="studioSidebar">
+          <div class="studioBrand">
+            <div class="studioMark" aria-hidden="true">
+              <img src="/images/intelligence-snacks-logo.webp" alt="" />
+            </div>
+            <div>
+              <strong>Snack Studio</strong>
+              <span>Editorial workspace</span>
+            </div>
           </div>
-        </div>
+          <nav class="studioNav" aria-label="Primary navigation">
+            <button class="active" type="button" data-studio-route="/">Episodes</button>
+            <button type="button" disabled>Review queue <span>Soon</span></button>
+            <button type="button" disabled>Publications <span>Soon</span></button>
+            <button type="button" data-studio-route="/settings">Settings</button>
+          </nav>
+          <div class="studioUser">
+            <div class="studioUserIdentity">
+              <div class="studioUserAvatar" id="studioUserAvatar" aria-hidden="true">?</div>
+              <div class="studioUserCopy">
+                <strong id="studioUserName">Signed in</strong>
+                <span id="studioNpub"></span>
+              </div>
+            </div>
+            <button class="btnTransparent" id="studioLogoutButton" type="button">Sign out</button>
+          </div>
+        </aside>
+
+        <section class="studioMain">
+          <header class="studioTopbar">
+            <span class="metadata" id="studioBreadcrumb">Snack Studio / Episodes</span>
+            <span class="metadata" id="studioStatus">Ready</span>
+          </header>
+
+          <div class="studioContent" id="episodesPage">
+            <header class="studioPageHeader">
+              <div>
+                <p class="eyebrow">Editorial workspaces</p>
+                <h1>Episodes</h1>
+                <p>Prepare source material and manage each episode through review and publication.</p>
+              </div>
+              <button class="btn btnPrimary" id="newEpisodeButton" type="button">New episode</button>
+            </header>
+
+            <section class="episodeSummary" aria-label="Episode summary">
+              <article class="card cardCompact"><span>Workspaces</span><strong class="num" id="episodeCount">0</strong></article>
+              <article class="card cardCompact"><span>In preparation</span><strong class="num" id="preparationCount">0</strong></article>
+              <article class="card cardCompact"><span>In review</span><strong class="num" id="reviewCount">0</strong></article>
+              <article class="card cardCompact"><span>Published</span><strong class="num" id="publishedCount">0</strong></article>
+            </section>
+
+            <section class="episodeList card" aria-live="polite">
+              <div class="episodeListHeader">
+                <span>Episode</span><span>Stage</span><span>Last activity</span><span></span>
+              </div>
+              <div id="episodeList"></div>
+            </section>
+          </div>
+
+          <div class="studioContent hidden" id="episodePage">
+            <button class="backLink" id="episodesBackButton" type="button">← All episodes</button>
+            <section class="episodeWorkspace card" id="episodeWorkspace"></section>
+          </div>
+
+          <div class="studioContent hidden" id="studioSettingsPage">
+            <header class="studioPageHeader">
+              <div>
+                <p class="eyebrow">Application</p>
+                <h1>Settings</h1>
+                <p>Manage Studio access, Autopilot connections, and the local reference database.</p>
+              </div>
+            </header>
+            <section class="settingsGrid">
+              <div class="settingsPanel">
+                <h2>Autopilot</h2>
+                <label>
+                  <span>Target</span>
+                  <select id="autopilotTargetSelect"></select>
+                </label>
+                <label>
+                  <span>Target label</span>
+                  <input id="autopilotLabelInput" type="text" placeholder="Rick local" />
+                </label>
+                <label>
+                  <span>Autopilot URL</span>
+                  <input id="autopilotUrlInput" type="url" placeholder="http://127.0.0.1:3256" />
+                </label>
+                <label>
+                  <span>Default pipeline</span>
+                  <select id="pipelineSelect"></select>
+                  <input id="pipelineInput" type="text" placeholder="snack-studio-transcript-to-snacks" />
+                </label>
+                <div class="settingsActions">
+                  <button id="loadPipelinesButton" type="button">Refresh pipelines</button>
+                  <button id="saveSettingsButton" type="button">Save</button>
+                  <button id="newTargetButton" type="button">New target</button>
+                  <button id="deleteTargetButton" type="button">Delete target</button>
+                </div>
+              </div>
+              <div class="settingsPanel">
+                <h2>Access</h2>
+                <label>
+                  <span>Npub</span>
+                  <input id="accessNpubInput" type="text" placeholder="npub1..." />
+                </label>
+                <label>
+                  <span>Role</span>
+                  <select id="accessRoleSelect">
+                    <option value="read">Read</option>
+                    <option value="edit">Edit</option>
+                  </select>
+                </label>
+                <button id="addAccessButton" type="button">Add access</button>
+                <div id="accessList" class="accessList"></div>
+              </div>
+              <div class="settingsPanel widePanel">
+                <h2>SQLite reference database</h2>
+                <div class="dbMeta" id="dbMeta"></div>
+                <label>
+                  <span>Snapshot note</span>
+                  <input id="snapshotNoteInput" type="text" placeholder="Before testing a migration" />
+                </label>
+                <div class="settingsActions">
+                  <button id="refreshDbButton" type="button">Refresh database</button>
+                  <button id="exportDbButton" type="button">Export snapshot</button>
+                </div>
+                <label>
+                  <span>Import SQLite file</span>
+                  <input id="importDbInput" type="file" accept=".sqlite,.db,application/vnd.sqlite3,application/octet-stream" />
+                </label>
+                <div class="settingsActions">
+                  <button id="importDbButton" type="button">Stage import</button>
+                  <button id="clearImportButton" type="button">Clear pending</button>
+                </div>
+                <div id="snapshotList" class="snapshotList"></div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <dialog class="episodeDialog" id="episodeDialog">
+          <form id="episodeForm">
+            <header>
+              <div>
+                <p class="eyebrow">New workspace</p>
+                <h2>Create an episode</h2>
+              </div>
+              <button class="btnTransparent" id="closeEpisodeDialogButton" type="button" aria-label="Close">Close</button>
+            </header>
+            <label>
+              <span>Episode number <small>Optional</small></span>
+              <input id="episodeNumberInput" type="number" min="1" step="1" inputmode="numeric" />
+            </label>
+            <label>
+              <span>Working title</span>
+              <input id="episodeTitleInput" type="text" maxlength="160" required placeholder="What this conversation is about" />
+            </label>
+            <p class="formError" id="episodeFormError"></p>
+            <footer>
+              <button class="btn btnSecondary" id="cancelEpisodeButton" type="button">Cancel</button>
+              <button class="btn btnPrimary" type="submit">Create workspace</button>
+            </footer>
+          </form>
+        </dialog>
       </section>
 
       <section class="actPage hidden" id="actPage"></section>
-
-      <section class="settingsPage hidden" id="settingsPage">
-        <div class="settingsFrame">
-          <header class="pageHeader">
-            <h1>Settings</h1>
-            <button id="settingsHomeButton" type="button">Home</button>
-          </header>
-          <section class="settingsGrid">
-            <div class="settingsPanel">
-              <h2>Autopilot</h2>
-              <label>
-                <span>Target</span>
-                <select id="autopilotTargetSelect"></select>
-              </label>
-              <label>
-                <span>Target label</span>
-                <input id="autopilotLabelInput" type="text" placeholder="Rick local" />
-              </label>
-              <label>
-                <span>Autopilot URL</span>
-                <input id="autopilotUrlInput" type="url" placeholder="http://127.0.0.1:3256" />
-              </label>
-              <label>
-                <span>Default pipeline</span>
-                <select id="pipelineSelect"></select>
-                <input id="pipelineInput" type="text" placeholder="chat-wapp-agent-response" />
-              </label>
-              <div class="settingsActions">
-                <button id="loadPipelinesButton" type="button">Refresh Pipelines</button>
-                <button id="saveSettingsButton" type="button">Save</button>
-                <button id="newTargetButton" type="button">New Target</button>
-                <button id="deleteTargetButton" type="button">Delete Target</button>
-              </div>
-            </div>
-            <div class="settingsPanel">
-              <h2>Access</h2>
-              <label>
-                <span>Npub</span>
-                <input id="accessNpubInput" type="text" placeholder="npub1..." />
-              </label>
-              <label>
-                <span>Role</span>
-                <select id="accessRoleSelect">
-                  <option value="read">Read</option>
-                  <option value="edit">Edit</option>
-                </select>
-              </label>
-              <button id="addAccessButton" type="button">Add access</button>
-              <div id="accessList" class="accessList"></div>
-            </div>
-            <div class="settingsPanel widePanel">
-              <h2>SQLite Reference DB</h2>
-              <div class="dbMeta" id="dbMeta"></div>
-              <label>
-                <span>Snapshot note</span>
-                <input id="snapshotNoteInput" type="text" placeholder="Before testing migration 004" />
-              </label>
-              <div class="settingsActions">
-                <button id="refreshDbButton" type="button">Refresh DB</button>
-                <button id="exportDbButton" type="button">Export Snapshot</button>
-              </div>
-              <label>
-                <span>Import SQLite file</span>
-                <input id="importDbInput" type="file" accept=".sqlite,.db,application/vnd.sqlite3,application/octet-stream" />
-              </label>
-              <div class="settingsActions">
-                <button id="importDbButton" type="button">Stage Import</button>
-                <button id="clearImportButton" type="button">Clear Pending</button>
-              </div>
-              <div id="snapshotList" class="snapshotList"></div>
-            </div>
-          </section>
-        </div>
-      </section>
 
       <section class="shell hidden" id="shell">
         <aside class="sidebar">
