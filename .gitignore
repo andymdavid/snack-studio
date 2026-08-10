@@ -1,0 +1,28 @@
+.DS_Store
+
+# Local runtime configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+.bun/
+
+# Local databases and runtime state
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Logs and process artifacts
+logs/
+*.log
+*.pid
+
+# Temporary files
+tmp/
+temp/
+coverage/
