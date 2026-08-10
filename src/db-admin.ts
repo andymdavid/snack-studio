@@ -29,7 +29,7 @@ export function getDbStatus() {
 export function exportSnapshot(note = "") {
   mkdirSync(DB_SNAPSHOT_DIR, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const filename = `${stamp}-chat-wapp.sqlite`;
+  const filename = `${stamp}-snack-studio.sqlite`;
   const filePath = join(DB_SNAPSHOT_DIR, filename);
   db.exec("PRAGMA wal_checkpoint(FULL)");
   db.exec(`VACUUM INTO ${quoteSqlString(filePath)}`);
