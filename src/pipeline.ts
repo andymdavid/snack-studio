@@ -26,7 +26,7 @@ export type PipelineTriggerRequest = {
   method: "POST";
   body: {
     input: {
-      source: "chat-wapp";
+      source: "snack-studio";
       chatId: string;
       autopilotTargetId?: string;
       autopilotLabel?: string;
@@ -38,7 +38,40 @@ export type PipelineTriggerRequest = {
       webhook: {
         url: string;
         token: string;
-        authHeader: "x-chat-wapp-token";
+        authHeader: "x-snack-studio-token";
+      };
+    };
+  };
+};
+
+export type EpisodePipelineTriggerRequest = {
+  url: string;
+  method: "POST";
+  body: {
+    input: {
+      source: "snack-studio";
+      wappId: "snack-studio";
+      appId: "snack-studio";
+      requestId: string;
+      attemptId: string;
+      episodeId: string;
+      operation: "transcript-to-snacks" | "transcript-normalization";
+      userNpub: string;
+      inputRevisionId: string;
+      pipelineVersion: string | null;
+      promptSuiteVersion: string;
+      resultSchemaVersion: string;
+      localContext: {
+        references: Array<{
+          type: "pipeline-context" | "transcript";
+          url: string;
+          authorization: string;
+        }>;
+      };
+      webhook: {
+        url: string;
+        token: string;
+        authHeader: "x-snack-studio-token";
       };
     };
   };
@@ -53,7 +86,7 @@ export function buildPipelineTriggerRequest(input: PipelineStartInput): Pipeline
     method: "POST",
     body: {
       input: {
-        source: "chat-wapp",
+        source: "snack-studio",
         chatId: input.chatId,
         autopilotTargetId: input.autopilotTargetId,
         autopilotLabel: input.autopilotLabel,
@@ -65,7 +98,7 @@ export function buildPipelineTriggerRequest(input: PipelineStartInput): Pipeline
         webhook: {
           url: input.webhookUrl,
           token: input.webhookToken,
-          authHeader: "x-chat-wapp-token",
+          authHeader: "x-snack-studio-token",
         },
       },
     },
@@ -94,7 +127,68 @@ export async function startPreparedChatPipeline(trigger: PipelineTriggerRequest,
   }
 }
 
-async function startAutopilotHttpPipeline(trigger: PipelineTriggerRequest, authorization?: string): Promise<PipelineStartResult> {
+export function buildEpisodePipelineTriggerRequest(input: {
+  autopilotUrl: string;
+  pipelineName: string;
+  requestId: string;
+  attemptId: string;
+  episodeId: string;
+  operation: EpisodePipelineTriggerRequest["body"]["input"]["operation"];
+  userNpub: string;
+  inputRevisionId: string;
+  pipelineVersion: string | null;
+  promptSuiteVersion: string;
+  resultSchemaVersion: string;
+  contextUrl: string;
+  transcriptUrl: string;
+  webhookUrl: string;
+  webhookToken: string;
+}): EpisodePipelineTriggerRequest {
+  // Pin Snack Studio's numbered production definitions at the HTTP boundary.
+  // The version is also retained in the payload for provenance, but Autopilot
+  // resolves the definition from the route rather than from input metadata.
+  const pipelineName = input.pipelineVersion
+    && input.pipelineName === "snack-studio-transcript-to-snacks"
+    ? `${input.pipelineName}.v${input.pipelineVersion}`
+    : input.pipelineName;
+  return {
+    url: new URL(`/api/pipelines/triggers/http/${encodeURIComponent(pipelineName)}`, input.autopilotUrl.replace(/\/$/, "")).toString(),
+    method: "POST",
+    body: {
+      input: {
+        source: "snack-studio",
+        wappId: "snack-studio",
+        appId: "snack-studio",
+        requestId: input.requestId,
+        attemptId: input.attemptId,
+        episodeId: input.episodeId,
+        operation: input.operation,
+        userNpub: input.userNpub,
+        inputRevisionId: input.inputRevisionId,
+        pipelineVersion: input.pipelineVersion,
+        promptSuiteVersion: input.promptSuiteVersion,
+        resultSchemaVersion: input.resultSchemaVersion,
+        localContext: {
+          references: [
+            { type: "pipeline-context", url: input.contextUrl, authorization: "" },
+            { type: "transcript", url: input.transcriptUrl, authorization: "" },
+          ],
+        },
+        webhook: {
+          url: input.webhookUrl,
+          token: input.webhookToken,
+          authHeader: "x-snack-studio-token",
+        },
+      },
+    },
+  };
+}
+
+export async function startPreparedEpisodePipeline(trigger: EpisodePipelineTriggerRequest, authorization: string): Promise<PipelineStartResult> {
+  return startAutopilotHttpPipeline(trigger, authorization);
+}
+
+async function startAutopilotHttpPipeline(trigger: PipelineTriggerRequest | EpisodePipelineTriggerRequest, authorization?: string): Promise<PipelineStartResult> {
   const res = await fetch(trigger.url, {
     method: trigger.method,
     headers: {
@@ -130,8 +224,8 @@ function startMockPipeline(input: PipelineStartInput, cause: unknown): PipelineS
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-chat-wapp-token": input.webhookToken,
-        "x-chat-wapp-signature": WEBHOOK_SECRET,
+        "x-snack-studio-token": input.webhookToken,
+        "x-snack-studio-signature": WEBHOOK_SECRET,
       },
       body: JSON.stringify({
         chatId: input.chatId,
