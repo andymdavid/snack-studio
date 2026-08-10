@@ -26,3 +26,14 @@ logs/
 tmp/
 temp/
 coverage/
+
+# Local Intelligence Snacks reference docs
+docs/private/
+
+# Local pipeline inspection and callback payloads
+/.pipeline-callback.json
+/callback-payload.json
+/grounding-result.json
+/pipeline-callback.json
+/pipeline-result.json
+/verifier-callback.json
