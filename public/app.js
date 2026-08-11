@@ -1339,20 +1339,24 @@ function openRegenerationDialog(candidate) {
   instruction.placeholder = "For example, make the title more concrete or improve the flow between paragraphs.";
   const actions = document.createElement("div");
   actions.className = "regenerationActions";
+  const errorMessage = document.createElement("p");
+  errorMessage.className = "formError";
   const cancel = document.createElement("button");
   cancel.type = "button"; cancel.className = "btn btnSecondary"; cancel.textContent = "Cancel";
   cancel.addEventListener("click", () => dialog.close());
   const generate = document.createElement("button");
   generate.type = "submit"; generate.className = "btn btnPrimary"; generate.textContent = "Generate alternative";
   actions.append(cancel, generate);
-  form.append(title, help, makeWorkspaceField("Optional instruction", instruction), actions);
+  form.append(title, help, makeWorkspaceField("Optional instruction", instruction), errorMessage, actions);
   form.addEventListener("submit", async (event) => {
     event.preventDefault(); generate.disabled = true;
     try {
+      errorMessage.textContent = "";
       await startSnackRegeneration(candidate, instruction.value);
       dialog.close();
     } catch (error) {
       generate.disabled = false;
+      errorMessage.textContent = error.message;
       setStudioStatus(error.message);
     }
   });
