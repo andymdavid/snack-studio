@@ -1925,6 +1925,18 @@ textarea {
   font-size: var(--text-xs);
 }
 .candidateGenerationControls .btn { padding-block: 7px; }
+.approvedBatchBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 -8px 6px;
+  padding: 9px 10px 9px 18px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.approvedBatchBar .btn { padding-block: 7px; }
 .candidateQueueHeader h2,
 .candidateQueueHeader p {
   margin: 0;

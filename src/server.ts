@@ -500,7 +500,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     if (!Array.isArray(body.candidateIds)) return json({ error: "candidateIds must be an array" }, 400);
     try {
       const candidates = setApprovedCandidateOrder(episodeId, body.candidateIds.map(String), session.pubkey);
-      return json({ candidates, generations: buildCandidateGenerations(candidates, listEpisodePipelineRequests(episodeId)), approvedBatch: validateApprovedCandidateBatch(episodeId) });
+      return json({ candidates, generations: buildCandidateGenerations(candidates, listEpisodePipelineRequests(episodeId)), approvedBatch: validateApprovedCandidateBatch(episodeId), episode: getEpisode(episodeId) });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 400);
     }

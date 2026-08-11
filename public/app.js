@@ -32,6 +32,7 @@ const state = {
   transcriptRevisions: [],
   candidates: [],
   candidateGenerations: [],
+  approvedBatch: { ready: false, checks: [], candidateIds: [] },
   activeGenerationId: "",
   activeCandidateId: "",
   curation: { newsletterItems: [], relationships: [], validation: { ready: false, checks: [], counts: {} } },
@@ -411,6 +412,7 @@ async function loadEpisode(id) {
     state.transcriptRevisions = payload.transcriptRevisions || [];
     state.candidates = candidatePayload.candidates || [];
     state.candidateGenerations = candidatePayload.generations || [];
+    state.approvedBatch = candidatePayload.approvedBatch || { ready: false, checks: [], candidateIds: [] };
     if (!hasCandidateGeneration(state.activeGenerationId)) {
       state.activeGenerationId = state.candidateGenerations.at(-1)?.id || "";
       state.activeCandidateId = "";
@@ -946,6 +948,7 @@ function startEpisodePipelinePolling() {
       state.pipelineTimeoutMs = Number(pipelinePayload.timeoutMs || 0);
       state.candidates = candidatePayload.candidates || [];
       state.candidateGenerations = candidatePayload.generations || [];
+      state.approvedBatch = candidatePayload.approvedBatch || { ready: false, checks: [], candidateIds: [] };
       if (!hasCandidateGeneration(state.activeGenerationId)) {
         state.activeGenerationId = state.candidateGenerations.at(-1)?.id || "";
         state.activeCandidateId = "";
@@ -1176,6 +1179,23 @@ function renderCandidateSection(episode, candidates) {
   listHeader.append(listHeading, generationControls);
   list.appendChild(listHeader);
   const activeGenerationId = generationSelect.value;
+  if (activeGenerationId === "approved") {
+    const batchBar = document.createElement("div");
+    batchBar.className = "approvedBatchBar";
+    const batchStatus = document.createElement("span");
+    const firstIncomplete = state.approvedBatch.checks?.find((check) => !check.ok);
+    batchStatus.textContent = episode.status === "approved"
+      ? "Final set approved"
+      : state.approvedBatch.ready ? "Final set ready" : firstIncomplete?.message || "Build the final set";
+    const approve = document.createElement("button");
+    approve.type = "button";
+    approve.className = "btn btnPrimary";
+    approve.textContent = episode.status === "approved" ? "Approved" : "Approve final set";
+    approve.disabled = !state.me?.access?.edit || !state.approvedBatch.ready || episode.status === "approved";
+    approve.addEventListener("click", approveFinalCandidateBatch);
+    batchBar.append(batchStatus, approve);
+    list.appendChild(batchBar);
+  }
   const visibleCandidates = activeGenerationId === "approved"
     ? candidates.filter((candidate) => candidate.reviewDecision === "accepted").sort((a, b) => (a.approvedPosition || 0) - (b.approvedPosition || 0))
     : candidates.filter((candidate) => (candidate.pipelineRequestId || "fixture") === activeGenerationId);
@@ -1390,12 +1410,15 @@ function renderCandidateEditor(candidate) {
 }
 
 async function refreshCandidates() {
-  const [payload, curation] = await Promise.all([
+  const [payload, curation, episodePayload] = await Promise.all([
     api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/candidates`),
     api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/curation`),
+    api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}`),
   ]);
+  state.activeEpisode = episodePayload.episode;
   state.candidates = payload.candidates || [];
   state.candidateGenerations = payload.generations || [];
+  state.approvedBatch = payload.approvedBatch || { ready: false, checks: [], candidateIds: [] };
   if (!hasCandidateGeneration(state.activeGenerationId)) {
     state.activeGenerationId = state.candidateGenerations.at(-1)?.id || "";
     state.activeCandidateId = "";
@@ -1420,9 +1443,27 @@ async function moveApprovedCandidate(candidateId, direction) {
     });
     state.candidates = payload.candidates || [];
     state.candidateGenerations = payload.generations || [];
+    state.approvedBatch = payload.approvedBatch || { ready: false, checks: [], candidateIds: [] };
+    state.activeEpisode = payload.episode || state.activeEpisode;
     state.activeGenerationId = "approved";
     renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
     setStudioStatus("Approved Snack order saved");
+  } catch (error) {
+    setStudioStatus(error.message);
+  }
+}
+
+async function approveFinalCandidateBatch() {
+  setStudioStatus("Approving final Snack set…");
+  try {
+    const payload = await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/approved-candidate-batch`, {
+      method: "POST",
+      body: "{}",
+    });
+    state.activeEpisode = payload.episode;
+    state.approvedBatch = payload.approvedBatch;
+    renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
+    setStudioStatus("Final Snack set approved");
   } catch (error) {
     setStudioStatus(error.message);
   }
