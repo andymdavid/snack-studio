@@ -105,7 +105,7 @@ export function createThumbnailGeneration(jobId: string, actorPubkey: string, pu
     reviewNote: targetedNote || null,
   }, null, 2));
   const token = `${crypto.randomUUID().replaceAll('-', '')}${crypto.randomUUID().replaceAll('-', '')}`;
-  db.query("UPDATE thumbnail_jobs SET status='extracting', callback_token_hash=?1, generation_round=?2, pipeline_name='snack-studio-snack-thumbnail', pipeline_version='2', failure_summary=NULL, updated_at=?3 WHERE id=?4")
+  db.query("UPDATE thumbnail_jobs SET status='extracting', callback_token_hash=?1, generation_round=?2, pipeline_name='snack-studio-snack-thumbnail', pipeline_version='3', failure_summary=NULL, updated_at=?3 WHERE id=?4")
     .run(hashToken(token), round, Date.now(), job.id);
   if (targetedNote) db.query('UPDATE thumbnail_jobs SET review_notes=?1 WHERE id=?2').run(targetedNote, job.id);
   recordAuditEvent({ actorPubkey, action: 'thumbnail.generation.started', entityType: 'thumbnail-job', entityId: job.id, detail: { round } });
@@ -113,7 +113,7 @@ export function createThumbnailGeneration(jobId: string, actorPubkey: string, pu
   return {
     job: getThumbnailJob(job.id),
     triggerRequest: {
-      url: new URL('/api/pipelines/triggers/http/snack-studio-snack-thumbnail.v2', target.url).toString(), method: 'POST',
+      url: new URL('/api/pipelines/triggers/http/snack-studio-snack-thumbnail.v3', target.url).toString(), method: 'POST',
       body: { input: { source: 'snack-studio', operation: 'snack-thumbnail', jobId: job.id, generationRound: round, contextPath, outputDirectory, agent: 'codex', webhook: { url: `${publicOrigin.replace(/\/$/, '')}/api/thumbnail-webhooks/${job.id}`, token, authHeader: 'x-snack-studio-token' } } },
     },
   };
@@ -131,7 +131,7 @@ export function verifyThumbnailGenerationTrigger(jobId: string, trigger: Record<
   let url: URL; try { url = new URL(String(trigger.url || '')); } catch { return false; }
   const target = getCurrentAutopilotTarget();
   return Boolean(row?.callback_token_hash && String(trigger.method) === 'POST' && input.jobId === jobId
-    && url.origin === new URL(target.url).origin && url.pathname.endsWith('/snack-studio-snack-thumbnail.v2')
+    && url.origin === new URL(target.url).origin && url.pathname.endsWith('/snack-studio-snack-thumbnail.v3')
     && String(webhook.token || '') && hashToken(String(webhook.token)) === row.callback_token_hash);
 }
 
@@ -161,7 +161,7 @@ export function applyThumbnailResult(jobId: string, token: string, body: Record<
   const response = body.response && typeof body.response === 'object' ? body.response as Record<string, unknown> : body;
   const evidence = Array.isArray(response.evidence) ? response.evidence : [];
   const candidates = Array.isArray(response.candidates) ? response.candidates : [];
-  if (candidates.length !== 3) throw new Error('Thumbnail result requires three candidates');
+  if (candidates.length !== 1) throw new Error('Thumbnail result requires one candidate');
   const round = Number(row.generation_round); const now = Date.now();
   db.transaction(() => {
     db.query('DELETE FROM thumbnail_object_evidence WHERE job_id=?1').run(jobId);
