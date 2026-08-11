@@ -1966,18 +1966,6 @@ textarea {
   white-space: nowrap;
 }
 .candidateQueueItem span { white-space: nowrap; }
-.candidateQueueApprovedItem {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-}
-.candidateQueueApprovedItem .candidateQueueItem { width: 100%; }
-.candidateQueueOrder { display: flex; }
-.candidateQueueOrder .btn {
-  min-width: 28px;
-  padding: 5px;
-  color: var(--text-muted);
-}
 .candidateReader {
   width: min(760px, calc(100% - 72px));
   margin: 0 auto;

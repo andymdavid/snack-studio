@@ -1212,27 +1212,7 @@ function renderCandidateSection(episode, candidates) {
       state.activeCandidateId = candidate.id;
       renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
     });
-    if (activeGenerationId !== "approved") {
-      list.appendChild(button);
-      continue;
-    }
-    const row = document.createElement("div");
-    row.className = "candidateQueueApprovedItem";
-    const order = document.createElement("div");
-    order.className = "candidateQueueOrder";
-    for (const [direction, label] of [[-1, "↑"], [1, "↓"]]) {
-      const move = document.createElement("button");
-      move.type = "button";
-      move.className = "btn btnTransparent";
-      move.textContent = label;
-      move.title = direction < 0 ? "Move earlier" : "Move later";
-      const index = visibleCandidates.findIndex((item) => item.id === candidate.id);
-      move.disabled = !state.me?.access?.edit || index + direction < 0 || index + direction >= visibleCandidates.length;
-      move.addEventListener("click", () => moveApprovedCandidate(candidate.id, direction));
-      order.appendChild(move);
-    }
-    row.append(button, order);
-    list.appendChild(row);
+    list.appendChild(button);
   }
   layout.appendChild(list);
   const active = visibleCandidates.find((candidate) => candidate.id === state.activeCandidateId) || visibleCandidates[0];
@@ -1425,32 +1405,6 @@ async function refreshCandidates() {
   }
   state.curation = curation;
   renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
-}
-
-async function moveApprovedCandidate(candidateId, direction) {
-  const approved = state.candidates
-    .filter((candidate) => candidate.reviewDecision === "accepted")
-    .sort((a, b) => (a.approvedPosition || 0) - (b.approvedPosition || 0));
-  const index = approved.findIndex((candidate) => candidate.id === candidateId);
-  const target = index + direction;
-  if (index < 0 || target < 0 || target >= approved.length) return;
-  [approved[index], approved[target]] = [approved[target], approved[index]];
-  setStudioStatus("Saving approved Snack order…");
-  try {
-    const payload = await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/approved-candidate-order`, {
-      method: "PUT",
-      body: JSON.stringify({ candidateIds: approved.map((candidate) => candidate.id) }),
-    });
-    state.candidates = payload.candidates || [];
-    state.candidateGenerations = payload.generations || [];
-    state.approvedBatch = payload.approvedBatch || { ready: false, checks: [], candidateIds: [] };
-    state.activeEpisode = payload.episode || state.activeEpisode;
-    state.activeGenerationId = "approved";
-    renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
-    setStudioStatus("Approved Snack order saved");
-  } catch (error) {
-    setStudioStatus(error.message);
-  }
 }
 
 async function approveFinalCandidateBatch() {
