@@ -74,4 +74,17 @@ describe("episode Autopilot trigger", () => {
     expect(trigger.url).toBe("https://autopilot.example/api/pipelines/triggers/http/snack-studio-regenerate-snack.v1");
     expect(trigger.body.input).toMatchObject({ operation: "snack-regeneration", promptSuiteVersion: "v3-intelligence-snacks-natural-prose" });
   });
+
+  test("pins publication metadata to its independent classifier", () => {
+    const trigger = buildEpisodePipelineTriggerRequest({
+      autopilotUrl: "https://autopilot.example", pipelineName: "snack-studio-publication-metadata",
+      requestId: "request-3", attemptId: "attempt-3", episodeId: "episode-64",
+      operation: "publication-metadata", userNpub: "npub1editor", inputRevisionId: "revision-3",
+      pipelineVersion: "1", promptSuiteVersion: "v1-publication-topic-classifier",
+      resultSchemaVersion: "1", contextUrl: "https://studio.example/context",
+      transcriptUrl: "https://studio.example/transcript", webhookUrl: "https://studio.example/webhook", webhookToken: "secret",
+    });
+    expect(trigger.url).toBe("https://autopilot.example/api/pipelines/triggers/http/snack-studio-publication-metadata.v1");
+    expect(trigger.body.input.operation).toBe("publication-metadata");
+  });
 });

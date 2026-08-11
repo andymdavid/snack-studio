@@ -133,7 +133,9 @@ export function preparePublicationThumbnails(episodeId: string, actorPubkey: str
   db.transaction(() => {
     for (const candidateId of approved.candidateIds) {
       const candidate = getCandidate(candidateId)!;
-      const topic = resolveCanonicalTopic(candidate.revision.primaryTopic);
+      const storedMetadata = db.query("SELECT primary_topic FROM publication_snack_metadata WHERE snack_revision_id = ?1")
+        .get(candidate.currentRevisionId) as { primary_topic: string } | null;
+      const topic = resolveCanonicalTopic(storedMetadata?.primary_topic || candidate.revision.primaryTopic);
       db.query(`INSERT OR IGNORE INTO thumbnail_jobs(
         id, episode_id, asset_kind, snack_candidate_id, snack_revision_id, transcript_revision_id,
         status, topic_colour, contributor_ids_json, created_by_pubkey, created_at, updated_at

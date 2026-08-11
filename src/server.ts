@@ -87,6 +87,8 @@ import { validateSuccessfulRegenerationResult } from "./regeneration-result-inpu
 import { validateThumbnailBrief } from "./thumbnail-input.ts";
 import { createThumbnailJob, getPublicationPreparation, listThumbnailJobs, preparePublicationThumbnails } from "./thumbnails.ts";
 import { THUMBNAIL_CANDIDATES_PER_ROUND, THUMBNAIL_CONTRIBUTORS, THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
+import { validateSuccessfulPublicationMetadataResult } from "./publication-metadata-result-input.ts";
+import { applySuccessfulPublicationMetadataResult } from "./publication-metadata-results.ts";
 
 const PUBLIC_DIR = join(import.meta.dir, "..", "public");
 
@@ -1256,7 +1258,9 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
 
       const validation = pipelineRequest.operation === "snack-regeneration"
         ? validateSuccessfulRegenerationResult(body)
-        : validateSuccessfulPipelineResult(body);
+        : pipelineRequest.operation === "publication-metadata"
+          ? validateSuccessfulPublicationMetadataResult(body)
+          : validateSuccessfulPipelineResult(body);
       if (!validation.ok) {
         markPipelineResultRejected({ runId: run.id, summary: validation.error });
         recordAuditEvent({
@@ -1274,7 +1278,13 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
           recordAuditEvent({ action: "candidate.regeneration.proposed", entityType: "episode", entityId: pipelineRequest.episodeId, detail: { requestId, runId: run.id, candidateId: proposal.candidateId, proposalId: proposal.id } });
           return json({ ok: true, requestId, status: "completed", proposalId: proposal.id });
         }
-        const applied = applySuccessfulPipelineResult({ localRunId: run.id, result: validation.value as import("./pipeline-result-input.ts").SuccessfulPipelineResult });
+        if (pipelineRequest.operation === "publication-metadata") {
+          const applied = applySuccessfulPublicationMetadataResult({ localRunId: run.id, result: validation.value as import("./publication-metadata-result-input.ts").SuccessfulPublicationMetadataResult });
+          recordAuditEvent({ action: "publication.topics.assigned", entityType: "episode", entityId: pipelineRequest.episodeId, detail: { requestId, runId: run.id, assignmentCount: applied.assignmentCount } });
+          return json({ ok: true, requestId, status: "completed", replay: applied.replay, assignmentCount: applied.assignmentCount });
+        }
+        const successfulResult = validation.value as import("./pipeline-result-input.ts").SuccessfulPipelineResult;
+        const applied = applySuccessfulPipelineResult({ localRunId: run.id, result: successfulResult });
         if (!applied.replay) {
           recordAuditEvent({
             action: "pipeline.callback.applied",
@@ -1283,11 +1293,11 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
             detail: {
               requestId,
               runId: run.id,
-              autopilotRunId: validation.value.runId,
+              autopilotRunId: successfulResult.runId,
               candidateCount: applied.candidateCount,
-              promptSuiteVersion: validation.value.promptSuiteVersion,
-              pipelineVersion: validation.value.pipelineVersion,
-              resultSchemaVersion: validation.value.resultSchemaVersion,
+              promptSuiteVersion: successfulResult.promptSuiteVersion,
+              pipelineVersion: successfulResult.pipelineVersion,
+              resultSchemaVersion: successfulResult.resultSchemaVersion,
             },
           });
         }

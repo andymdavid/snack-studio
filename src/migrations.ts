@@ -735,6 +735,82 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: "017_publication_metadata_pipeline",
+    description: "Add publication metadata requests and immutable Snack taxonomy assignments",
+    up(db) {
+      db.exec(`
+        PRAGMA defer_foreign_keys = ON;
+        CREATE TEMP TABLE migration_017_pipeline_runs AS SELECT * FROM pipeline_runs;
+        CREATE TEMP TABLE migration_017_pipeline_artifacts AS SELECT * FROM pipeline_artifacts;
+        CREATE TEMP TABLE migration_017_regeneration_proposals AS SELECT * FROM snack_regeneration_proposals;
+        CREATE TABLE pipeline_requests_new (
+          id TEXT PRIMARY KEY,
+          episode_id TEXT NOT NULL,
+          operation TEXT NOT NULL CHECK(operation IN (
+            'transcript-to-snacks', 'transcript-normalization', 'snack-regeneration', 'publication-metadata'
+          )),
+          status TEXT NOT NULL DEFAULT 'created' CHECK(status IN (
+            'created', 'awaiting-authorization', 'queued', 'running', 'applying-result',
+            'completed', 'failed', 'timed-out', 'needs-review', 'cancelled'
+          )),
+          actor_pubkey TEXT NOT NULL,
+          input_transcript_revision_id TEXT NOT NULL,
+          input_transcript_sha256 TEXT NOT NULL,
+          autopilot_target_id TEXT NOT NULL,
+          pipeline_name TEXT NOT NULL,
+          pipeline_version TEXT,
+          prompt_suite_version TEXT NOT NULL,
+          result_schema_version TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL UNIQUE,
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          result_applied_at INTEGER,
+          failure_summary TEXT,
+          target_candidate_id TEXT,
+          base_candidate_revision_id TEXT,
+          regeneration_instruction TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (actor_pubkey) REFERENCES users(pubkey),
+          FOREIGN KEY (input_transcript_revision_id) REFERENCES transcript_revisions(id),
+          FOREIGN KEY (autopilot_target_id) REFERENCES autopilot_targets(id),
+          FOREIGN KEY (target_candidate_id) REFERENCES snack_candidates(id) ON DELETE CASCADE,
+          FOREIGN KEY (base_candidate_revision_id) REFERENCES snack_revisions(id)
+        );
+        INSERT INTO pipeline_requests_new SELECT * FROM pipeline_requests;
+        DROP TABLE pipeline_requests;
+        ALTER TABLE pipeline_requests_new RENAME TO pipeline_requests;
+        CREATE INDEX pipeline_requests_episode_index ON pipeline_requests(episode_id, created_at DESC);
+        INSERT INTO pipeline_runs SELECT * FROM migration_017_pipeline_runs;
+        INSERT INTO pipeline_artifacts SELECT * FROM migration_017_pipeline_artifacts;
+        INSERT INTO snack_regeneration_proposals SELECT * FROM migration_017_regeneration_proposals;
+        DROP TABLE migration_017_pipeline_runs;
+        DROP TABLE migration_017_pipeline_artifacts;
+        DROP TABLE migration_017_regeneration_proposals;
+
+        CREATE TABLE IF NOT EXISTS publication_snack_metadata (
+          snack_revision_id TEXT PRIMARY KEY,
+          candidate_id TEXT NOT NULL,
+          episode_id TEXT NOT NULL,
+          primary_topic TEXT NOT NULL,
+          rationale TEXT NOT NULL,
+          pipeline_request_id TEXT NOT NULL,
+          pipeline_run_id TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (snack_revision_id) REFERENCES snack_revisions(id) ON DELETE CASCADE,
+          FOREIGN KEY (candidate_id) REFERENCES snack_candidates(id) ON DELETE CASCADE,
+          FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (pipeline_request_id) REFERENCES pipeline_requests(id),
+          FOREIGN KEY (pipeline_run_id) REFERENCES pipeline_runs(id)
+        );
+
+        CREATE INDEX publication_snack_metadata_episode_index
+          ON publication_snack_metadata(episode_id, created_at ASC);
+      `);
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

@@ -2,8 +2,9 @@ import type { Database } from "bun:sqlite";
 import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex } from "@noble/hashes/utils";
 import { db as appDb } from "./db.ts";
+import { THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
 
-export const PIPELINE_OPERATIONS = ["transcript-to-snacks", "transcript-normalization", "snack-regeneration"] as const;
+export const PIPELINE_OPERATIONS = ["transcript-to-snacks", "transcript-normalization", "snack-regeneration", "publication-metadata"] as const;
 export type PipelineOperation = typeof PIPELINE_OPERATIONS[number];
 
 export const PIPELINE_REQUEST_STATUSES = [
@@ -456,6 +457,22 @@ export function getPipelineRequestContext(requestId: string, database: Database 
       ? content.evidence.filter((item) => item && typeof item === "object" && originalEvidenceIds.has(String((item as Record<string, unknown>).evidenceId || "")))
       : [];
   } catch {}
+  const approvedCandidates = String(row.operation) === "publication-metadata"
+    ? (database.query(`
+        SELECT c.id, c.current_revision_id, r.public_title, r.standfirst, r.body_markdown, r.primary_topic
+        FROM snack_candidates c
+        JOIN snack_revisions r ON r.id = c.current_revision_id
+        WHERE c.episode_id = ?1 AND c.review_decision = 'accepted'
+        ORDER BY c.approved_position ASC
+      `).all(String(row.episode_id)) as Record<string, unknown>[]).map((candidate) => ({
+        candidateId: String(candidate.id),
+        revisionId: String(candidate.current_revision_id),
+        publicTitle: String(candidate.public_title),
+        standfirst: String(candidate.standfirst),
+        bodyMarkdown: String(candidate.body_markdown),
+        primaryTopic: candidate.primary_topic == null ? null : String(candidate.primary_topic),
+      }))
+    : [];
   return {
     request: mapRequest(row),
     episode: {
@@ -478,6 +495,8 @@ export function getPipelineRequestContext(requestId: string, database: Database 
       createdAt: Number(row.transcript_created_at),
     },
     contributors: [],
+    approvedCandidates,
+    canonicalTopics: String(row.operation) === "publication-metadata" ? THUMBNAIL_TOPICS : [],
     targetCandidate: targetRow ? {
       id: String(targetRow.id),
       baseRevisionId: String(row.base_candidate_revision_id),
