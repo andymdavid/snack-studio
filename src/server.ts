@@ -86,7 +86,7 @@ import { applySuccessfulPipelineResult } from "./pipeline-results.ts";
 import { applySuccessfulRegenerationResult, listRegenerationProposals, resolveRegenerationProposal } from "./regeneration-proposals.ts";
 import { validateSuccessfulRegenerationResult } from "./regeneration-result-input.ts";
 import { validateThumbnailBrief } from "./thumbnail-input.ts";
-import { applyThumbnailResult, createThumbnailGeneration, createThumbnailJob, getPublicationPreparation, getThumbnailCandidateRow, getThumbnailJobDetail, listThumbnailJobs, markThumbnailGenerationStarted, preparePublicationThumbnails } from "./thumbnails.ts";
+import { approveThumbnailCandidate, applyThumbnailResult, createThumbnailGeneration, createThumbnailJob, getPublicationPreparation, getThumbnailCandidateRow, getThumbnailJobDetail, listThumbnailJobs, markThumbnailGenerationStarted, preparePublicationThumbnails } from "./thumbnails.ts";
 import { THUMBNAIL_CANDIDATES_PER_ROUND, THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
 import { validateSuccessfulPublicationMetadataResult } from "./publication-metadata-result-input.ts";
 import { applySuccessfulPublicationMetadataResult } from "./publication-metadata-results.ts";
@@ -626,7 +626,8 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
   const thumbnailGenerateMatch = pathname.match(/^\/api\/thumbnail-jobs\/([^/]+)\/generate$/);
   if (thumbnailGenerateMatch && req.method === 'POST') {
     const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
-    try { return json(createThumbnailGeneration(decodeURIComponent(thumbnailGenerateMatch[1]!), session.pubkey, new URL(req.url).origin), 201); }
+    const body = await readJson(req);
+    try { return json(createThumbnailGeneration(decodeURIComponent(thumbnailGenerateMatch[1]!), session.pubkey, new URL(req.url).origin, String(body.reviewNote || '')), 201); }
     catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 400); }
   }
   const thumbnailStartedMatch = pathname.match(/^\/api\/thumbnail-jobs\/([^/]+)\/started$/);
@@ -644,6 +645,12 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     if (!candidate) return json({ error: 'thumbnail candidate not found' }, 404);
     const file = Bun.file(String(candidate.source_uri)); if (!await file.exists()) return json({ error: 'image not found' }, 404);
     return new Response(file, { headers: { 'content-type': String(candidate.mime_type || 'image/png'), 'cache-control': 'private, max-age=300' } });
+  }
+  const thumbnailCandidateApproveMatch = pathname.match(/^\/api\/thumbnail-candidates\/([^/]+)\/approve$/);
+  if (thumbnailCandidateApproveMatch && req.method === 'POST') {
+    const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
+    try { return json({ job: approveThumbnailCandidate(decodeURIComponent(thumbnailCandidateApproveMatch[1]!), session.pubkey) }); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 400); }
   }
   const thumbnailWebhookMatch = pathname.match(/^\/api\/thumbnail-webhooks\/([^/]+)$/);
   if (thumbnailWebhookMatch && req.method === 'POST') {

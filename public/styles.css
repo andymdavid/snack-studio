@@ -2024,6 +2024,21 @@ div.publicationPreparationBlocker { display: flex; align-items: center; justify-
 .contributorPortraitGallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; color: var(--text-muted); }
 .contributorPortraitGallery article { display: grid; gap: 8px; }
 .contributorPortraitGallery img { width: 100%; aspect-ratio: 1; border-radius: var(--radius-card); object-fit: cover; background: var(--surface-2); }
+.thumbnailReviewDialog { width: min(1240px, calc(100vw - 32px)); max-height: calc(100vh - 32px); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 0; background: var(--surface-1); color: var(--text-primary); }
+.thumbnailReviewDialog::backdrop { background: rgba(16, 18, 17, .62); }
+.thumbnailReviewShell { display: grid; gap: 24px; padding: 24px; }
+.thumbnailReviewShell > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.thumbnailReviewShell h2, .thumbnailReviewShell p { margin: 0; }
+.thumbnailReviewShell h2 { margin-top: 4px; font-size: var(--text-xl); }
+.thumbnailReviewGallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.thumbnailReviewGallery article { min-width: 0; display: grid; gap: 8px; }
+.thumbnailReviewGallery img { width: 100%; aspect-ratio: 3 / 2; border-radius: var(--radius-card); object-fit: cover; background: var(--surface-2); }
+.thumbnailEvidence { display: grid; gap: 10px; border-top: 1px solid var(--border); padding-top: 20px; }
+.thumbnailEvidence h3 { margin: 0; }
+.thumbnailEvidence article { display: grid; gap: 3px; border-left: 3px solid var(--success); padding: 8px 12px; background: var(--surface-2); }
+.thumbnailEvidence article p, .thumbnailEvidence article small { margin: 0; color: var(--text-muted); }
+.thumbnailRegenerate { display: grid; grid-template-columns: 1fr auto; align-items: stretch; gap: 8px; }
+.thumbnailRegenerate textarea { min-height: var(--control-height); border: 1px solid var(--border); border-radius: var(--radius-control); padding: 10px; background: var(--surface-1); color: var(--text-primary); font: inherit; resize: vertical; }
 
 .publicationThumbnailQueue {
   display: grid;
@@ -2062,6 +2077,8 @@ div.publicationPreparationBlocker { display: flex; align-items: center; justify-
   div.publicationPreparationBlocker { align-items: flex-start; flex-direction: column; }
   .contributorPortraitWorkflow > div:first-child { flex-direction: column; }
   .contributorPortraitGallery { grid-template-columns: 1fr; }
+  .thumbnailReviewGallery { grid-template-columns: 1fr; }
+  .thumbnailRegenerate { grid-template-columns: 1fr; }
 }
 .candidateQueueHeader h2,
 .candidateQueueHeader p {

@@ -75,7 +75,9 @@ export function getThumbnailJobDetail(id: string) {
   if (!job) return null;
   const evidence = db.query('SELECT * FROM thumbnail_object_evidence WHERE job_id = ?1 ORDER BY created_at').all(id);
   const candidates = (db.query('SELECT * FROM thumbnail_candidates WHERE job_id = ?1 ORDER BY generation_round DESC, candidate_number').all(id) as Record<string, unknown>[])
-    .map((row) => ({ ...row, previewUrl: `/api/thumbnail-candidates/${encodeURIComponent(String(row.id))}/image` }));
+    .map((row) => ({ id: String(row.id), generationRound: Number(row.generation_round), candidateNumber: Number(row.candidate_number),
+      status: String(row.status), promptText: String(row.prompt_text), modelName: row.model_name == null ? null : String(row.model_name),
+      width: Number(row.width), height: Number(row.height), previewUrl: `/api/thumbnail-candidates/${encodeURIComponent(String(row.id))}/image` }));
   return { ...job, evidence, candidates };
 }
 
@@ -83,7 +85,7 @@ export function getThumbnailCandidateRow(id: string) {
   return db.query('SELECT * FROM thumbnail_candidates WHERE id = ?1').get(id) as Record<string, unknown> | null;
 }
 
-export function createThumbnailGeneration(jobId: string, actorPubkey: string, publicOrigin: string) {
+export function createThumbnailGeneration(jobId: string, actorPubkey: string, publicOrigin: string, reviewNote?: string) {
   const job = getThumbnailJob(jobId);
   if (!job || job.assetKind !== 'snack' || !job.snackCandidateId) throw new Error('Snack thumbnail job not found');
   if (!job.topicColour) throw new Error('Topic colour is required');
@@ -93,16 +95,19 @@ export function createThumbnailGeneration(jobId: string, actorPubkey: string, pu
   const contributors = job.contributorIds.map(getContributor);
   if (contributors.some((item) => !item?.portraitPath || item.portraitStatus !== 'approved')) throw new Error('Every contributor needs an approved portrait');
   const round = Number(job.generationRound || 0) + 1;
+  const targetedNote = String(reviewNote || '').trim().slice(0, 600);
   const outputDirectory = resolve(join(CONTRIBUTOR_UPLOAD_DIR, '..', 'thumbnails', job.id, `round-${round}`));
   mkdirSync(outputDirectory, { recursive: true });
   const contextPath = join(outputDirectory, 'context.json');
   writeFileSync(contextPath, JSON.stringify({
     jobId: job.id, snack: candidate.revision, transcript: transcript.transcriptText, topicColour: job.topicColour,
     contributors: contributors.map((item) => ({ id: item!.id, name: item!.name, portraitPath: resolve(`public${item!.portraitPath}`) })),
+    reviewNote: targetedNote || null,
   }, null, 2));
   const token = `${crypto.randomUUID().replaceAll('-', '')}${crypto.randomUUID().replaceAll('-', '')}`;
   db.query("UPDATE thumbnail_jobs SET status='extracting', callback_token_hash=?1, generation_round=?2, pipeline_name='snack-studio-snack-thumbnail', pipeline_version='1', failure_summary=NULL, updated_at=?3 WHERE id=?4")
     .run(hashToken(token), round, Date.now(), job.id);
+  if (targetedNote) db.query('UPDATE thumbnail_jobs SET review_notes=?1 WHERE id=?2').run(targetedNote, job.id);
   recordAuditEvent({ actorPubkey, action: 'thumbnail.generation.started', entityType: 'thumbnail-job', entityId: job.id, detail: { round } });
   const target = getCurrentAutopilotTarget();
   return {
@@ -125,6 +130,14 @@ function safeThumbnailPath(jobId: string, round: number, value: string) {
   return path;
 }
 
+function thumbnailDimensions(path: string) {
+  const result = Bun.spawnSync(['identify', '-format', '%w %h', path]);
+  if (result.exitCode !== 0) throw new Error('Generated thumbnail candidate is not a readable image');
+  const [width, height] = result.stdout.toString().trim().split(/\s+/).map(Number);
+  if (!width || !height || Math.abs(width / height - 1.5) > 0.03 || width < 1200) throw new Error('Thumbnail candidates must be 3:2 and at least 1200 pixels wide');
+  return { width, height };
+}
+
 export function applyThumbnailResult(jobId: string, token: string, body: Record<string, unknown>) {
   const row = db.query('SELECT * FROM thumbnail_jobs WHERE id=?1').get(jobId) as Record<string, unknown> | null;
   if (!row || String(row.callback_token_hash || '') !== hashToken(token)) throw new Error('Invalid thumbnail callback');
@@ -141,12 +154,33 @@ export function applyThumbnailResult(jobId: string, token: string, body: Record<
         .run(crypto.randomUUID(), jobId, String(item.object || ''), String(item.evidence || ''), String(item.timestamp || ''), String(item.roleInSnack || ''), String(item.rationale || ''), now);
     }
     for (const [index, raw] of candidates.entries()) {
-      const item = raw as Record<string, unknown>; const path = safeThumbnailPath(jobId, round, String(item.path || ''));
-      db.query(`INSERT INTO thumbnail_candidates(id,job_id,generation_round,candidate_number,source_uri,prompt_text,model_name,width,height,mime_type,size_bytes,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,1536,1024,?8,?9,?10)`)
-        .run(crypto.randomUUID(), jobId, round, index + 1, path, String(response.prompt || ''), String(response.model || ''), String(item.mimeType || (extname(path)==='.webp'?'image/webp':'image/png')), statSync(path).size, now);
+      const item = raw as Record<string, unknown>; const path = safeThumbnailPath(jobId, round, String(item.path || '')); const dimensions = thumbnailDimensions(path);
+      db.query(`INSERT INTO thumbnail_candidates(id,job_id,generation_round,candidate_number,source_uri,prompt_text,model_name,width,height,mime_type,size_bytes,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)`)
+        .run(crypto.randomUUID(), jobId, round, index + 1, path, String(response.prompt || ''), String(response.model || ''), dimensions.width, dimensions.height, String(item.mimeType || (extname(path)==='.webp'?'image/webp':'image/png')), statSync(path).size, now);
     }
     db.query("UPDATE thumbnail_jobs SET status='in-review', updated_at=?1 WHERE id=?2").run(now, jobId);
   })();
+}
+
+export function approveThumbnailCandidate(candidateId: string, actorPubkey: string) {
+  const row = db.query(`SELECT c.*, j.episode_id, j.snack_candidate_id FROM thumbnail_candidates c JOIN thumbnail_jobs j ON j.id=c.job_id WHERE c.id=?1`).get(candidateId) as Record<string, unknown> | null;
+  if (!row) throw new Error('Thumbnail candidate not found');
+  const jobId = String(row.job_id);
+  const version = Number((db.query("SELECT COALESCE(MAX(version_number),0)+1 version FROM thumbnail_assets WHERE job_id=?1 AND asset_stage='finished'").get(jobId) as { version: number }).version);
+  const directory = resolve(join(CONTRIBUTOR_UPLOAD_DIR, '..', 'thumbnails', jobId, 'finished'));
+  mkdirSync(directory, { recursive: true });
+  const destination = join(directory, `thumbnail-v${version}.webp`);
+  const conversion = Bun.spawnSync(['magick', String(row.source_uri), '-resize', '1536x1024^', '-gravity', 'center', '-extent', '1536x1024', '-strip', '-quality', '84', destination]);
+  if (conversion.exitCode !== 0) throw new Error('Thumbnail candidate could not be finished');
+  const digest = bytesToHex(sha256(readFileSync(destination))); const now = Date.now();
+  db.transaction(() => {
+    db.query("UPDATE thumbnail_candidates SET status=CASE WHEN id=?1 THEN 'approved' ELSE 'rejected' END WHERE job_id=?2 AND generation_round=?3").run(candidateId, jobId, Number(row.generation_round));
+    db.query(`INSERT INTO thumbnail_assets(id,job_id,candidate_id,asset_stage,storage_path,width,height,mime_type,size_bytes,sha256,version_number,created_at) VALUES(?1,?2,?3,'finished',?4,1536,1024,'image/webp',?5,?6,?7,?8)`)
+      .run(crypto.randomUUID(), jobId, candidateId, destination, statSync(destination).size, digest, version, now);
+    db.query("UPDATE thumbnail_jobs SET status='approved', selected_candidate_id=?1, updated_at=?2 WHERE id=?3").run(candidateId, now, jobId);
+    recordAuditEvent({ actorPubkey, action: 'thumbnail.candidate.approved', entityType: 'thumbnail-job', entityId: jobId, detail: { candidateId, version, sha256: digest } });
+  })();
+  return getThumbnailJobDetail(jobId)!;
 }
 
 export function listThumbnailJobs(episodeId: string): ThumbnailJob[] {
