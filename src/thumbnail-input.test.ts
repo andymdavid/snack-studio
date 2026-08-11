@@ -34,4 +34,11 @@ describe("thumbnail brief input", () => {
       contributorIds: [],
     })).toThrow("six-digit topic colour");
   });
+
+  test("requires an approved contributor reference", () => {
+    expect(() => validateThumbnailBrief({
+      assetKind: "episode",
+      contributorIds: ["unknown-guest"],
+    })).toThrow("approved thumbnail reference");
+  });
 });

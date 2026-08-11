@@ -1,3 +1,5 @@
+import { THUMBNAIL_CONTRIBUTORS } from "./thumbnail-catalog.ts";
+
 export type ThumbnailAssetKind = "snack" | "episode";
 
 export type ThumbnailBriefInput = {
@@ -10,6 +12,7 @@ export type ThumbnailBriefInput = {
 
 const HEX_COLOUR = /^#[0-9a-f]{6}$/i;
 const CONTRIBUTOR_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const APPROVED_CONTRIBUTORS = new Set<string>(THUMBNAIL_CONTRIBUTORS.map(({ id }) => id));
 
 function optionalText(value: unknown, maxLength: number): string | null {
   if (value == null || value === "") return null;
@@ -42,6 +45,9 @@ export function validateThumbnailBrief(value: Record<string, unknown>): Thumbnai
   }))];
   if (!contributorIds.length) throw new Error("Select at least one contributor");
   if (contributorIds.length > 6) throw new Error("Select no more than six contributors");
+  if (contributorIds.some((id) => !APPROVED_CONTRIBUTORS.has(id))) {
+    throw new Error("Every contributor requires an approved thumbnail reference");
+  }
 
   return {
     assetKind,

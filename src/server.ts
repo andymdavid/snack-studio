@@ -86,6 +86,7 @@ import { applySuccessfulRegenerationResult, listRegenerationProposals, resolveRe
 import { validateSuccessfulRegenerationResult } from "./regeneration-result-input.ts";
 import { validateThumbnailBrief } from "./thumbnail-input.ts";
 import { createThumbnailJob, listThumbnailJobs } from "./thumbnails.ts";
+import { THUMBNAIL_CANDIDATES_PER_ROUND, THUMBNAIL_CONTRIBUTORS, THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
 
 const PUBLIC_DIR = join(import.meta.dir, "..", "public");
 
@@ -328,6 +329,17 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     if (!session) return json({ error: "unauthorized" }, 401);
     if (!hasAccess(session.pubkey, "read")) return json({ error: "read access required" }, 403);
     return json({ episodes: listEpisodes() });
+  }
+
+  if (pathname === "/api/thumbnail-options" && req.method === "GET") {
+    const session = requireSession(req);
+    if (!session) return json({ error: "unauthorized" }, 401);
+    if (!hasAccess(session.pubkey, "read")) return json({ error: "read access required" }, 403);
+    return json({
+      contributors: THUMBNAIL_CONTRIBUTORS,
+      topics: THUMBNAIL_TOPICS,
+      candidatesPerRound: THUMBNAIL_CANDIDATES_PER_ROUND,
+    });
   }
 
   if (pathname === "/api/episodes" && req.method === "POST") {
