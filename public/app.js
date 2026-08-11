@@ -33,6 +33,7 @@ const state = {
   candidates: [],
   candidateGenerations: [],
   approvedBatch: { ready: false, checks: [], candidateIds: [] },
+  regenerationProposals: {},
   activeGenerationId: "",
   activeCandidateId: "",
   curation: { newsletterItems: [], relationships: [], validation: { ready: false, checks: [], counts: {} } },
@@ -448,6 +449,7 @@ async function loadEpisode(id) {
     state.candidates = candidatePayload.candidates || [];
     state.candidateGenerations = candidateGenerations(state.candidates, candidatePayload.generations);
     state.approvedBatch = candidatePayload.approvedBatch || { ready: false, checks: [], candidateIds: [] };
+    state.regenerationProposals = candidatePayload.regenerationProposals || {};
     if (!hasCandidateGeneration(state.activeGenerationId)) {
       state.activeGenerationId = state.candidateGenerations.at(-1)?.id || "";
       state.activeCandidateId = "";
@@ -984,6 +986,7 @@ function startEpisodePipelinePolling() {
       state.candidates = candidatePayload.candidates || [];
       state.candidateGenerations = candidateGenerations(state.candidates, candidatePayload.generations);
       state.approvedBatch = candidatePayload.approvedBatch || { ready: false, checks: [], candidateIds: [] };
+      state.regenerationProposals = candidatePayload.regenerationProposals || {};
       if (!hasCandidateGeneration(state.activeGenerationId)) {
         state.activeGenerationId = state.candidateGenerations.at(-1)?.id || "";
         state.activeCandidateId = "";
@@ -1321,6 +1324,67 @@ function openCandidateEditor(candidate) {
   dialog.showModal();
 }
 
+function openRegenerationDialog(candidate) {
+  const dialog = document.createElement("dialog");
+  dialog.className = "regenerationDialog";
+  const form = document.createElement("form");
+  form.className = "regenerationForm";
+  const title = document.createElement("h2");
+  title.textContent = "Generate an alternative";
+  const help = document.createElement("p");
+  help.textContent = "The current Snack will remain unchanged. Add a focused instruction, or leave this blank for a faithful alternative rendering.";
+  const instruction = document.createElement("textarea");
+  instruction.rows = 4;
+  instruction.maxLength = 1000;
+  instruction.placeholder = "For example, make the title more concrete or improve the flow between paragraphs.";
+  const actions = document.createElement("div");
+  actions.className = "regenerationActions";
+  const cancel = document.createElement("button");
+  cancel.type = "button"; cancel.className = "btn btnSecondary"; cancel.textContent = "Cancel";
+  cancel.addEventListener("click", () => dialog.close());
+  const generate = document.createElement("button");
+  generate.type = "submit"; generate.className = "btn btnPrimary"; generate.textContent = "Generate alternative";
+  actions.append(cancel, generate);
+  form.append(title, help, makeWorkspaceField("Optional instruction", instruction), actions);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault(); generate.disabled = true;
+    try {
+      await startSnackRegeneration(candidate, instruction.value);
+      dialog.close();
+    } catch (error) {
+      generate.disabled = false;
+      setStudioStatus(error.message);
+    }
+  });
+  dialog.addEventListener("close", () => dialog.remove());
+  dialog.appendChild(form); document.body.appendChild(dialog); dialog.showModal();
+}
+
+async function startSnackRegeneration(candidate, instruction) {
+  setStudioStatus("Preparing Snack alternative…");
+  const prepared = await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/pipeline-requests`, {
+    method: "POST",
+    body: JSON.stringify({
+      operation: "snack-regeneration", pipelineName: "snack-studio-regenerate-snack",
+      pipelineVersion: "1", promptSuiteVersion: CURRENT_SNACK_PROMPT_SUITE,
+      resultSchemaVersion: "1", targetCandidateId: candidate.id,
+      regenerationInstruction: instruction.trim() || null, idempotencyKey: crypto.randomUUID(),
+      autopilotTargetId: state.activeAutopilotTargetId || undefined,
+    }),
+  });
+  state.pipelineRequests = [prepared.pipelineRequest, ...state.pipelineRequests.filter((request) => request.id !== prepared.pipelineRequest.id)];
+  const triggerRequest = structuredClone(prepared.triggerRequest);
+  for (const reference of triggerRequest.body?.input?.localContext?.references || []) {
+    reference.authorization = await signNip98Request({ url: reference.url, method: "GET" });
+  }
+  const autopilotAuthorization = await signNip98Request(triggerRequest);
+  await api(`/api/episode-pipeline-runs/${encodeURIComponent(prepared.runId)}/start`, {
+    method: "POST", body: JSON.stringify({ autopilotAuthorization, triggerRequest }),
+  });
+  await loadEpisode(state.activeEpisode.id);
+  setStudioStatus("Generating Snack alternative…");
+}
+
 function candidateField(labelText, key, value, multiline = false) {
   const input = multiline ? document.createElement("textarea") : document.createElement("input");
   input.dataset.candidateField = key;
@@ -1344,7 +1408,7 @@ function renderCandidateEditor(candidate) {
   meta.append(title, detail);
   const decisions = document.createElement("div");
   decisions.className = "candidateDecisions";
-  for (const [decision, label] of [["accepted", "Accept"], ["rejected", "Reject"], ["regeneration-requested", "Regenerate"]]) {
+  for (const [decision, label] of [["accepted", "Accept"], ["rejected", "Reject"]]) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = decision === "accepted" ? "btn btnPrimary" : "btn btnSecondary";
@@ -1353,6 +1417,13 @@ function renderCandidateEditor(candidate) {
     button.addEventListener("click", () => updateCandidateDecision(candidate.id, decision));
     decisions.appendChild(button);
   }
+  const regenerate = document.createElement("button");
+  regenerate.type = "button";
+  regenerate.className = "btn btnSecondary";
+  regenerate.textContent = "Generate alternative";
+  regenerate.disabled = !state.me?.access?.edit || state.pipelineRequests.some((request) => request.operation === "snack-regeneration" && request.targetCandidateId === candidate.id && ["created", "awaiting-authorization", "queued", "running", "applying-result"].includes(request.status));
+  regenerate.addEventListener("click", () => openRegenerationDialog(candidate));
+  decisions.appendChild(regenerate);
   header.append(meta, decisions);
   const revisionNav = document.createElement("div");
   revisionNav.className = "candidateRevisionNav";
@@ -1407,8 +1478,10 @@ function renderCandidateEditor(candidate) {
   const error = document.createElement("p");
   error.className = "formError";
   error.dataset.candidateError = "";
+  const proposed = (state.regenerationProposals[candidate.id] || []).find((proposal) => proposal.status === "proposed");
   form.append(
     header,
+    ...(proposed ? [renderRegenerationComparison(candidate, proposed)] : []),
     revisionNav,
     ...(candidate.revision.origin === "pipeline" ? [provenance] : []),
     grid,
@@ -1424,6 +1497,49 @@ function renderCandidateEditor(candidate) {
   return form;
 }
 
+function comparisonArticle(label, titleText, standfirstText, bodyText) {
+  const article = document.createElement("article");
+  const labelElement = document.createElement("span"); labelElement.className = "eyebrow"; labelElement.textContent = label;
+  const title = document.createElement("h3"); title.textContent = titleText;
+  const standfirst = document.createElement("p"); standfirst.className = "candidateReaderStandfirst"; standfirst.textContent = standfirstText;
+  const body = document.createElement("div"); body.className = "candidateReaderBody";
+  for (const paragraph of String(bodyText || "").split(/\n\s*\n/).filter(Boolean)) {
+    const p = document.createElement("p"); p.textContent = paragraph; body.appendChild(p);
+  }
+  article.append(labelElement, title, standfirst, body); return article;
+}
+
+function renderRegenerationComparison(candidate, proposal) {
+  const section = document.createElement("section"); section.className = "regenerationComparison";
+  const heading = document.createElement("div"); heading.className = "regenerationComparisonHeader";
+  const copy = document.createElement("div");
+  const title = document.createElement("h3"); title.textContent = "Alternative ready";
+  const rationale = document.createElement("p"); rationale.textContent = proposal.rationale || proposal.instruction || "A grounded alternative rendering of the same idea.";
+  copy.append(title, rationale);
+  const actions = document.createElement("div"); actions.className = "regenerationActions";
+  for (const [resolution, label, className] of [["discard", "Discard", "btn btnSecondary"], ["adopt", "Adopt as new revision", "btn btnPrimary"]]) {
+    const button = document.createElement("button"); button.type = "button"; button.className = className; button.textContent = label;
+    button.addEventListener("click", () => resolveRegenerationProposal(proposal.id, resolution)); actions.appendChild(button);
+  }
+  heading.append(copy, actions);
+  const comparison = document.createElement("div"); comparison.className = "regenerationComparisonGrid";
+  comparison.append(
+    comparisonArticle("Current", candidate.revision.publicTitle, candidate.revision.standfirst, candidate.revision.bodyMarkdown),
+    comparisonArticle("Proposed", proposal.publicTitle, proposal.standfirst, proposal.bodyMarkdown),
+  );
+  section.append(heading, comparison); return section;
+}
+
+async function resolveRegenerationProposal(proposalId, resolution) {
+  setStudioStatus(resolution === "adopt" ? "Adopting alternative…" : "Discarding alternative…");
+  try {
+    await api(`/api/regeneration-proposals/${encodeURIComponent(proposalId)}/${resolution}`, { method: "POST", body: "{}" });
+    document.querySelector(".candidateEditorDialog")?.close();
+    await refreshCandidates();
+    setStudioStatus(resolution === "adopt" ? "Alternative adopted as a new revision" : "Alternative discarded");
+  } catch (error) { setStudioStatus(error.message); }
+}
+
 async function refreshCandidates() {
   const [payload, curation, episodePayload] = await Promise.all([
     api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/candidates`),
@@ -1434,6 +1550,7 @@ async function refreshCandidates() {
   state.candidates = payload.candidates || [];
   state.candidateGenerations = candidateGenerations(state.candidates, payload.generations);
   state.approvedBatch = payload.approvedBatch || { ready: false, checks: [], candidateIds: [] };
+  state.regenerationProposals = payload.regenerationProposals || {};
   if (!hasCandidateGeneration(state.activeGenerationId)) {
     state.activeGenerationId = state.candidateGenerations.at(-1)?.id || "";
     state.activeCandidateId = "";

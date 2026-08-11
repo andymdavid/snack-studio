@@ -1937,6 +1937,22 @@ textarea {
   font-size: var(--text-xs);
 }
 .approvedBatchBar .btn { padding-block: 7px; }
+.regenerationDialog { width: min(560px, calc(100vw - 32px)); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-1); color: var(--text-primary); }
+.regenerationForm { display: grid; gap: 18px; padding: 22px; }
+.regenerationForm h2, .regenerationForm p { margin: 0; }
+.regenerationActions { display: flex; justify-content: flex-end; gap: 8px; }
+.regenerationComparison { display: grid; gap: 16px; padding: 18px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-2); }
+.regenerationComparisonHeader { display: flex; justify-content: space-between; gap: 16px; align-items: start; }
+.regenerationComparisonHeader h3, .regenerationComparisonHeader p { margin: 0; }
+.regenerationComparisonHeader p { margin-top: 4px; }
+.regenerationComparisonGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--border); }
+.regenerationComparisonGrid article { padding: 18px; background: var(--surface-1); }
+.regenerationComparisonGrid article h3 { margin: 8px 0; }
+.regenerationComparisonGrid .candidateReaderBody { font-size: var(--text-sm); }
+@media (max-width: 760px) {
+  .regenerationComparisonHeader { display: grid; }
+  .regenerationComparisonGrid { grid-template-columns: 1fr; }
+}
 .candidateQueueHeader h2,
 .candidateQueueHeader p {
   margin: 0;
