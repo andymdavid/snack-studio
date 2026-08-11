@@ -42,6 +42,7 @@ const state = {
   episodeStage: "",
   episodeStageId: "",
   episodeAuditEvents: [],
+  publicationPreparation: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -437,11 +438,12 @@ async function loadEpisode(id) {
   showStudioPage("episodePage", "Snack Studio / Episodes / Workspace");
   setStudioStatus("Loading workspace…");
   try {
-    const [payload, candidatePayload, curationPayload, pipelinePayload] = await Promise.all([
+    const [payload, candidatePayload, curationPayload, pipelinePayload, publicationPayload] = await Promise.all([
       api(`/api/episodes/${encodeURIComponent(id)}`),
       api(`/api/episodes/${encodeURIComponent(id)}/candidates`),
       api(`/api/episodes/${encodeURIComponent(id)}/curation`),
       api(`/api/episodes/${encodeURIComponent(id)}/pipeline-requests`),
+      api(`/api/episodes/${encodeURIComponent(id)}/publication-preparation`).catch(() => ({ preparation: null })),
     ]);
     state.activeEpisode = payload.episode;
     state.activeTranscript = payload.transcript || null;
@@ -458,6 +460,7 @@ async function loadEpisode(id) {
     state.pipelineRequests = pipelinePayload.pipelineRequests || [];
     state.pipelineTimeoutMs = Number(pipelinePayload.timeoutMs || 0);
     state.episodeAuditEvents = payload.auditEvents || [];
+    state.publicationPreparation = publicationPayload.preparation || null;
     if (!state.episodeStage || state.episodeStageId !== id) {
       state.episodeStage = episodeWorkspaceStage();
       state.episodeStageId = id;
@@ -726,10 +729,81 @@ function renderEpisodeWorkspace(episode, transcript, transcriptRevisions, auditE
   const outputStage = document.createElement("div");
   outputStage.className = "episodeStage";
   outputStage.append(candidateSection);
+  const publicationStage = document.createElement("div");
+  publicationStage.className = "episodeStage";
+  publicationStage.append(renderPublicationPreparation(episode, candidates));
   const detailsStage = document.createElement("div");
   detailsStage.className = "episodeStage episodeDetailsStage";
   detailsStage.append(metadataForm, transcriptForm, history, pipelineSection, curationSection, renderDeleteEpisodeSection(episode));
-  workspace.append(header, flow, state.episodeStage === "details" ? detailsStage : state.episodeStage === "processing" ? processingStage : state.episodeStage === "output" ? outputStage : setupStage);
+  workspace.append(header, flow, state.episodeStage === "details" ? detailsStage : state.episodeStage === "publication" ? publicationStage : state.episodeStage === "processing" ? processingStage : state.episodeStage === "output" ? outputStage : setupStage);
+}
+
+function renderPublicationPreparation(episode, candidates) {
+  const section = document.createElement("section");
+  section.className = "publicationPreparation";
+  const header = document.createElement("header");
+  header.className = "publicationPreparationHeader";
+  const copy = document.createElement("div");
+  const eyebrow = document.createElement("p");
+  eyebrow.className = "eyebrow metadata";
+  eyebrow.textContent = "Publishing";
+  const title = document.createElement("h2");
+  title.textContent = "Prepare episode package";
+  const help = document.createElement("p");
+  help.textContent = "Snack Studio is assembling canonical topics, contributor portraits and transcript-grounded thumbnail work for the approved set.";
+  copy.append(eyebrow, title, help);
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "btn btnSecondary";
+  back.textContent = "Back to Snacks";
+  back.addEventListener("click", () => setEpisodeStage("output"));
+  header.append(copy, back);
+  section.appendChild(header);
+
+  const preparation = state.publicationPreparation;
+  if (!preparation) {
+    const empty = document.createElement("p");
+    empty.textContent = "Publication preparation has not started.";
+    section.appendChild(empty);
+    return section;
+  }
+  const facts = document.createElement("div");
+  facts.className = "publicationPreparationFacts";
+  const resolved = preparation.participants?.resolved || [];
+  const unresolved = preparation.participants?.unresolved || [];
+  const topicsMissing = preparation.needsTopicClassification || [];
+  for (const [label, value, stateClass] of [
+    ["Approved Snacks", String(preparation.jobs?.length || 0), ""],
+    ["Contributor portraits", `${resolved.length} resolved`, unresolved.length ? "statusWarning" : "statusSuccess"],
+    ["Topic colours", topicsMissing.length ? `${topicsMissing.length} to classify` : "Resolved", topicsMissing.length ? "statusWarning" : "statusSuccess"],
+  ]) {
+    const item = document.createElement("div");
+    const name = document.createElement("span"); name.textContent = label;
+    const valueNode = document.createElement("strong"); valueNode.textContent = value;
+    if (stateClass) valueNode.className = `statusPill ${stateClass}`;
+    item.append(name, valueNode); facts.appendChild(item);
+  }
+  section.appendChild(facts);
+  if (unresolved.length) {
+    const blocker = document.createElement("p");
+    blocker.className = "publicationPreparationBlocker";
+    blocker.textContent = `New contributor portrait required for ${unresolved.join(", ")}.`;
+    section.appendChild(blocker);
+  }
+  const queue = document.createElement("div");
+  queue.className = "publicationThumbnailQueue";
+  for (const job of preparation.jobs || []) {
+    const candidate = candidates.find((item) => item.id === job.snackCandidateId);
+    const row = document.createElement("div");
+    const identity = document.createElement("div");
+    const name = document.createElement("strong"); name.textContent = candidate?.revision?.publicTitle || "Approved Snack";
+    const detail = document.createElement("span"); detail.textContent = job.topicColour ? `Topic colour ${job.topicColour}` : "Topic classification pending";
+    identity.append(name, detail);
+    const status = document.createElement("span"); status.className = `statusPill ${job.topicColour ? "statusSuccess" : "statusWarning"}`; status.textContent = job.topicColour ? "Ready" : "Needs metadata";
+    row.append(identity, status); queue.appendChild(row);
+  }
+  section.appendChild(queue);
+  return section;
 }
 
 function renderDeleteEpisodeSection(episode) {
@@ -1232,6 +1306,15 @@ function renderCandidateSection(episode, candidates) {
     approve.disabled = !state.me?.access?.edit || !state.approvedBatch.ready || episode.status === "approved";
     approve.addEventListener("click", approveFinalCandidateBatch);
     batchBar.append(batchStatus, approve);
+    if (episode.status === "approved") {
+      const prepare = document.createElement("button");
+      prepare.type = "button";
+      prepare.className = "btn btnSecondary";
+      prepare.textContent = state.publicationPreparation ? "Open publication" : "Prepare publication";
+      prepare.disabled = !state.me?.access?.edit;
+      prepare.addEventListener("click", preparePublication);
+      batchBar.appendChild(prepare);
+    }
     list.appendChild(batchBar);
   }
   const visibleCandidates = activeGenerationId === "approved"
@@ -1574,6 +1657,22 @@ async function approveFinalCandidateBatch() {
     state.approvedBatch = payload.approvedBatch;
     renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
     setStudioStatus("Final Snack set approved");
+  } catch (error) {
+    setStudioStatus(error.message);
+  }
+}
+
+async function preparePublication() {
+  if (!state.activeEpisode) return;
+  setStudioStatus("Preparing publication…");
+  try {
+    const payload = state.publicationPreparation
+      ? { preparation: state.publicationPreparation }
+      : await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`, { method: "POST", body: JSON.stringify({}) });
+    state.publicationPreparation = payload.preparation;
+    state.episodeStage = "publication";
+    renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+    setStudioStatus("Ready");
   } catch (error) {
     setStudioStatus(error.message);
   }
