@@ -840,10 +840,9 @@ async function generateSnackThumbnail(jobId, reviewNote = '') {
   try {
     const prepared = await api(`/api/thumbnail-jobs/${encodeURIComponent(jobId)}/generate`, { method: 'POST', body: JSON.stringify({ reviewNote }) });
     const authorization = await signNip98Request(prepared.triggerRequest);
-    const response = await fetch(prepared.triggerRequest.url, { method: 'POST', headers: { 'content-type': 'application/json', authorization }, body: JSON.stringify(prepared.triggerRequest.body) });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || `Thumbnail pipeline failed to start (${response.status})`);
-    await api(`/api/thumbnail-jobs/${encodeURIComponent(jobId)}/started`, { method: 'POST', body: JSON.stringify({ autopilotRunId: String(payload.run?.id || payload.runId || '') }) });
+    await api(`/api/thumbnail-jobs/${encodeURIComponent(jobId)}/start`, {
+      method: 'POST', body: JSON.stringify({ autopilotAuthorization: authorization, triggerRequest: prepared.triggerRequest }),
+    });
     state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
     renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
     setStudioStatus('Generating thumbnail…');
@@ -946,13 +945,9 @@ async function generateContributorPortraits(contributorId) {
   try {
     const prepared = await api(`/api/contributors/${encodeURIComponent(contributorId)}/portrait-jobs`, { method: 'POST', body: '{}' });
     const authorization = await signNip98Request(prepared.triggerRequest);
-    const response = await fetch(prepared.triggerRequest.url, {
-      method: 'POST', headers: { 'content-type': 'application/json', authorization }, body: JSON.stringify(prepared.triggerRequest.body),
+    await api(`/api/contributor-portrait-jobs/${encodeURIComponent(prepared.job.id)}/start`, {
+      method: 'POST', body: JSON.stringify({ autopilotAuthorization: authorization, triggerRequest: prepared.triggerRequest }),
     });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || `Portrait pipeline failed to start (${response.status})`);
-    const autopilotRunId = String(payload.run?.id || payload.runId || '');
-    await api(`/api/contributor-portrait-jobs/${encodeURIComponent(prepared.job.id)}/started`, { method: 'POST', body: JSON.stringify({ autopilotRunId }) });
     state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
     renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
     setStudioStatus('Generating contributor portraits…');

@@ -123,6 +123,23 @@ export function markThumbnailGenerationStarted(jobId: string, runId: string) {
   db.query("UPDATE thumbnail_jobs SET status='generating', autopilot_run_id=?1, updated_at=?2 WHERE id=?3").run(runId, Date.now(), jobId);
 }
 
+export function verifyThumbnailGenerationTrigger(jobId: string, trigger: Record<string, unknown>) {
+  const row = db.query('SELECT callback_token_hash FROM thumbnail_jobs WHERE id=?1').get(jobId) as { callback_token_hash: string | null } | null;
+  const body = trigger.body && typeof trigger.body === 'object' ? trigger.body as Record<string, unknown> : {};
+  const input = body.input && typeof body.input === 'object' ? body.input as Record<string, unknown> : {};
+  const webhook = input.webhook && typeof input.webhook === 'object' ? input.webhook as Record<string, unknown> : {};
+  let url: URL; try { url = new URL(String(trigger.url || '')); } catch { return false; }
+  const target = getCurrentAutopilotTarget();
+  return Boolean(row?.callback_token_hash && String(trigger.method) === 'POST' && input.jobId === jobId
+    && url.origin === new URL(target.url).origin && url.pathname.endsWith('/snack-studio-snack-thumbnail.v1')
+    && String(webhook.token || '') && hashToken(String(webhook.token)) === row.callback_token_hash);
+}
+
+export function markThumbnailGenerationFailed(jobId: string, summary: string) {
+  db.query("UPDATE thumbnail_jobs SET status='failed', failure_summary=?1, updated_at=?2 WHERE id=?3")
+    .run(summary.slice(0, 1000), Date.now(), jobId);
+}
+
 function safeThumbnailPath(jobId: string, round: number, value: string) {
   const base = resolve(join(CONTRIBUTOR_UPLOAD_DIR, '..', 'thumbnails', jobId, `round-${round}`));
   const path = resolve(normalize(value));

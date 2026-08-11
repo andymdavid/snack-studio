@@ -93,6 +93,18 @@ export function markPortraitJobStarted(jobId: string, autopilotRunId: string) {
   db.query("UPDATE contributor_portrait_jobs SET status = 'running', autopilot_run_id = ?1, updated_at = ?2 WHERE id = ?3").run(autopilotRunId, now, jobId);
 }
 
+export function verifyPortraitTrigger(jobId: string, trigger: Record<string, unknown>) {
+  const row = db.query('SELECT callback_token_hash FROM contributor_portrait_jobs WHERE id=?1').get(jobId) as { callback_token_hash: string } | null;
+  const body = trigger.body && typeof trigger.body === 'object' ? trigger.body as Record<string, unknown> : {};
+  const input = body.input && typeof body.input === 'object' ? body.input as Record<string, unknown> : {};
+  const webhook = input.webhook && typeof input.webhook === 'object' ? input.webhook as Record<string, unknown> : {};
+  let url: URL; try { url = new URL(String(trigger.url || '')); } catch { return false; }
+  const target = getCurrentAutopilotTarget();
+  return Boolean(row && String(trigger.method) === 'POST' && input.jobId === jobId
+    && url.origin === new URL(target.url).origin && url.pathname.endsWith('/snack-studio-contributor-portrait.v1')
+    && tokenHash(String(webhook.token || '')) === row.callback_token_hash);
+}
+
 function safeCandidatePath(jobId: string, value: string): string {
   const base = resolve(join(CONTRIBUTOR_UPLOAD_DIR));
   const candidate = resolve(normalize(value));

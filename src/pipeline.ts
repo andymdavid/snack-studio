@@ -188,6 +188,10 @@ export async function startPreparedEpisodePipeline(trigger: EpisodePipelineTrigg
   return startAutopilotHttpPipeline(trigger, authorization);
 }
 
+export async function startPreparedWappPipeline(trigger: { url: string; method: "POST"; body: Record<string, unknown> }, authorization: string): Promise<PipelineStartResult> {
+  return startAutopilotHttpPipeline(trigger as PipelineTriggerRequest, authorization);
+}
+
 async function startAutopilotHttpPipeline(trigger: PipelineTriggerRequest | EpisodePipelineTriggerRequest, authorization?: string): Promise<PipelineStartResult> {
   const res = await fetch(trigger.url, {
     method: trigger.method,

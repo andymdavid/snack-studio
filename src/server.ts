@@ -59,6 +59,7 @@ import {
   buildPipelineTriggerRequest,
   startPreparedChatPipeline,
   startPreparedEpisodePipeline,
+  startPreparedWappPipeline,
   type EpisodePipelineTriggerRequest,
   type PipelineTriggerRequest,
 } from "./pipeline.ts";
@@ -86,13 +87,13 @@ import { applySuccessfulPipelineResult } from "./pipeline-results.ts";
 import { applySuccessfulRegenerationResult, listRegenerationProposals, resolveRegenerationProposal } from "./regeneration-proposals.ts";
 import { validateSuccessfulRegenerationResult } from "./regeneration-result-input.ts";
 import { validateThumbnailBrief } from "./thumbnail-input.ts";
-import { approveThumbnailCandidate, applyThumbnailResult, createThumbnailGeneration, createThumbnailJob, getPublicationPreparation, getThumbnailCandidateRow, getThumbnailJobDetail, listThumbnailJobs, markThumbnailGenerationStarted, preparePublicationThumbnails } from "./thumbnails.ts";
+import { approveThumbnailCandidate, applyThumbnailResult, createThumbnailGeneration, createThumbnailJob, getPublicationPreparation, getThumbnailCandidateRow, getThumbnailJobDetail, listThumbnailJobs, markThumbnailGenerationFailed, markThumbnailGenerationStarted, preparePublicationThumbnails, verifyThumbnailGenerationTrigger } from "./thumbnails.ts";
 import { THUMBNAIL_CANDIDATES_PER_ROUND, THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
 import { validateSuccessfulPublicationMetadataResult } from "./publication-metadata-result-input.ts";
 import { applySuccessfulPublicationMetadataResult } from "./publication-metadata-results.ts";
 import { createContributor, getContributor, listContributors, photoMediaType, publicContributor } from "./contributors.ts";
 import { validateContributorPhoto, validateContributorProfile } from "./contributor-input.ts";
-import { approvePortraitCandidate, applyPortraitResult, createPortraitJob, getPortraitCandidate, listPortraitJobs, markPortraitJobStarted } from "./contributor-portraits.ts";
+import { approvePortraitCandidate, applyPortraitResult, createPortraitJob, getPortraitCandidate, listPortraitJobs, markPortraitJobStarted, verifyPortraitTrigger } from "./contributor-portraits.ts";
 
 const PUBLIC_DIR = join(import.meta.dir, "..", "public");
 
@@ -408,6 +409,17 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     markPortraitJobStarted(decodeURIComponent(portraitJobStartMatch[1]!), runId);
     return json({ ok: true });
   }
+  const portraitJobTriggerMatch = pathname.match(/^\/api\/contributor-portrait-jobs\/([^/]+)\/start$/);
+  if (portraitJobTriggerMatch && req.method === 'POST') {
+    const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
+    const body = await readJson(req); const trigger = body.triggerRequest && typeof body.triggerRequest === 'object' ? body.triggerRequest as Record<string, unknown> : {};
+    const jobId = decodeURIComponent(portraitJobTriggerMatch[1]!);
+    if (!verifyPortraitTrigger(jobId, trigger)) return json({ error: 'portrait trigger does not match the prepared job' }, 400);
+    try {
+      const result = await startPreparedWappPipeline(trigger as { url: string; method: 'POST'; body: Record<string, unknown> }, String(body.autopilotAuthorization || ''));
+      markPortraitJobStarted(jobId, result.runId); return json(result);
+    } catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 502); }
+  }
 
   const portraitCandidateImageMatch = pathname.match(/^\/api\/contributor-portrait-candidates\/([^/]+)\/image$/);
   if (portraitCandidateImageMatch && req.method === 'GET') {
@@ -636,6 +648,19 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const body = await readJson(req); const runId = String(body.autopilotRunId || '');
     if (!runId) return json({ error: 'autopilotRunId is required' }, 400);
     markThumbnailGenerationStarted(decodeURIComponent(thumbnailStartedMatch[1]!), runId); return json({ ok: true });
+  }
+  const thumbnailStartMatch = pathname.match(/^\/api\/thumbnail-jobs\/([^/]+)\/start$/);
+  if (thumbnailStartMatch && req.method === 'POST') {
+    const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
+    const body = await readJson(req); const trigger = body.triggerRequest && typeof body.triggerRequest === 'object' ? body.triggerRequest as Record<string, unknown> : {};
+    const jobId = decodeURIComponent(thumbnailStartMatch[1]!);
+    if (!verifyThumbnailGenerationTrigger(jobId, trigger)) return json({ error: 'thumbnail trigger does not match the prepared job' }, 400);
+    try {
+      const result = await startPreparedWappPipeline(trigger as { url: string; method: 'POST'; body: Record<string, unknown> }, String(body.autopilotAuthorization || ''));
+      markThumbnailGenerationStarted(jobId, result.runId); return json(result);
+    } catch (error) {
+      const summary = error instanceof Error ? error.message : String(error); markThumbnailGenerationFailed(jobId, summary); return json({ error: summary }, 502);
+    }
   }
   const thumbnailCandidateImageMatch = pathname.match(/^\/api\/thumbnail-candidates\/([^/]+)\/image$/);
   if (thumbnailCandidateImageMatch && req.method === 'GET') {
