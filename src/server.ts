@@ -86,7 +86,7 @@ import { applySuccessfulPipelineResult } from "./pipeline-results.ts";
 import { applySuccessfulRegenerationResult, listRegenerationProposals, resolveRegenerationProposal } from "./regeneration-proposals.ts";
 import { validateSuccessfulRegenerationResult } from "./regeneration-result-input.ts";
 import { validateThumbnailBrief } from "./thumbnail-input.ts";
-import { createThumbnailJob, getPublicationPreparation, listThumbnailJobs, preparePublicationThumbnails } from "./thumbnails.ts";
+import { applyThumbnailResult, createThumbnailGeneration, createThumbnailJob, getPublicationPreparation, getThumbnailCandidateRow, getThumbnailJobDetail, listThumbnailJobs, markThumbnailGenerationStarted, preparePublicationThumbnails } from "./thumbnails.ts";
 import { THUMBNAIL_CANDIDATES_PER_ROUND, THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
 import { validateSuccessfulPublicationMetadataResult } from "./publication-metadata-result-input.ts";
 import { applySuccessfulPublicationMetadataResult } from "./publication-metadata-results.ts";
@@ -614,6 +614,41 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 400);
     }
+  }
+
+  const thumbnailJobMatch = pathname.match(/^\/api\/thumbnail-jobs\/([^/]+)$/);
+  if (thumbnailJobMatch && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    const job = getThumbnailJobDetail(decodeURIComponent(thumbnailJobMatch[1]!));
+    return job ? json({ job }) : json({ error: 'thumbnail job not found' }, 404);
+  }
+  const thumbnailGenerateMatch = pathname.match(/^\/api\/thumbnail-jobs\/([^/]+)\/generate$/);
+  if (thumbnailGenerateMatch && req.method === 'POST') {
+    const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
+    try { return json(createThumbnailGeneration(decodeURIComponent(thumbnailGenerateMatch[1]!), session.pubkey, new URL(req.url).origin), 201); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 400); }
+  }
+  const thumbnailStartedMatch = pathname.match(/^\/api\/thumbnail-jobs\/([^/]+)\/started$/);
+  if (thumbnailStartedMatch && req.method === 'POST') {
+    const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
+    const body = await readJson(req); const runId = String(body.autopilotRunId || '');
+    if (!runId) return json({ error: 'autopilotRunId is required' }, 400);
+    markThumbnailGenerationStarted(decodeURIComponent(thumbnailStartedMatch[1]!), runId); return json({ ok: true });
+  }
+  const thumbnailCandidateImageMatch = pathname.match(/^\/api\/thumbnail-candidates\/([^/]+)\/image$/);
+  if (thumbnailCandidateImageMatch && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    const candidate = getThumbnailCandidateRow(decodeURIComponent(thumbnailCandidateImageMatch[1]!));
+    if (!candidate) return json({ error: 'thumbnail candidate not found' }, 404);
+    const file = Bun.file(String(candidate.source_uri)); if (!await file.exists()) return json({ error: 'image not found' }, 404);
+    return new Response(file, { headers: { 'content-type': String(candidate.mime_type || 'image/png'), 'cache-control': 'private, max-age=300' } });
+  }
+  const thumbnailWebhookMatch = pathname.match(/^\/api\/thumbnail-webhooks\/([^/]+)$/);
+  if (thumbnailWebhookMatch && req.method === 'POST') {
+    try { applyThumbnailResult(decodeURIComponent(thumbnailWebhookMatch[1]!), req.headers.get('x-snack-studio-token') || '', await readJson(req)); return json({ ok: true }); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 400); }
   }
 
   const publicationPreparationMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/publication-preparation$/);

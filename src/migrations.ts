@@ -919,6 +919,18 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: "020_thumbnail_generation_delivery",
+    description: "Add authenticated Autopilot delivery state to thumbnail jobs",
+    up(db) {
+      for (const [column, definition] of [
+        ['callback_token_hash', 'TEXT'], ['autopilot_run_id', 'TEXT'], ['failure_summary', 'TEXT'],
+        ['generation_round', 'INTEGER NOT NULL DEFAULT 0'],
+      ] as const) {
+        if (!hasColumn(db, 'thumbnail_jobs', column)) db.exec(`ALTER TABLE thumbnail_jobs ADD COLUMN ${column} ${definition}`);
+      }
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

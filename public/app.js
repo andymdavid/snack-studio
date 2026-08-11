@@ -819,11 +819,33 @@ function renderPublicationPreparation(episode, candidates) {
     const name = document.createElement("strong"); name.textContent = candidate?.revision?.publicTitle || "Approved Snack";
     const detail = document.createElement("span"); detail.textContent = job.topicColour ? `Topic colour ${job.topicColour}` : topicsRunning ? "Topic classification running" : "Topic classification pending";
     identity.append(name, detail);
-    const status = document.createElement("span"); status.className = `statusPill ${job.topicColour ? "statusSuccess" : "statusWarning"}`; status.textContent = job.topicColour ? "Ready" : topicsRunning ? "Running" : "Needs metadata";
+    const status = document.createElement(job.topicColour && resolved.length && !portraitsNeeded.length && ['draft','failed'].includes(job.status) ? 'button' : 'span');
+    if (status instanceof HTMLButtonElement) {
+      status.type = 'button'; status.className = 'btn btnSecondary'; status.textContent = job.status === 'failed' ? 'Retry thumbnail' : 'Generate thumbnail';
+      status.disabled = !state.me?.access?.edit; status.addEventListener('click', () => generateSnackThumbnail(job.id));
+    } else {
+      status.className = `statusPill ${job.status === 'in-review' || job.status === 'approved' ? 'statusSuccess' : 'statusWarning'}`;
+      status.textContent = job.status === 'in-review' ? 'Ready to review' : job.status === 'approved' ? 'Approved' : ['extracting','grounding','generating'].includes(job.status) ? 'Generating…' : job.topicColour ? 'Ready' : topicsRunning ? 'Running' : 'Needs metadata';
+    }
     row.append(identity, status); queue.appendChild(row);
   }
   section.appendChild(queue);
   return section;
+}
+
+async function generateSnackThumbnail(jobId) {
+  setStudioStatus('Starting thumbnail generation…');
+  try {
+    const prepared = await api(`/api/thumbnail-jobs/${encodeURIComponent(jobId)}/generate`, { method: 'POST', body: '{}' });
+    const authorization = await signNip98Request(prepared.triggerRequest);
+    const response = await fetch(prepared.triggerRequest.url, { method: 'POST', headers: { 'content-type': 'application/json', authorization }, body: JSON.stringify(prepared.triggerRequest.body) });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `Thumbnail pipeline failed to start (${response.status})`);
+    await api(`/api/thumbnail-jobs/${encodeURIComponent(jobId)}/started`, { method: 'POST', body: JSON.stringify({ autopilotRunId: String(payload.run?.id || payload.runId || '') }) });
+    state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
+    renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+    setStudioStatus('Generating thumbnail…');
+  } catch (error) { setStudioStatus(error.message); }
 }
 
 function renderContributorPortraitWorkflow(item) {
