@@ -1316,7 +1316,7 @@ function openCandidateEditor(candidate) {
   close.type = "button";
   close.className = "candidateEditorDialogClose";
   close.setAttribute("aria-label", "Close editor");
-  close.textContent = "×";
+  close.textContent = "x";
   close.addEventListener("click", () => dialog.close());
   dialog.addEventListener("close", () => dialog.remove());
   dialog.append(close, renderCandidateEditor(candidate));
