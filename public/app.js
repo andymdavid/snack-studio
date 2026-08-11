@@ -772,10 +772,12 @@ function renderPublicationPreparation(episode, candidates) {
   const resolved = preparation.participants?.resolved || [];
   const unresolved = preparation.participants?.unresolved || [];
   const topicsMissing = preparation.needsTopicClassification || [];
+  const topicRequest = state.pipelineRequests.find((request) => request.operation === "publication-metadata");
+  const topicsRunning = topicRequest && ["created", "awaiting-authorization", "queued", "running", "applying-result"].includes(topicRequest.status);
   for (const [label, value, stateClass] of [
     ["Approved Snacks", String(preparation.jobs?.length || 0), ""],
     ["Contributor portraits", `${resolved.length} resolved`, unresolved.length ? "statusWarning" : "statusSuccess"],
-    ["Topic colours", topicsMissing.length ? `${topicsMissing.length} to classify` : "Resolved", topicsMissing.length ? "statusWarning" : "statusSuccess"],
+    ["Topic colours", topicsRunning ? "Classifying…" : topicsMissing.length ? `${topicsMissing.length} to classify` : "Resolved", topicsRunning || topicsMissing.length ? "statusWarning" : "statusSuccess"],
   ]) {
     const item = document.createElement("div");
     const name = document.createElement("span"); name.textContent = label;
@@ -797,9 +799,9 @@ function renderPublicationPreparation(episode, candidates) {
     const row = document.createElement("div");
     const identity = document.createElement("div");
     const name = document.createElement("strong"); name.textContent = candidate?.revision?.publicTitle || "Approved Snack";
-    const detail = document.createElement("span"); detail.textContent = job.topicColour ? `Topic colour ${job.topicColour}` : "Topic classification pending";
+    const detail = document.createElement("span"); detail.textContent = job.topicColour ? `Topic colour ${job.topicColour}` : topicsRunning ? "Topic classification running" : "Topic classification pending";
     identity.append(name, detail);
-    const status = document.createElement("span"); status.className = `statusPill ${job.topicColour ? "statusSuccess" : "statusWarning"}`; status.textContent = job.topicColour ? "Ready" : "Needs metadata";
+    const status = document.createElement("span"); status.className = `statusPill ${job.topicColour ? "statusSuccess" : "statusWarning"}`; status.textContent = job.topicColour ? "Ready" : topicsRunning ? "Running" : "Needs metadata";
     row.append(identity, status); queue.appendChild(row);
   }
   section.appendChild(queue);
@@ -964,7 +966,7 @@ function renderPipelineRequestsSection(episode, requests) {
       retry.type = "button";
       retry.className = "btn btnSecondary";
       const targetPipeline = currentTarget()?.defaultPipeline || "snack-studio-transcript-to-snacks";
-      const obsoletePipeline = request.pipelineName !== targetPipeline;
+      const obsoletePipeline = request.operation === "transcript-to-snacks" && request.pipelineName !== targetPipeline;
       retry.textContent = obsoletePipeline ? "Return to Setup" : request.status === "awaiting-authorization" ? "Resume" : "Retry";
       retry.disabled = !state.me?.access?.edit;
       retry.addEventListener("click", () => obsoletePipeline ? setEpisodeStage("setup") : retryPipelineRequest(request.id));
@@ -1002,7 +1004,7 @@ async function startEpisodeExtraction() {
 async function retryPipelineRequest(requestId) {
   if (!state.activeEpisode) return;
   const previousRequest = state.pipelineRequests.find((request) => request.id === requestId);
-  if (previousRequest?.promptSuiteVersion !== CURRENT_SNACK_PROMPT_SUITE) {
+  if (previousRequest?.operation === "transcript-to-snacks" && previousRequest.promptSuiteVersion !== CURRENT_SNACK_PROMPT_SUITE) {
     await startEpisodeExtraction();
     return;
   }
@@ -1017,26 +1019,29 @@ async function retryPipelineRequest(requestId) {
 }
 
 async function authorizePreparedEpisodeRun(prepared) {
+  const publicationMetadata = prepared.pipelineRequest?.operation === "publication-metadata";
   state.pipelineRequests = [prepared.pipelineRequest, ...state.pipelineRequests.filter((request) => request.id !== prepared.pipelineRequest.id)];
-  state.activeGenerationId = "";
-  state.activeCandidateId = "";
-  state.episodeStage = "processing";
+  if (!publicationMetadata) {
+    state.activeGenerationId = "";
+    state.activeCandidateId = "";
+  }
+  state.episodeStage = publicationMetadata ? "publication" : "processing";
   renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
   if (!prepared.requiresAutopilotAuth || !prepared.triggerRequest) throw new Error("Autopilot trigger was not prepared");
-  setStudioStatus("Authorize extraction with Nostr…");
+  setStudioStatus(publicationMetadata ? "Authorize topic classification with Nostr…" : "Authorize extraction with Nostr…");
   const triggerRequest = structuredClone(prepared.triggerRequest);
   const references = triggerRequest.body?.input?.localContext?.references || [];
   for (const reference of references) {
     reference.authorization = await signNip98Request({ url: reference.url, method: "GET" });
   }
   const autopilotAuthorization = await signNip98Request(triggerRequest);
-  setStudioStatus("Starting Autopilot extraction…");
+  setStudioStatus(publicationMetadata ? "Starting topic classification…" : "Starting Autopilot extraction…");
   await api(`/api/episode-pipeline-runs/${encodeURIComponent(prepared.runId)}/start`, {
     method: "POST",
     body: JSON.stringify({ autopilotAuthorization, triggerRequest }),
   });
   await loadEpisode(state.activeEpisode.id);
-  setStudioStatus("Extraction started");
+  setStudioStatus(publicationMetadata ? "Topic classification started" : "Extraction started");
 }
 
 function startEpisodePipelinePolling() {
@@ -1050,10 +1055,11 @@ function startEpisodePipelinePolling() {
   state.pollTimer = setInterval(async () => {
     if (state.activeEpisode?.id !== episodeId || !/^\/episodes\//.test(window.location.pathname)) return stopPolling();
     try {
-      const [pipelinePayload, candidatePayload, curationPayload] = await Promise.all([
+      const [pipelinePayload, candidatePayload, curationPayload, publicationPayload] = await Promise.all([
         api(`/api/episodes/${encodeURIComponent(episodeId)}/pipeline-requests`),
         api(`/api/episodes/${encodeURIComponent(episodeId)}/candidates`),
         api(`/api/episodes/${encodeURIComponent(episodeId)}/curation`),
+        api(`/api/episodes/${encodeURIComponent(episodeId)}/publication-preparation`).catch(() => ({ preparation: state.publicationPreparation })),
       ]);
       state.pipelineRequests = pipelinePayload.pipelineRequests || [];
       state.pipelineTimeoutMs = Number(pipelinePayload.timeoutMs || 0);
@@ -1066,7 +1072,8 @@ function startEpisodePipelinePolling() {
         state.activeCandidateId = "";
       }
       state.curation = curationPayload;
-      if (state.candidates.length) state.episodeStage = "output";
+      state.publicationPreparation = publicationPayload.preparation || state.publicationPreparation;
+      if (state.candidates.length && state.episodeStage === "processing") state.episodeStage = "output";
       renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
       if (!state.pipelineRequests.some((request) => ["queued", "running", "applying-result"].includes(request.status))) stopPolling();
     } catch {
@@ -1672,10 +1679,43 @@ async function preparePublication() {
     state.publicationPreparation = payload.preparation;
     state.episodeStage = "publication";
     renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
-    setStudioStatus("Ready");
+    const metadataActive = state.pipelineRequests.some((request) => request.operation === "publication-metadata" && ["created", "awaiting-authorization", "queued", "running", "applying-result"].includes(request.status));
+    if (state.publicationPreparation.needsTopicClassification?.length && !metadataActive) {
+      await startPublicationMetadataClassification();
+    } else {
+      setStudioStatus("Ready");
+    }
   } catch (error) {
     setStudioStatus(error.message);
   }
+}
+
+async function startPublicationMetadataClassification() {
+  setStudioStatus("Preparing topic classification…");
+  const prepared = await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/pipeline-requests`, {
+    method: "POST",
+    body: JSON.stringify({
+      operation: "publication-metadata",
+      pipelineName: "snack-studio-publication-metadata",
+      pipelineVersion: "1",
+      promptSuiteVersion: "v1-publication-topic-classifier",
+      resultSchemaVersion: "1",
+      idempotencyKey: crypto.randomUUID(),
+      autopilotTargetId: state.activeAutopilotTargetId || undefined,
+    }),
+  });
+  state.pipelineRequests = [prepared.pipelineRequest, ...state.pipelineRequests.filter((request) => request.id !== prepared.pipelineRequest.id)];
+  if (!prepared.requiresAutopilotAuth || !prepared.triggerRequest) throw new Error("Topic classification trigger was not prepared");
+  const triggerRequest = structuredClone(prepared.triggerRequest);
+  for (const reference of triggerRequest.body?.input?.localContext?.references || []) {
+    reference.authorization = await signNip98Request({ url: reference.url, method: "GET" });
+  }
+  const autopilotAuthorization = await signNip98Request(triggerRequest);
+  await api(`/api/episode-pipeline-runs/${encodeURIComponent(prepared.runId)}/start`, {
+    method: "POST", body: JSON.stringify({ autopilotAuthorization, triggerRequest }),
+  });
+  await loadEpisode(state.activeEpisode.id);
+  setStudioStatus("Classifying publication topics…");
 }
 
 async function refreshCuration() {
