@@ -6,17 +6,23 @@ Autopilot owns pipeline execution and controlled publication operations. The Int
 
 ## Current implementation
 
-The first foundation slice provides:
+The editorial production workflow currently provides:
 
 - Nostr login with owner, `read`, and `edit` access;
-- a responsive Snack Studio application shell;
-- durable SQLite migrations and administration;
-- episode workspaces with stable IDs and workflow states;
-- episode creation, listing, detail, and audit events;
-- configurable Autopilot targets and pipeline discovery;
-- a health endpoint at `/api/health`.
+- durable episode workspaces, transcript revisions, audit history, and episode deletion;
+- asynchronous, version-pinned transcript-to-Snacks generation through Autopilot;
+- authenticated request context and idempotent, run-scoped pipeline callbacks;
+- visible pipeline progress, failure, timeout, retry, and historical-run states;
+- multiple full generations within one episode workspace;
+- focused Snack reading, editing, rejection, and acceptance across generations;
+- assembly and approval of one final Snack set from any successful generation;
+- targeted alternative generation with evidence reuse, comparison, adoption, and revision recovery;
+- newsletter and relationship curation records for later package assembly;
+- configurable Autopilot targets and a health endpoint at `/api/health`.
 
-Legacy pipeline-chat routes remain temporarily while the episode workflow replaces the starter behavior.
+The accepted production transcript pipeline is pinned to the Episode 64 v3
+baseline. Targeted regeneration uses its own v1 definition without changing the
+full-run prompt suite.
 
 ## Development
 
