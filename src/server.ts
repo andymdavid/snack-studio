@@ -82,6 +82,8 @@ import {
 } from "./pipeline-requests.ts";
 import { validateSuccessfulPipelineResult } from "./pipeline-result-input.ts";
 import { applySuccessfulPipelineResult } from "./pipeline-results.ts";
+import { applySuccessfulRegenerationResult, listRegenerationProposals, resolveRegenerationProposal } from "./regeneration-proposals.ts";
+import { validateSuccessfulRegenerationResult } from "./regeneration-result-input.ts";
 
 const PUBLIC_DIR = join(import.meta.dir, "..", "public");
 
@@ -475,6 +477,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       candidates,
       generations: buildCandidateGenerations(candidates, listEpisodePipelineRequests(episodeId)),
       approvedBatch: validateApprovedCandidateBatch(episodeId),
+      regenerationProposals: Object.fromEntries(candidates.map((candidate) => [candidate.id, listRegenerationProposals(candidate.id)])),
     });
   }
 
@@ -707,6 +710,21 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       session.pubkey,
     );
     return candidate ? json({ candidate }) : json({ error: "candidate revision not found" }, 404);
+  }
+
+  const regenerationProposalMatch = pathname.match(/^\/api\/regeneration-proposals\/([^/]+)\/(adopt|discard)$/);
+  if (regenerationProposalMatch && req.method === "POST") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    try {
+      const proposalId = decodeURIComponent(regenerationProposalMatch[1]!);
+      const resolution = regenerationProposalMatch[2] === "adopt" ? "adopted" : "discarded";
+      const candidate = resolveRegenerationProposal(proposalId, resolution, session.pubkey);
+      if (!candidate) return json({ error: "regeneration proposal not found" }, 404);
+      return json({ candidate, proposals: listRegenerationProposals(candidate.id), episode: getEpisode(candidate.episodeId) });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
   }
 
   const curationMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/curation$/);
@@ -1176,7 +1194,9 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
         return json({ ok: true, requestId, status: "failed" });
       }
 
-      const validation = validateSuccessfulPipelineResult(body);
+      const validation = pipelineRequest.operation === "snack-regeneration"
+        ? validateSuccessfulRegenerationResult(body)
+        : validateSuccessfulPipelineResult(body);
       if (!validation.ok) {
         markPipelineResultRejected({ runId: run.id, summary: validation.error });
         recordAuditEvent({
@@ -1189,7 +1209,12 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       }
       try {
         if (validation.value.attemptId !== run.id) return json({ error: "pipeline callback attempt mismatch" }, 409);
-        const applied = applySuccessfulPipelineResult({ localRunId: run.id, result: validation.value });
+        if (pipelineRequest.operation === "snack-regeneration") {
+          const proposal = applySuccessfulRegenerationResult({ localRunId: run.id, result: validation.value as import("./regeneration-result-input.ts").SuccessfulRegenerationResult });
+          recordAuditEvent({ action: "candidate.regeneration.proposed", entityType: "episode", entityId: pipelineRequest.episodeId, detail: { requestId, runId: run.id, candidateId: proposal.candidateId, proposalId: proposal.id } });
+          return json({ ok: true, requestId, status: "completed", proposalId: proposal.id });
+        }
+        const applied = applySuccessfulPipelineResult({ localRunId: run.id, result: validation.value as import("./pipeline-result-input.ts").SuccessfulPipelineResult });
         if (!applied.replay) {
           recordAuditEvent({
             action: "pipeline.callback.applied",

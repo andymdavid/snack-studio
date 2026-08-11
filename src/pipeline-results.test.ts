@@ -21,6 +21,7 @@ function testDatabase(): Database {
       autopilot_target_id TEXT NOT NULL, pipeline_name TEXT NOT NULL, pipeline_version TEXT,
       prompt_suite_version TEXT NOT NULL, result_schema_version TEXT NOT NULL, idempotency_key TEXT NOT NULL UNIQUE,
       attempt_count INTEGER NOT NULL DEFAULT 0, result_applied_at INTEGER, failure_summary TEXT,
+      target_candidate_id TEXT, base_candidate_revision_id TEXT, regeneration_instruction TEXT,
       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     );
     CREATE TABLE pipeline_runs(

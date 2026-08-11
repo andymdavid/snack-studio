@@ -1,6 +1,8 @@
 import { db } from "./db.ts";
 import { getCandidate, type SnackCandidate } from "./candidates.ts";
 import { recordAuditEvent } from "./episodes.ts";
+import { getPipelineRequest, getPipelineRun } from "./pipeline-requests.ts";
+import type { SuccessfulRegenerationResult } from "./regeneration-result-input.ts";
 
 export type RegenerationProposal = {
   id: string;
@@ -91,6 +93,43 @@ export function createRegenerationProposal(input: {
       input.structureException, JSON.stringify(input.claimEvidenceMap), input.transcriptExcerpt,
       input.rationale, JSON.stringify(input.validationWarnings), now);
   return listRegenerationProposals(input.candidateId).find((proposal) => proposal.id === id)!;
+}
+
+export function applySuccessfulRegenerationResult(input: { localRunId: string; result: SuccessfulRegenerationResult }): RegenerationProposal {
+  const request = getPipelineRequest(input.result.requestId);
+  const run = getPipelineRun(input.localRunId);
+  if (!request || !run || run.requestId !== request.id) throw new Error("regeneration callback target not found");
+  if (request.operation !== "snack-regeneration") throw new Error("regeneration callback operation mismatch");
+  if (request.episodeId !== input.result.episodeId || request.targetCandidateId !== input.result.candidateId) throw new Error("regeneration callback candidate mismatch");
+  if (request.baseCandidateRevisionId !== input.result.baseRevisionId) throw new Error("regeneration callback base revision mismatch");
+  if (request.inputTranscriptRevisionId !== input.result.inputRevisionId) throw new Error("regeneration callback transcript mismatch");
+  if (request.promptSuiteVersion !== input.result.promptSuiteVersion || request.resultSchemaVersion !== input.result.resultSchemaVersion) throw new Error("regeneration callback version mismatch");
+  if (run.autopilotRunId && input.result.runId && run.autopilotRunId !== input.result.runId) throw new Error("regeneration callback Autopilot run mismatch");
+  const transcript = db.query("SELECT transcript_text FROM transcript_revisions WHERE id = ?1").get(request.inputTranscriptRevisionId) as { transcript_text: string } | null;
+  if (!transcript) throw new Error("regeneration source transcript not found");
+  const normalizedTranscript = transcript.transcript_text.replace(/\s+/g, " ");
+  for (const evidence of input.result.evidence) {
+    if (!normalizedTranscript.includes(evidence.excerpt.replace(/\s+/g, " "))) throw new Error(`regeneration evidence ${evidence.evidenceId} is not an exact transcript excerpt`);
+  }
+  const usedIds = new Set(input.result.candidate.claimEvidenceMap.flatMap((mapping) => mapping.evidenceIds));
+  const transcriptExcerpt = input.result.evidence.filter((evidence) => usedIds.has(evidence.evidenceId)).map((evidence) => evidence.excerpt).join("\n\n");
+  const now = Date.now();
+  let proposal!: RegenerationProposal;
+  db.transaction(() => {
+    proposal = createRegenerationProposal({
+      candidateId: input.result.candidateId, baseRevisionId: input.result.baseRevisionId,
+      pipelineRequestId: request.id, instruction: request.regenerationInstruction,
+      editorialTitle: input.result.candidate.editorialTitle, publicTitle: input.result.candidate.publicTitle,
+      standfirst: input.result.candidate.standfirst, paragraphs: input.result.candidate.paragraphs,
+      structureException: input.result.candidate.structureException, claimEvidenceMap: input.result.candidate.claimEvidenceMap,
+      transcriptExcerpt, rationale: input.result.rationale, validationWarnings: input.result.candidate.validationWarnings,
+    });
+    db.query("UPDATE pipeline_runs SET status = 'complete', autopilot_run_id = COALESCE(autopilot_run_id, ?1), progress_percent = 100, progress_label = 'Alternative ready', completed_at = ?2, updated_at = ?2 WHERE id = ?3")
+      .run(input.result.runId, now, run.id);
+    db.query("UPDATE pipeline_requests SET status = 'completed', pipeline_version = COALESCE(?1, pipeline_version), result_applied_at = ?2, failure_summary = NULL, updated_at = ?2 WHERE id = ?3")
+      .run(input.result.pipelineVersion, now, request.id);
+  })();
+  return proposal;
 }
 
 export function resolveRegenerationProposal(id: string, resolution: "adopted" | "discarded", actorPubkey: string): SnackCandidate | null {
