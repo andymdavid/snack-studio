@@ -918,9 +918,9 @@ async function openThumbnailReview(jobId, snackTitle, triggerButton = null) {
     for (const item of payload.job.evidence) { const row = document.createElement('article'); const strong = document.createElement('strong'); strong.textContent = item.object_name; const quote = document.createElement('p'); quote.textContent = `${item.timestamp_label || ''} ${item.transcript_excerpt}`.trim(); const reason = document.createElement('small'); reason.textContent = item.grounding_rationale; row.append(strong, quote, reason); evidence.appendChild(row); }
     shell.appendChild(evidence);
     const regenerate = document.createElement('form'); regenerate.className = 'thumbnailRegenerate';
-    const note = document.createElement('textarea'); note.rows = 2; note.maxLength = 600; note.placeholder = 'One targeted change, for example: make the hand plane larger and improve the contributors’ eye lines.';
+    const note = document.createElement('textarea'); note.rows = 2; note.maxLength = 600; note.placeholder = 'Optional direction, for example: make the hand plane larger and improve the contributors’ eye lines.';
     const button = document.createElement('button'); button.type = 'submit'; button.className = 'btn btnSecondary'; button.textContent = 'Regenerate set';
-    regenerate.append(note, button); regenerate.addEventListener('submit', async (event) => { event.preventDefault(); if (!note.value.trim()) return; const clear = setButtonBusy(button, 'Regenerating…'); dialog.close(); try { await generateSnackThumbnail(jobId, note.value.trim()); } finally { clear(); } });
+    regenerate.append(note, button); regenerate.addEventListener('submit', async (event) => { event.preventDefault(); const clear = setButtonBusy(button, 'Regenerating…'); dialog.close(); try { await generateSnackThumbnail(jobId, note.value.trim()); } finally { clear(); } });
     shell.appendChild(regenerate); dialog.appendChild(shell); document.body.appendChild(dialog); dialog.showModal(); setStudioStatus('Ready');
   } catch (error) { setStudioStatus(error.message); }
   finally { clearBusy(); }
