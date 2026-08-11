@@ -101,7 +101,7 @@ export function createThumbnailJob(input: ThumbnailBriefInput & { episodeId: str
   return getThumbnailJob(id)!;
 }
 
-export function preparePublicationThumbnails(episodeId: string, actorPubkey: string) {
+function publicationContext(episodeId: string) {
   const episode = getEpisode(episodeId);
   if (!episode) throw new Error("Episode not found");
   if (episode.status !== "approved") throw new Error("Approve the final Snack set before preparing publication");
@@ -113,6 +113,22 @@ export function preparePublicationThumbnails(episodeId: string, actorPubkey: str
   const participants = resolveTranscriptParticipants(transcript.transcriptText);
   const contributorIds = participants.resolved.map(({ contributorId }) => contributorId);
   if (!contributorIds.length) throw new Error("No episode contributors could be resolved from the transcript");
+  return { approved, transcript, participants, contributorIds };
+}
+
+export function getPublicationPreparation(episodeId: string) {
+  const { participants } = publicationContext(episodeId);
+  const jobs = listThumbnailJobs(episodeId);
+  return {
+    jobs,
+    participants,
+    needsTopicClassification: jobs.filter((job) => job.assetKind === "snack" && !job.topicColour).map((job) => job.snackCandidateId),
+    ready: jobs.length > 0 && participants.unresolved.length === 0 && jobs.every((job) => job.assetKind !== "snack" || Boolean(job.topicColour)),
+  };
+}
+
+export function preparePublicationThumbnails(episodeId: string, actorPubkey: string) {
+  const { approved, transcript, participants, contributorIds } = publicationContext(episodeId);
   const now = Date.now();
   db.transaction(() => {
     for (const candidateId of approved.candidateIds) {
@@ -134,11 +150,5 @@ export function preparePublicationThumbnails(episodeId: string, actorPubkey: str
     });
   })();
 
-  const jobs = listThumbnailJobs(episodeId);
-  return {
-    jobs,
-    participants,
-    needsTopicClassification: jobs.filter((job) => job.assetKind === "snack" && !job.topicColour).map((job) => job.snackCandidateId),
-    ready: participants.unresolved.length === 0 && jobs.every((job) => job.assetKind !== "snack" || Boolean(job.topicColour)),
-  };
+  return getPublicationPreparation(episodeId);
 }
