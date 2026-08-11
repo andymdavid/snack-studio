@@ -34,7 +34,7 @@ import {
 import { clearPendingImport, exportSnapshot, getDbStatus, snapshotPath, stageSnapshotImport, stageUploadedImport } from "./db-admin.ts";
 import { validateEpisodeInput } from "./episode-input.ts";
 import { validateCandidateRevision, validateReviewDecision } from "./candidate-input.ts";
-import { activateCandidateRevision, createCandidateRevision, generateFixtureCandidates, getCandidate, listCandidates, setApprovedCandidateOrder, updateCandidateDecision } from "./candidates.ts";
+import { activateCandidateRevision, approveCandidateBatch, createCandidateRevision, generateFixtureCandidates, getCandidate, listCandidates, setApprovedCandidateOrder, updateCandidateDecision, validateApprovedCandidateBatch } from "./candidates.ts";
 import { buildCandidateGenerations } from "./candidate-generations.ts";
 import { createFixtureRelationshipSuggestions, createRelationship, deleteRelationship, getCuration, RELATIONSHIP_TYPES, setNewsletterItems, updateRelationshipState } from "./curation.ts";
 import { normalizeTranscriptText, validateEpisodeMetadata, validateTranscriptUpload } from "./transcript-input.ts";
@@ -474,6 +474,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     return json({
       candidates,
       generations: buildCandidateGenerations(candidates, listEpisodePipelineRequests(episodeId)),
+      approvedBatch: validateApprovedCandidateBatch(episodeId),
     });
   }
 
@@ -499,9 +500,22 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     if (!Array.isArray(body.candidateIds)) return json({ error: "candidateIds must be an array" }, 400);
     try {
       const candidates = setApprovedCandidateOrder(episodeId, body.candidateIds.map(String), session.pubkey);
-      return json({ candidates, generations: buildCandidateGenerations(candidates, listEpisodePipelineRequests(episodeId)) });
+      return json({ candidates, generations: buildCandidateGenerations(candidates, listEpisodePipelineRequests(episodeId)), approvedBatch: validateApprovedCandidateBatch(episodeId) });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  }
+
+  const approveCandidateBatchMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/approved-candidate-batch$/);
+  if (approveCandidateBatchMatch && req.method === "POST") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const episodeId = decodeURIComponent(approveCandidateBatchMatch[1]!);
+    if (!getEpisode(episodeId)) return json({ error: "episode not found" }, 404);
+    try {
+      return json({ approvedBatch: approveCandidateBatch(episodeId, session.pubkey), episode: getEpisode(episodeId) });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error), approvedBatch: validateApprovedCandidateBatch(episodeId) }, 409);
     }
   }
 
