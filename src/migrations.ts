@@ -811,6 +811,68 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: "018_contributor_profiles",
+    description: "Add canonical contributor profiles and private identity-photo sources",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS contributors (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          role TEXT NOT NULL,
+          short_bio TEXT NOT NULL,
+          biography_markdown TEXT NOT NULL,
+          aliases_json TEXT NOT NULL DEFAULT '[]',
+          external_url TEXT,
+          x_url TEXT,
+          linkedin_url TEXT,
+          nostr_url TEXT,
+          reference_photo_path TEXT,
+          portrait_path TEXT,
+          portrait_status TEXT NOT NULL DEFAULT 'needed' CHECK(portrait_status IN (
+            'needed', 'ready-to-generate', 'generating', 'in-review', 'approved', 'failed'
+          )),
+          source TEXT NOT NULL DEFAULT 'studio' CHECK(source IN ('website', 'studio')),
+          created_by_pubkey TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (created_by_pubkey) REFERENCES users(pubkey)
+        );
+
+        CREATE INDEX IF NOT EXISTS contributors_name_index ON contributors(name);
+      `);
+
+      const now = Date.now();
+      const insert = db.query(`INSERT OR IGNORE INTO contributors(
+        id, name, role, short_bio, biography_markdown, aliases_json,
+        external_url, x_url, linkedin_url, nostr_url, portrait_path,
+        portrait_status, source, created_at, updated_at
+      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'approved', 'website', ?12, ?12)`);
+      insert.run(
+        'andy-david', 'Andy David', 'Host and co-founder',
+        'Co-host of Intelligence Snacks and co-founder of Other Stuff.',
+        'Andy explores how AI changes software, organisations and the practical work of building new systems.',
+        JSON.stringify(['andy', 'andy david']), null, 'https://x.com/andymdavid',
+        'https://www.linkedin.com/in/andymdavid/', 'https://primal.net/andydavid',
+        '/images/contributors/andy-david-voxel.webp', now,
+      );
+      insert.run(
+        'pete-winn', 'Pete Winn', 'Host and co-founder',
+        'Co-host of Intelligence Snacks and co-founder of Other Stuff.',
+        'Pete brings a systems perspective to conversations about agents, software architecture and technological change.',
+        JSON.stringify(['pete', 'pete winn']), null, 'https://x.com/Pete_Winn',
+        'https://www.linkedin.com/in/pete-winn-otherstuff/', 'https://primal.net/pw',
+        '/images/contributors/pete-winn-voxel.webp', now,
+      );
+      insert.run(
+        'dpc', 'dpc', 'Episode 64 guest',
+        "Guest participant in Episode 64's conversation about coding agents, software craft and agent harnesses.",
+        'Guest participant in the source conversation for the Episode 64 reference material.',
+        JSON.stringify(['dpc', 'david']), null, 'https://x.com/dpc_pw', null,
+        'https://primal.net/dpc', '/images/contributors/dpc-voxel.webp', now,
+      );
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

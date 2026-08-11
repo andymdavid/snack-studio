@@ -43,6 +43,7 @@ const state = {
   episodeStageId: "",
   episodeAuditEvents: [],
   publicationPreparation: null,
+  contributorFormOpen: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -787,10 +788,29 @@ function renderPublicationPreparation(episode, candidates) {
   }
   section.appendChild(facts);
   if (unresolved.length) {
-    const blocker = document.createElement("p");
+    const blocker = document.createElement("div");
     blocker.className = "publicationPreparationBlocker";
-    blocker.textContent = `New contributor portrait required for ${unresolved.join(", ")}.`;
+    const message = document.createElement("p");
+    message.textContent = `New contributor profile required for ${unresolved.join(", ")}.`;
+    const create = document.createElement("button");
+    create.type = "button";
+    create.className = "btn btnSecondary";
+    create.textContent = "Create contributor";
+    create.disabled = !state.me?.access?.edit;
+    create.addEventListener("click", () => {
+      state.contributorFormOpen = true;
+      renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+    });
+    blocker.append(message, create);
     section.appendChild(blocker);
+    if (state.contributorFormOpen) section.appendChild(renderContributorForm(unresolved[0]));
+  }
+  const portraitsNeeded = preparation.contributorsNeedingPortraits || [];
+  if (portraitsNeeded.length) {
+    const note = document.createElement("p");
+    note.className = "publicationPreparationBlocker";
+    note.textContent = portraitsNeeded.map((item) => `${item.name} portrait ${item.portraitStatus.replaceAll('-', ' ')}`).join(" · ");
+    section.appendChild(note);
   }
   const queue = document.createElement("div");
   queue.className = "publicationThumbnailQueue";
@@ -806,6 +826,64 @@ function renderPublicationPreparation(episode, candidates) {
   }
   section.appendChild(queue);
   return section;
+}
+
+function renderContributorForm(speakerLabel) {
+  const form = document.createElement("form");
+  form.className = "contributorProfileForm";
+  const heading = document.createElement("div");
+  heading.innerHTML = "<p class=\"eyebrow\">New contributor</p><h3>Profile and portrait source</h3><p>This profile will publish with the episode after its voxel portrait is approved.</p>";
+  form.appendChild(heading);
+  const fields = [
+    ["name", "Name", speakerLabel, true],
+    ["role", "Role", state.activeEpisode?.episodeNumber ? `Episode ${state.activeEpisode.episodeNumber} guest` : "Episode guest", true],
+    ["shortBio", "Short bio", "", true],
+    ["biographyMarkdown", "About", "", true, "textarea"],
+    ["aliases", "Transcript aliases", speakerLabel, false],
+    ["externalUrl", "Website", "", false],
+    ["xUrl", "X profile", "", false],
+    ["linkedinUrl", "LinkedIn profile", "", false],
+    ["nostrUrl", "Nostr profile", "", false],
+  ];
+  const grid = document.createElement("div");
+  grid.className = "contributorProfileFields";
+  for (const [name, labelText, value, required, kind] of fields) {
+    const label = document.createElement("label");
+    const title = document.createElement("span"); title.textContent = labelText;
+    const input = document.createElement(kind === "textarea" ? "textarea" : "input");
+    input.name = name; input.value = value; input.required = required;
+    if (name.toLowerCase().includes('url')) input.type = 'url';
+    if (kind === "textarea") input.rows = 4;
+    label.append(title, input); grid.appendChild(label);
+  }
+  const photo = document.createElement("label");
+  photo.className = "contributorPhotoField";
+  photo.innerHTML = "<span>Reference photo</span><small>JPEG, PNG or WebP up to 12 MB. This is used for identity only and stays private.</small>";
+  const photoInput = document.createElement("input"); photoInput.type = "file"; photoInput.name = "photo"; photoInput.accept = "image/jpeg,image/png,image/webp"; photoInput.required = true;
+  photo.appendChild(photoInput); grid.appendChild(photo);
+  form.appendChild(grid);
+  const actions = document.createElement("div"); actions.className = "contributorProfileActions";
+  const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "btn btnSecondary"; cancel.textContent = "Cancel";
+  cancel.addEventListener("click", () => { state.contributorFormOpen = false; renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates); });
+  const submit = document.createElement("button"); submit.type = "submit"; submit.className = "btn btnPrimary"; submit.textContent = "Save profile";
+  actions.append(cancel, submit); form.appendChild(actions);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    submit.disabled = true;
+    setStudioStatus("Saving contributor profile…");
+    try {
+      await apiForm("/api/contributors", new FormData(form));
+      state.contributorFormOpen = false;
+      const payload = await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`);
+      state.publicationPreparation = payload.preparation;
+      renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+      setStudioStatus("Contributor saved · portrait generation required");
+    } catch (error) {
+      submit.disabled = false;
+      setStudioStatus(error.message);
+    }
+  });
+  return form;
 }
 
 function renderDeleteEpisodeSection(episode) {

@@ -3,6 +3,7 @@ import { getCandidate, validateApprovedCandidateBatch } from "./candidates.ts";
 import { getActiveTranscriptRevision, getEpisode, recordAuditEvent } from "./episodes.ts";
 import type { ThumbnailAssetKind, ThumbnailBriefInput } from "./thumbnail-input.ts";
 import { resolveCanonicalTopic, resolveTranscriptParticipants } from "./publication-metadata.ts";
+import { getContributor } from "./contributors.ts";
 
 export type ThumbnailJobStatus = "draft" | "extracting" | "grounding" | "generating" | "in-review" | "approved" | "failed";
 
@@ -119,11 +120,20 @@ function publicationContext(episodeId: string) {
 export function getPublicationPreparation(episodeId: string) {
   const { participants } = publicationContext(episodeId);
   const jobs = listThumbnailJobs(episodeId);
+  const contributors = participants.resolved.map((participant) => ({
+    ...participant,
+    profile: getContributor(participant.contributorId),
+  }));
+  const contributorsNeedingPortraits = contributors
+    .filter(({ profile }) => profile?.portraitStatus !== 'approved' || !profile.portraitPath)
+    .map(({ contributorId, name, profile }) => ({ contributorId, name, portraitStatus: profile?.portraitStatus || 'needed' }));
   return {
     jobs,
-    participants,
+    participants: { ...participants, resolved: contributors },
+    contributorsNeedingPortraits,
     needsTopicClassification: jobs.filter((job) => job.assetKind === "snack" && !job.topicColour).map((job) => job.snackCandidateId),
-    ready: jobs.length > 0 && participants.unresolved.length === 0 && jobs.every((job) => job.assetKind !== "snack" || Boolean(job.topicColour)),
+    ready: jobs.length > 0 && participants.unresolved.length === 0 && contributorsNeedingPortraits.length === 0
+      && jobs.every((job) => job.assetKind !== "snack" || Boolean(job.topicColour)),
   };
 }
 
@@ -143,6 +153,8 @@ export function preparePublicationThumbnails(episodeId: string, actorPubkey: str
         .run(crypto.randomUUID(), episodeId, candidate.id, candidate.currentRevisionId,
           transcript.id, topic?.colour || null, JSON.stringify(contributorIds), actorPubkey, now);
     }
+    db.query("UPDATE thumbnail_jobs SET contributor_ids_json = ?1, updated_at = ?2 WHERE episode_id = ?3")
+      .run(JSON.stringify(contributorIds), now, episodeId);
     recordAuditEvent({
       actorPubkey,
       action: "publication.thumbnails.prepared",

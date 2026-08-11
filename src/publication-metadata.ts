@@ -1,4 +1,5 @@
-import { THUMBNAIL_CONTRIBUTORS, THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
+import { THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
+import { listContributors } from "./contributors.ts";
 
 export type ResolvedParticipant = {
   speakerLabel: string;
@@ -32,7 +33,7 @@ export function resolveTranscriptParticipants(transcriptText: string): {
   const unresolved: string[] = [];
   for (const speakerLabel of transcriptSpeakerLabels(transcriptText)) {
     const normalized = normalizedLabel(speakerLabel);
-    const contributor = THUMBNAIL_CONTRIBUTORS.find(({ aliases }) => aliases.some((alias) => normalizedLabel(alias) === normalized));
+    const contributor = listContributors().find(({ aliases }) => aliases.some((alias) => normalizedLabel(alias) === normalized));
     if (!contributor) {
       unresolved.push(speakerLabel);
       continue;
@@ -41,7 +42,7 @@ export function resolveTranscriptParticipants(transcriptText: string): {
       speakerLabel,
       contributorId: contributor.id,
       name: contributor.name,
-      referenceImage: contributor.referenceImage,
+      referenceImage: contributor.portraitPath || '',
     });
   }
   return { resolved, unresolved };

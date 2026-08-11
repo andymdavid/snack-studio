@@ -18,6 +18,7 @@ export const DB_SNAPSHOT_DIR = process.env.SNACK_STUDIO_DB_SNAPSHOT_DIR || proce
 export const DB_IMPORT_DIR = process.env.SNACK_STUDIO_DB_IMPORT_DIR || process.env.IS_STUDIO_DB_IMPORT_DIR || process.env.CHAT_WAPP_DB_IMPORT_DIR || "data/imports";
 export const DB_BACKUP_DIR = process.env.SNACK_STUDIO_DB_BACKUP_DIR || process.env.IS_STUDIO_DB_BACKUP_DIR || process.env.CHAT_WAPP_DB_BACKUP_DIR || "data/backups";
 export const TRANSCRIPT_UPLOAD_DIR = process.env.SNACK_STUDIO_TRANSCRIPT_UPLOAD_DIR || process.env.IS_STUDIO_TRANSCRIPT_UPLOAD_DIR || "data/uploads/transcripts";
+export const CONTRIBUTOR_UPLOAD_DIR = process.env.SNACK_STUDIO_CONTRIBUTOR_UPLOAD_DIR || "data/uploads/contributors";
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 export const PIPELINE_NAME = process.env.SNACK_STUDIO_PIPELINE_NAME || process.env.IS_STUDIO_PIPELINE_NAME || process.env.CHAT_WAPP_PIPELINE_NAME || "snack-studio-transcript-to-snacks";

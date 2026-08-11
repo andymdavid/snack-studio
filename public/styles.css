@@ -2003,6 +2003,19 @@ textarea {
 .publicationPreparationFacts > div > span:first-child { color: var(--text-muted); font-size: var(--text-xs); }
 .publicationPreparationFacts .statusPill { justify-self: start; }
 .publicationPreparationBlocker { margin: 0; border-left: 3px solid var(--warning); padding: 10px 12px; background: var(--warning-soft); }
+div.publicationPreparationBlocker { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.publicationPreparationBlocker p { margin: 0; }
+
+.contributorProfileForm { display: grid; gap: 22px; border: 1px solid var(--border); border-radius: var(--radius-card); padding: 22px; background: var(--surface-1); }
+.contributorProfileForm h3, .contributorProfileForm p { margin: 0; }
+.contributorProfileForm h3 { margin-block: 4px 6px; font-size: var(--text-lg); }
+.contributorProfileForm > div:first-child > p:last-child { color: var(--text-muted); }
+.contributorProfileFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.contributorProfileFields label { min-width: 0; display: grid; align-content: start; gap: 6px; color: var(--text-muted); font-size: var(--text-xs); }
+.contributorProfileFields input, .contributorProfileFields textarea { width: 100%; border: 1px solid var(--border); border-radius: var(--radius-control); padding: 9px 10px; background: var(--surface-1); color: var(--text-primary); font: inherit; }
+.contributorProfileFields textarea { resize: vertical; }
+.contributorPhotoField small { color: var(--text-muted); line-height: 1.35; }
+.contributorProfileActions { display: flex; justify-content: flex-end; gap: 8px; }
 
 .publicationThumbnailQueue {
   display: grid;
@@ -2037,6 +2050,8 @@ textarea {
 @media (max-width: 760px) {
   .regenerationComparisonHeader { display: grid; }
   .regenerationComparisonGrid { grid-template-columns: 1fr; }
+  .contributorProfileFields { grid-template-columns: 1fr; }
+  div.publicationPreparationBlocker { align-items: flex-start; flex-direction: column; }
 }
 .candidateQueueHeader h2,
 .candidateQueueHeader p {

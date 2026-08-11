@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import type { Event as NostrEvent } from "nostr-tools";
 import {
   addAccessRule,
@@ -86,9 +87,11 @@ import { applySuccessfulRegenerationResult, listRegenerationProposals, resolveRe
 import { validateSuccessfulRegenerationResult } from "./regeneration-result-input.ts";
 import { validateThumbnailBrief } from "./thumbnail-input.ts";
 import { createThumbnailJob, getPublicationPreparation, listThumbnailJobs, preparePublicationThumbnails } from "./thumbnails.ts";
-import { THUMBNAIL_CANDIDATES_PER_ROUND, THUMBNAIL_CONTRIBUTORS, THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
+import { THUMBNAIL_CANDIDATES_PER_ROUND, THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
 import { validateSuccessfulPublicationMetadataResult } from "./publication-metadata-result-input.ts";
 import { applySuccessfulPublicationMetadataResult } from "./publication-metadata-results.ts";
+import { createContributor, getContributor, listContributors, photoMediaType, publicContributor } from "./contributors.ts";
+import { validateContributorPhoto, validateContributorProfile } from "./contributor-input.ts";
 
 const PUBLIC_DIR = join(import.meta.dir, "..", "public");
 
@@ -338,10 +341,46 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     if (!session) return json({ error: "unauthorized" }, 401);
     if (!hasAccess(session.pubkey, "read")) return json({ error: "read access required" }, 403);
     return json({
-      contributors: THUMBNAIL_CONTRIBUTORS,
+      contributors: listContributors().map(publicContributor),
       topics: THUMBNAIL_TOPICS,
       candidatesPerRound: THUMBNAIL_CANDIDATES_PER_ROUND,
     });
+  }
+
+  if (pathname === "/api/contributors" && req.method === "GET") {
+    const session = requireSession(req);
+    if (!session) return json({ error: "unauthorized" }, 401);
+    if (!hasAccess(session.pubkey, "read")) return json({ error: "read access required" }, 403);
+    return json({ contributors: listContributors().map(publicContributor) });
+  }
+
+  if (pathname === "/api/contributors" && req.method === "POST") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    try {
+      const form = await req.formData();
+      const input = validateContributorProfile(form);
+      const photo = form.get('photo');
+      if (!(photo instanceof File)) throw new Error('A reference photo is required');
+      validateContributorPhoto(photo);
+      return json({ contributor: publicContributor(await createContributor({ ...input, actorPubkey: session.pubkey, photo })) }, 201);
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  }
+
+  const contributorPhotoMatch = pathname.match(/^\/api\/contributors\/([^/]+)\/reference-photo$/);
+  if (contributorPhotoMatch && req.method === "GET") {
+    const session = requireSession(req);
+    if (!session) return json({ error: "unauthorized" }, 401);
+    if (!hasAccess(session.pubkey, "read")) return json({ error: "read access required" }, 403);
+    const contributor = getContributor(decodeURIComponent(contributorPhotoMatch[1]!));
+    if (!contributor?.referencePhotoPath) return json({ error: "reference photo not found" }, 404);
+    try {
+      return new Response(readFileSync(contributor.referencePhotoPath), { headers: { 'content-type': photoMediaType(contributor.referencePhotoPath), 'cache-control': 'private, max-age=300' } });
+    } catch {
+      return json({ error: "reference photo not found" }, 404);
+    }
   }
 
   if (pathname === "/api/episodes" && req.method === "POST") {
