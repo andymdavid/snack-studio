@@ -624,6 +624,106 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: "015_thumbnail_workflow",
+    description: "Add durable thumbnail briefs, grounded objects, candidates, and assets",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS thumbnail_jobs (
+          id TEXT PRIMARY KEY,
+          episode_id TEXT NOT NULL,
+          asset_kind TEXT NOT NULL CHECK(asset_kind IN ('snack', 'episode')),
+          snack_candidate_id TEXT,
+          snack_revision_id TEXT,
+          transcript_revision_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN (
+            'draft', 'extracting', 'grounding', 'generating', 'in-review', 'approved', 'failed'
+          )),
+          topic_colour TEXT,
+          contributor_ids_json TEXT NOT NULL DEFAULT '[]',
+          selected_candidate_id TEXT,
+          review_notes TEXT,
+          pipeline_name TEXT,
+          pipeline_version TEXT,
+          created_by_pubkey TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          CHECK(
+            (asset_kind = 'snack' AND snack_candidate_id IS NOT NULL AND snack_revision_id IS NOT NULL)
+            OR (asset_kind = 'episode' AND snack_candidate_id IS NULL AND snack_revision_id IS NULL)
+          ),
+          FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (snack_candidate_id) REFERENCES snack_candidates(id) ON DELETE CASCADE,
+          FOREIGN KEY (snack_revision_id) REFERENCES snack_revisions(id),
+          FOREIGN KEY (transcript_revision_id) REFERENCES transcript_revisions(id),
+          FOREIGN KEY (created_by_pubkey) REFERENCES users(pubkey)
+        );
+
+        CREATE INDEX IF NOT EXISTS thumbnail_jobs_episode_index
+          ON thumbnail_jobs(episode_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS thumbnail_jobs_snack_index
+          ON thumbnail_jobs(snack_candidate_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS thumbnail_object_evidence (
+          id TEXT PRIMARY KEY,
+          job_id TEXT NOT NULL,
+          object_name TEXT NOT NULL,
+          transcript_excerpt TEXT NOT NULL,
+          timestamp_label TEXT,
+          role_in_snack TEXT NOT NULL,
+          grounding_status TEXT NOT NULL DEFAULT 'proposed' CHECK(grounding_status IN ('proposed', 'approved', 'rejected')),
+          grounding_rationale TEXT,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (job_id) REFERENCES thumbnail_jobs(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS thumbnail_object_evidence_job_index
+          ON thumbnail_object_evidence(job_id, created_at ASC);
+
+        CREATE TABLE IF NOT EXISTS thumbnail_candidates (
+          id TEXT PRIMARY KEY,
+          job_id TEXT NOT NULL,
+          generation_round INTEGER NOT NULL CHECK(generation_round > 0),
+          candidate_number INTEGER NOT NULL CHECK(candidate_number > 0),
+          status TEXT NOT NULL DEFAULT 'generated' CHECK(status IN ('generated', 'approved', 'rejected')),
+          source_uri TEXT NOT NULL,
+          prompt_text TEXT NOT NULL,
+          model_name TEXT,
+          width INTEGER,
+          height INTEGER,
+          mime_type TEXT,
+          size_bytes INTEGER,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (job_id) REFERENCES thumbnail_jobs(id) ON DELETE CASCADE,
+          UNIQUE(job_id, generation_round, candidate_number)
+        );
+
+        CREATE INDEX IF NOT EXISTS thumbnail_candidates_job_index
+          ON thumbnail_candidates(job_id, generation_round DESC, candidate_number ASC);
+
+        CREATE TABLE IF NOT EXISTS thumbnail_assets (
+          id TEXT PRIMARY KEY,
+          job_id TEXT NOT NULL,
+          candidate_id TEXT NOT NULL,
+          asset_stage TEXT NOT NULL CHECK(asset_stage IN ('source', 'finished')),
+          storage_path TEXT NOT NULL,
+          width INTEGER NOT NULL,
+          height INTEGER NOT NULL,
+          mime_type TEXT NOT NULL,
+          size_bytes INTEGER NOT NULL,
+          sha256 TEXT NOT NULL,
+          version_number INTEGER NOT NULL CHECK(version_number > 0),
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (job_id) REFERENCES thumbnail_jobs(id) ON DELETE CASCADE,
+          FOREIGN KEY (candidate_id) REFERENCES thumbnail_candidates(id) ON DELETE CASCADE,
+          UNIQUE(job_id, asset_stage, version_number)
+        );
+
+        CREATE INDEX IF NOT EXISTS thumbnail_assets_job_index
+          ON thumbnail_assets(job_id, asset_stage, version_number DESC);
+      `);
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {
