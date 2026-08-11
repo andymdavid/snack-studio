@@ -527,6 +527,39 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: "013_snack_regeneration_proposals",
+    description: "Store non-destructive proposed revisions from targeted Snack regeneration",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS snack_regeneration_proposals (
+          id TEXT PRIMARY KEY,
+          candidate_id TEXT NOT NULL,
+          base_revision_id TEXT NOT NULL,
+          pipeline_request_id TEXT NOT NULL UNIQUE,
+          status TEXT NOT NULL DEFAULT 'proposed' CHECK(status IN ('proposed', 'adopted', 'discarded')),
+          instruction TEXT,
+          editorial_title TEXT NOT NULL,
+          public_title TEXT NOT NULL,
+          standfirst TEXT NOT NULL,
+          body_markdown TEXT NOT NULL,
+          structure_exception TEXT,
+          claim_evidence_json TEXT NOT NULL DEFAULT '[]',
+          transcript_excerpt TEXT,
+          rationale TEXT,
+          validation_warnings_json TEXT NOT NULL DEFAULT '[]',
+          created_at INTEGER NOT NULL,
+          resolved_at INTEGER,
+          FOREIGN KEY (candidate_id) REFERENCES snack_candidates(id) ON DELETE CASCADE,
+          FOREIGN KEY (base_revision_id) REFERENCES snack_revisions(id),
+          FOREIGN KEY (pipeline_request_id) REFERENCES pipeline_requests(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS snack_regeneration_proposals_candidate_index
+          ON snack_regeneration_proposals(candidate_id, created_at DESC);
+      `);
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {
