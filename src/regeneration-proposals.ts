@@ -139,6 +139,9 @@ export function resolveRegenerationProposal(id: string, resolution: "adopted" | 
   const candidate = getCandidate(proposal.candidateId);
   if (!candidate) return null;
   if (proposal.status !== "proposed") throw new Error("regeneration proposal is already resolved");
+  if (resolution === "adopted" && candidate.currentRevisionId !== proposal.baseRevisionId) {
+    throw new Error("The Snack changed after this alternative was requested; discard it or generate a new alternative");
+  }
   const now = Date.now();
   db.transaction(() => {
     if (resolution === "adopted") {

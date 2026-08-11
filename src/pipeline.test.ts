@@ -61,4 +61,17 @@ describe("episode Autopilot trigger", () => {
     expect(trigger.url).toBe("https://autopilot.example/api/pipelines/triggers/http/snack-studio-transcript-to-snacks.v3");
     expect(trigger.body.input.pipelineVersion).toBe("3");
   });
+
+  test("pins the targeted regeneration definition without changing the v3 prompt suite", () => {
+    const trigger = buildEpisodePipelineTriggerRequest({
+      autopilotUrl: "https://autopilot.example", pipelineName: "snack-studio-regenerate-snack",
+      requestId: "request-2", attemptId: "attempt-2", episodeId: "episode-64",
+      operation: "snack-regeneration", userNpub: "npub1editor", inputRevisionId: "revision-3",
+      pipelineVersion: "1", promptSuiteVersion: "v3-intelligence-snacks-natural-prose",
+      resultSchemaVersion: "1", contextUrl: "https://studio.example/context",
+      transcriptUrl: "https://studio.example/transcript", webhookUrl: "https://studio.example/webhook", webhookToken: "secret",
+    });
+    expect(trigger.url).toBe("https://autopilot.example/api/pipelines/triggers/http/snack-studio-regenerate-snack.v1");
+    expect(trigger.body.input).toMatchObject({ operation: "snack-regeneration", promptSuiteVersion: "v3-intelligence-snacks-natural-prose" });
+  });
 });

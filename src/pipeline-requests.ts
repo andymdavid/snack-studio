@@ -466,7 +466,7 @@ export function getPipelineRequestContext(requestId: string, database: Database 
     contributors: [],
     targetCandidate: targetRow ? {
       id: String(targetRow.id),
-      baseRevisionId: String(targetRow.current_revision_id),
+      baseRevisionId: String(row.base_candidate_revision_id),
       revisionNumber: Number(targetRow.revision_number),
       reviewDecision: String(targetRow.review_decision),
       publicTitle: String(targetRow.public_title),
