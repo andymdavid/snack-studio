@@ -84,6 +84,8 @@ import { validateSuccessfulPipelineResult } from "./pipeline-result-input.ts";
 import { applySuccessfulPipelineResult } from "./pipeline-results.ts";
 import { applySuccessfulRegenerationResult, listRegenerationProposals, resolveRegenerationProposal } from "./regeneration-proposals.ts";
 import { validateSuccessfulRegenerationResult } from "./regeneration-result-input.ts";
+import { validateThumbnailBrief } from "./thumbnail-input.ts";
+import { createThumbnailJob, listThumbnailJobs } from "./thumbnails.ts";
 
 const PUBLIC_DIR = join(import.meta.dir, "..", "public");
 
@@ -479,6 +481,29 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       approvedBatch: validateApprovedCandidateBatch(episodeId),
       regenerationProposals: Object.fromEntries(candidates.map((candidate) => [candidate.id, listRegenerationProposals(candidate.id)])),
     });
+  }
+
+  const episodeThumbnailsMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/thumbnails$/);
+  if (episodeThumbnailsMatch && req.method === "GET") {
+    const session = requireSession(req);
+    if (!session) return json({ error: "unauthorized" }, 401);
+    if (!hasAccess(session.pubkey, "read")) return json({ error: "read access required" }, 403);
+    const episodeId = decodeURIComponent(episodeThumbnailsMatch[1]!);
+    if (!getEpisode(episodeId)) return json({ error: "episode not found" }, 404);
+    return json({ thumbnailJobs: listThumbnailJobs(episodeId) });
+  }
+
+  if (episodeThumbnailsMatch && req.method === "POST") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const episodeId = decodeURIComponent(episodeThumbnailsMatch[1]!);
+    if (!getEpisode(episodeId)) return json({ error: "episode not found" }, 404);
+    try {
+      const brief = validateThumbnailBrief(await readJson(req));
+      return json({ thumbnailJob: createThumbnailJob({ ...brief, episodeId, actorPubkey: session.pubkey }) }, 201);
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
   }
 
   const fixtureCandidatesMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/fixture-candidates$/);
