@@ -824,7 +824,7 @@ function renderPublicationPreparation(episode, candidates) {
     if (status instanceof HTMLButtonElement) {
       status.type = 'button'; status.className = 'btn btnSecondary'; status.textContent = job.status === 'failed' ? 'Retry thumbnail' : ['in-review','approved'].includes(job.status) ? 'Review thumbnail' : 'Generate thumbnail';
       status.disabled = !state.me?.access?.edit;
-      status.addEventListener('click', () => ['in-review','approved'].includes(job.status) ? openThumbnailReview(job.id, name.textContent) : generateSnackThumbnail(job.id));
+      status.addEventListener('click', () => ['in-review','approved'].includes(job.status) ? openThumbnailReview(job.id, name.textContent, status) : generateSnackThumbnail(job.id, '', status));
     } else {
       status.className = `statusPill ${job.status === 'in-review' || job.status === 'approved' ? 'statusSuccess' : 'statusWarning'}`;
       status.textContent = job.status === 'in-review' ? 'Ready to review' : job.status === 'approved' ? 'Approved' : ['extracting','grounding','generating'].includes(job.status) ? 'Generating…' : job.topicColour ? 'Ready' : topicsRunning ? 'Running' : 'Needs metadata';
@@ -835,7 +835,16 @@ function renderPublicationPreparation(episode, candidates) {
   return section;
 }
 
-async function generateSnackThumbnail(jobId, reviewNote = '') {
+function setButtonBusy(button, label) {
+  if (!(button instanceof HTMLButtonElement)) return () => {};
+  const original = { disabled: button.disabled, text: button.textContent };
+  button.disabled = true; button.classList.add('isBusy'); button.textContent = label;
+  button.setAttribute('aria-busy', 'true');
+  return () => { button.disabled = original.disabled; button.classList.remove('isBusy'); button.textContent = original.text; button.removeAttribute('aria-busy'); };
+}
+
+async function generateSnackThumbnail(jobId, reviewNote = '', triggerButton = null) {
+  const clearBusy = setButtonBusy(triggerButton, reviewNote ? 'Regenerating…' : 'Starting…');
   setStudioStatus('Starting thumbnail generation…');
   try {
     const prepared = await api(`/api/thumbnail-jobs/${encodeURIComponent(jobId)}/generate`, { method: 'POST', body: JSON.stringify({ reviewNote }) });
@@ -846,10 +855,11 @@ async function generateSnackThumbnail(jobId, reviewNote = '') {
     state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
     renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
     setStudioStatus('Generating thumbnail…');
-  } catch (error) { setStudioStatus(error.message); }
+  } catch (error) { clearBusy(); setStudioStatus(error.message); }
 }
 
-async function openThumbnailReview(jobId, snackTitle) {
+async function openThumbnailReview(jobId, snackTitle, triggerButton = null) {
+  const clearBusy = setButtonBusy(triggerButton, 'Opening…');
   setStudioStatus('Loading thumbnail review…');
   try {
     const payload = await api(`/api/thumbnail-jobs/${encodeURIComponent(jobId)}`);
@@ -872,7 +882,7 @@ async function openThumbnailReview(jobId, snackTitle) {
       fetch(candidate.previewUrl, { headers: state.token ? { authorization: `Bearer ${state.token}` } : {} }).then((res) => res.blob()).then((blob) => { image.src = URL.createObjectURL(blob); });
       const action = document.createElement('button'); action.type = 'button'; action.className = candidate.status === 'approved' ? 'btn btnPrimary' : 'btn btnSecondary';
       action.textContent = candidate.status === 'approved' ? 'Approved' : 'Approve this thumbnail'; action.disabled = candidate.status === 'approved' || !state.me?.access?.edit;
-      action.addEventListener('click', () => approveSnackThumbnail(candidate.id, dialog));
+      action.addEventListener('click', () => approveSnackThumbnail(candidate.id, dialog, action));
       card.append(image, action); gallery.appendChild(card);
     }
     shell.appendChild(gallery);
@@ -884,15 +894,17 @@ async function openThumbnailReview(jobId, snackTitle) {
     const regenerate = document.createElement('form'); regenerate.className = 'thumbnailRegenerate';
     const note = document.createElement('textarea'); note.rows = 2; note.maxLength = 600; note.placeholder = 'One targeted change, for example: make the hand plane larger and improve the contributors’ eye lines.';
     const button = document.createElement('button'); button.type = 'submit'; button.className = 'btn btnSecondary'; button.textContent = 'Regenerate set';
-    regenerate.append(note, button); regenerate.addEventListener('submit', async (event) => { event.preventDefault(); if (!note.value.trim()) return; dialog.close(); await generateSnackThumbnail(jobId, note.value.trim()); });
+    regenerate.append(note, button); regenerate.addEventListener('submit', async (event) => { event.preventDefault(); if (!note.value.trim()) return; const clear = setButtonBusy(button, 'Regenerating…'); dialog.close(); try { await generateSnackThumbnail(jobId, note.value.trim()); } finally { clear(); } });
     shell.appendChild(regenerate); dialog.appendChild(shell); document.body.appendChild(dialog); dialog.showModal(); setStudioStatus('Ready');
   } catch (error) { setStudioStatus(error.message); }
+  finally { clearBusy(); }
 }
 
-async function approveSnackThumbnail(candidateId, dialog) {
+async function approveSnackThumbnail(candidateId, dialog, triggerButton = null) {
+  const clearBusy = setButtonBusy(triggerButton, 'Approving…');
   setStudioStatus('Finishing approved thumbnail…');
   try { await api(`/api/thumbnail-candidates/${encodeURIComponent(candidateId)}/approve`, { method: 'POST', body: '{}' }); dialog.close(); state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation; renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates); setStudioStatus('Thumbnail approved'); }
-  catch (error) { setStudioStatus(error.message); }
+  catch (error) { clearBusy(); setStudioStatus(error.message); }
 }
 
 function renderContributorPortraitWorkflow(item) {
@@ -908,7 +920,7 @@ function renderContributorPortraitWorkflow(item) {
   generate.type = 'button'; generate.className = 'btn btnPrimary';
   generate.textContent = ['generating', 'in-review'].includes(item.portraitStatus) ? 'Generate another set' : 'Generate portraits';
   generate.disabled = !state.me?.access?.edit || item.portraitStatus === 'generating';
-  generate.addEventListener('click', () => generateContributorPortraits(item.contributorId));
+  generate.addEventListener('click', () => generateContributorPortraits(item.contributorId, generate));
   heading.append(copy, generate); panel.appendChild(heading);
   const gallery = document.createElement('div'); gallery.className = 'contributorPortraitGallery';
   panel.appendChild(gallery);
@@ -934,13 +946,14 @@ async function loadContributorPortraitJobs(contributorId, gallery) {
       const approve = document.createElement('button'); approve.type = 'button'; approve.className = 'btn btnSecondary';
       approve.textContent = candidate.status === 'approved' ? 'Approved' : 'Use this portrait';
       approve.disabled = candidate.status === 'approved' || !state.me?.access?.edit;
-      approve.addEventListener('click', () => approveContributorPortrait(candidate.id));
+      approve.addEventListener('click', () => approveContributorPortrait(candidate.id, approve));
       card.append(image, approve); gallery.appendChild(card);
     }
   } catch (error) { gallery.textContent = error.message; }
 }
 
-async function generateContributorPortraits(contributorId) {
+async function generateContributorPortraits(contributorId, triggerButton = null) {
+  const clearBusy = setButtonBusy(triggerButton, 'Starting…');
   setStudioStatus('Preparing contributor portraits…');
   try {
     const prepared = await api(`/api/contributors/${encodeURIComponent(contributorId)}/portrait-jobs`, { method: 'POST', body: '{}' });
@@ -952,7 +965,7 @@ async function generateContributorPortraits(contributorId) {
     renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
     setStudioStatus('Generating contributor portraits…');
     pollContributorPortrait(contributorId);
-  } catch (error) { setStudioStatus(error.message); }
+  } catch (error) { clearBusy(); setStudioStatus(error.message); }
 }
 
 async function pollContributorPortrait(contributorId) {
@@ -974,14 +987,15 @@ async function pollContributorPortrait(contributorId) {
   window.setTimeout(check, 5000);
 }
 
-async function approveContributorPortrait(candidateId) {
+async function approveContributorPortrait(candidateId, triggerButton = null) {
+  const clearBusy = setButtonBusy(triggerButton, 'Approving…');
   setStudioStatus('Approving contributor portrait…');
   try {
     await api(`/api/contributor-portrait-candidates/${encodeURIComponent(candidateId)}/approve`, { method: 'POST', body: '{}' });
     state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
     renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
     setStudioStatus('Contributor portrait approved');
-  } catch (error) { setStudioStatus(error.message); }
+  } catch (error) { clearBusy(); setStudioStatus(error.message); }
 }
 
 function renderContributorForm(speakerLabel) {
