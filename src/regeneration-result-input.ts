@@ -18,6 +18,17 @@ export type SuccessfulRegenerationResult = {
   rationale: string | null;
 };
 
+function normalizedEvidenceText(value: string, stripSpeakerMarkers = false): string {
+  const withoutMarkers = stripSpeakerMarkers
+    ? value.replace(/^[^\n()]{1,100}\(\d{1,2}:\d{2}(?::\d{2})?\)\s*$/gm, " ")
+    : value;
+  return withoutMarkers.replace(/\s+/g, " ").trim();
+}
+
+export function transcriptContainsExactEvidence(transcript: string, excerpt: string): boolean {
+  return normalizedEvidenceText(transcript, true).includes(normalizedEvidenceText(excerpt));
+}
+
 const prohibitedPhrases = [
   "the key insight is", "this highlights", "this suggests", "this represents a fundamental shift",
   "this has profound implications", "this signals a broader transformation", "this changes the landscape",

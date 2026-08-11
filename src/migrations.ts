@@ -566,6 +566,9 @@ const migrations: Migration[] = [
     up(db) {
       db.exec(`
         PRAGMA defer_foreign_keys = ON;
+        CREATE TEMP TABLE migration_014_pipeline_runs AS SELECT * FROM pipeline_runs;
+        CREATE TEMP TABLE migration_014_pipeline_artifacts AS SELECT * FROM pipeline_artifacts;
+        CREATE TEMP TABLE migration_014_regeneration_proposals AS SELECT * FROM snack_regeneration_proposals;
         CREATE TABLE pipeline_requests_new (
           id TEXT PRIMARY KEY,
           episode_id TEXT NOT NULL,
@@ -612,6 +615,12 @@ const migrations: Migration[] = [
         DROP TABLE pipeline_requests;
         ALTER TABLE pipeline_requests_new RENAME TO pipeline_requests;
         CREATE INDEX pipeline_requests_episode_index ON pipeline_requests(episode_id, created_at DESC);
+        INSERT INTO pipeline_runs SELECT * FROM migration_014_pipeline_runs;
+        INSERT INTO pipeline_artifacts SELECT * FROM migration_014_pipeline_artifacts;
+        INSERT INTO snack_regeneration_proposals SELECT * FROM migration_014_regeneration_proposals;
+        DROP TABLE migration_014_pipeline_runs;
+        DROP TABLE migration_014_pipeline_artifacts;
+        DROP TABLE migration_014_regeneration_proposals;
       `);
     },
   },

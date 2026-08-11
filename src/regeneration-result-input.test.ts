@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { validateSuccessfulRegenerationResult } from "./regeneration-result-input.ts";
+import { transcriptContainsExactEvidence, validateSuccessfulRegenerationResult } from "./regeneration-result-input.ts";
 
 test("validates one grounded non-destructive Snack proposal", () => {
   const result = validateSuccessfulRegenerationResult({
@@ -15,4 +15,10 @@ test("validates one grounded non-destructive Snack proposal", () => {
     }, rationale: "Responded to the editor's instruction without changing the underlying claim.",
   });
   expect(result.ok).toBe(true);
+});
+
+test("allows diarization markers but not omitted spoken words in exact evidence", () => {
+  const transcript = "dpc (23:34)\nBut I do not have a\n\ndpc (23:37)\nComplete picture of everything there.";
+  expect(transcriptContainsExactEvidence(transcript, "But I do not have a\nComplete picture of everything there.")).toBe(true);
+  expect(transcriptContainsExactEvidence("First spoken words and intervening spoken words before the end.", "First spoken words before the end.")).toBe(false);
 });

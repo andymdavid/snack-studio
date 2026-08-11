@@ -2,7 +2,7 @@ import { db } from "./db.ts";
 import { getCandidate, type SnackCandidate } from "./candidates.ts";
 import { recordAuditEvent } from "./episodes.ts";
 import { getPipelineRequest, getPipelineRun } from "./pipeline-requests.ts";
-import type { SuccessfulRegenerationResult } from "./regeneration-result-input.ts";
+import { transcriptContainsExactEvidence, type SuccessfulRegenerationResult } from "./regeneration-result-input.ts";
 
 export type RegenerationProposal = {
   id: string;
@@ -107,9 +107,8 @@ export function applySuccessfulRegenerationResult(input: { localRunId: string; r
   if (run.autopilotRunId && input.result.runId && run.autopilotRunId !== input.result.runId) throw new Error("regeneration callback Autopilot run mismatch");
   const transcript = db.query("SELECT transcript_text FROM transcript_revisions WHERE id = ?1").get(request.inputTranscriptRevisionId) as { transcript_text: string } | null;
   if (!transcript) throw new Error("regeneration source transcript not found");
-  const normalizedTranscript = transcript.transcript_text.replace(/\s+/g, " ");
   for (const evidence of input.result.evidence) {
-    if (!normalizedTranscript.includes(evidence.excerpt.replace(/\s+/g, " "))) throw new Error(`regeneration evidence ${evidence.evidenceId} is not an exact transcript excerpt`);
+    if (!transcriptContainsExactEvidence(transcript.transcript_text, evidence.excerpt)) throw new Error(`regeneration evidence ${evidence.evidenceId} is not an exact transcript excerpt`);
   }
   const usedIds = new Set(input.result.candidate.claimEvidenceMap.flatMap((mapping) => mapping.evidenceIds));
   const transcriptExcerpt = input.result.evidence.filter((evidence) => usedIds.has(evidence.evidenceId)).map((evidence) => evidence.excerpt).join("\n\n");
