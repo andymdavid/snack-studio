@@ -47,6 +47,7 @@ export type SnackCandidate = {
   revisions: SnackRevision[];
   pipelineRequestId: string | null;
   selectionId: string | null;
+  approvedPosition: number | null;
 };
 
 function stringArray(value: unknown): string[] {
@@ -119,6 +120,7 @@ function mapCandidate(row: Record<string, unknown>): SnackCandidate {
     revisions: [],
     pipelineRequestId: row.pipeline_request_id == null ? null : String(row.pipeline_request_id),
     selectionId: row.selection_id == null ? null : String(row.selection_id),
+    approvedPosition: row.approved_position == null ? null : Number(row.approved_position),
   };
 }
 
@@ -209,11 +211,39 @@ export function updateCandidateDecision(id: string, decision: ReviewDecision, ac
   if (!candidate) return null;
   const now = Date.now();
   db.transaction(() => {
-    db.query("UPDATE snack_candidates SET review_decision = ?1, updated_at = ?2 WHERE id = ?3").run(decision, now, id);
+    const nextPosition = decision === "accepted" && candidate.reviewDecision !== "accepted"
+      ? Number((db.query("SELECT COALESCE(MAX(approved_position), 0) AS value FROM snack_candidates WHERE episode_id = ?1").get(candidate.episodeId) as { value: number }).value) + 1
+      : candidate.approvedPosition;
+    db.query("UPDATE snack_candidates SET review_decision = ?1, approved_position = ?2, updated_at = ?3 WHERE id = ?4")
+      .run(decision, decision === "accepted" ? nextPosition : null, now, id);
+    if (decision !== "accepted" && candidate.approvedPosition !== null) {
+      db.query("UPDATE snack_candidates SET approved_position = approved_position - 1 WHERE episode_id = ?1 AND approved_position > ?2")
+        .run(candidate.episodeId, candidate.approvedPosition);
+    }
     db.query("UPDATE episodes SET updated_at = ?1 WHERE id = ?2").run(now, candidate.episodeId);
     recordAuditEvent({ actorPubkey, action: "candidate.decision.updated", entityType: "episode", entityId: candidate.episodeId, detail: { candidateId: id, decision } });
   })();
   return getCandidate(id);
+}
+
+export function setApprovedCandidateOrder(episodeId: string, candidateIds: string[], actorPubkey: string): SnackCandidate[] {
+  const accepted = listCandidates(episodeId).filter((candidate) => candidate.reviewDecision === "accepted");
+  const uniqueIds = [...new Set(candidateIds)];
+  if (uniqueIds.length !== candidateIds.length) throw new Error("Approved Snack order contains duplicates");
+  if (uniqueIds.length !== accepted.length || uniqueIds.some((id) => !accepted.some((candidate) => candidate.id === id))) {
+    throw new Error("Approved Snack order must contain every accepted Snack exactly once");
+  }
+  const now = Date.now();
+  db.transaction(() => {
+    db.query("UPDATE snack_candidates SET approved_position = NULL WHERE episode_id = ?1").run(episodeId);
+    uniqueIds.forEach((candidateId, index) => {
+      db.query("UPDATE snack_candidates SET approved_position = ?1, updated_at = ?2 WHERE id = ?3 AND episode_id = ?4")
+        .run(index + 1, now, candidateId, episodeId);
+    });
+    db.query("UPDATE episodes SET updated_at = ?1 WHERE id = ?2").run(now, episodeId);
+    recordAuditEvent({ actorPubkey, action: "candidates.approved-order.updated", entityType: "episode", entityId: episodeId, detail: { candidateIds: uniqueIds } });
+  })();
+  return listCandidates(episodeId);
 }
 
 export type CandidateRevisionInput = {

@@ -503,6 +503,30 @@ const migrations: Migration[] = [
       if (!hasColumn(db, "pipeline_runs", "progress_label")) db.exec("ALTER TABLE pipeline_runs ADD COLUMN progress_label TEXT");
     },
   },
+  {
+    id: "012_approved_snack_order",
+    description: "Persist the final order of accepted Snacks across generation runs",
+    up(db) {
+      if (!hasColumn(db, "snack_candidates", "approved_position")) {
+        db.exec("ALTER TABLE snack_candidates ADD COLUMN approved_position INTEGER");
+      }
+      db.exec(`
+        UPDATE snack_candidates AS candidate
+        SET approved_position = (
+          SELECT COUNT(*)
+          FROM snack_candidates AS preceding
+          WHERE preceding.episode_id = candidate.episode_id
+            AND preceding.review_decision = 'accepted'
+            AND (preceding.created_at < candidate.created_at OR (preceding.created_at = candidate.created_at AND preceding.id <= candidate.id))
+        )
+        WHERE candidate.review_decision = 'accepted' AND candidate.approved_position IS NULL;
+
+        CREATE UNIQUE INDEX IF NOT EXISTS snack_candidates_approved_position_unique
+          ON snack_candidates(episode_id, approved_position)
+          WHERE approved_position IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

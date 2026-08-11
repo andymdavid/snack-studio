@@ -13,6 +13,7 @@ function candidate(id: string, requestId: string | null, createdAt: number, revi
     updatedAt: createdAt,
     pipelineRequestId: requestId,
     selectionId: null,
+    approvedPosition: reviewDecision === "accepted" ? 1 : null,
     revisionCount: 1,
     revisions: [],
     revision: {
