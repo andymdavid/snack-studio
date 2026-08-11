@@ -724,6 +724,17 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: "016_thumbnail_job_identity",
+    description: "Keep one publishing thumbnail job per immutable Snack revision",
+    up(db) {
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS thumbnail_jobs_snack_revision_unique
+          ON thumbnail_jobs(snack_revision_id)
+          WHERE snack_revision_id IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

@@ -1,7 +1,8 @@
 import { db } from "./db.ts";
 import { getCandidate, validateApprovedCandidateBatch } from "./candidates.ts";
-import { getEpisode, recordAuditEvent } from "./episodes.ts";
+import { getActiveTranscriptRevision, getEpisode, recordAuditEvent } from "./episodes.ts";
 import type { ThumbnailAssetKind, ThumbnailBriefInput } from "./thumbnail-input.ts";
+import { resolveCanonicalTopic, resolveTranscriptParticipants } from "./publication-metadata.ts";
 
 export type ThumbnailJobStatus = "draft" | "extracting" | "grounding" | "generating" | "in-review" | "approved" | "failed";
 
@@ -98,4 +99,46 @@ export function createThumbnailJob(input: ThumbnailBriefInput & { episodeId: str
     });
   })();
   return getThumbnailJob(id)!;
+}
+
+export function preparePublicationThumbnails(episodeId: string, actorPubkey: string) {
+  const episode = getEpisode(episodeId);
+  if (!episode) throw new Error("Episode not found");
+  if (episode.status !== "approved") throw new Error("Approve the final Snack set before preparing publication");
+  const transcript = getActiveTranscriptRevision(episodeId);
+  if (!transcript) throw new Error("An active transcript is required");
+  const approved = validateApprovedCandidateBatch(episodeId);
+  if (!approved.ready) throw new Error("The approved Snack set is not ready");
+
+  const participants = resolveTranscriptParticipants(transcript.transcriptText);
+  const contributorIds = participants.resolved.map(({ contributorId }) => contributorId);
+  if (!contributorIds.length) throw new Error("No episode contributors could be resolved from the transcript");
+  const now = Date.now();
+  db.transaction(() => {
+    for (const candidateId of approved.candidateIds) {
+      const candidate = getCandidate(candidateId)!;
+      const topic = resolveCanonicalTopic(candidate.revision.primaryTopic);
+      db.query(`INSERT OR IGNORE INTO thumbnail_jobs(
+        id, episode_id, asset_kind, snack_candidate_id, snack_revision_id, transcript_revision_id,
+        status, topic_colour, contributor_ids_json, created_by_pubkey, created_at, updated_at
+      ) VALUES (?1, ?2, 'snack', ?3, ?4, ?5, 'draft', ?6, ?7, ?8, ?9, ?9)`)
+        .run(crypto.randomUUID(), episodeId, candidate.id, candidate.currentRevisionId,
+          transcript.id, topic?.colour || null, JSON.stringify(contributorIds), actorPubkey, now);
+    }
+    recordAuditEvent({
+      actorPubkey,
+      action: "publication.thumbnails.prepared",
+      entityType: "episode",
+      entityId: episodeId,
+      detail: { candidateIds: approved.candidateIds, contributorIds, unresolvedContributors: participants.unresolved },
+    });
+  })();
+
+  const jobs = listThumbnailJobs(episodeId);
+  return {
+    jobs,
+    participants,
+    needsTopicClassification: jobs.filter((job) => job.assetKind === "snack" && !job.topicColour).map((job) => job.snackCandidateId),
+    ready: participants.unresolved.length === 0 && jobs.every((job) => job.assetKind !== "snack" || Boolean(job.topicColour)),
+  };
 }

@@ -85,7 +85,7 @@ import { applySuccessfulPipelineResult } from "./pipeline-results.ts";
 import { applySuccessfulRegenerationResult, listRegenerationProposals, resolveRegenerationProposal } from "./regeneration-proposals.ts";
 import { validateSuccessfulRegenerationResult } from "./regeneration-result-input.ts";
 import { validateThumbnailBrief } from "./thumbnail-input.ts";
-import { createThumbnailJob, listThumbnailJobs } from "./thumbnails.ts";
+import { createThumbnailJob, listThumbnailJobs, preparePublicationThumbnails } from "./thumbnails.ts";
 import { THUMBNAIL_CANDIDATES_PER_ROUND, THUMBNAIL_CONTRIBUTORS, THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
 
 const PUBLIC_DIR = join(import.meta.dir, "..", "public");
@@ -515,6 +515,18 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       return json({ thumbnailJob: createThumbnailJob({ ...brief, episodeId, actorPubkey: session.pubkey }) }, 201);
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  }
+
+  const publicationPreparationMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/publication-preparation$/);
+  if (publicationPreparationMatch && req.method === "POST") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const episodeId = decodeURIComponent(publicationPreparationMatch[1]!);
+    try {
+      return json({ preparation: preparePublicationThumbnails(episodeId, session.pubkey) });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 409);
     }
   }
 
