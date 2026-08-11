@@ -92,6 +92,7 @@ import { validateSuccessfulPublicationMetadataResult } from "./publication-metad
 import { applySuccessfulPublicationMetadataResult } from "./publication-metadata-results.ts";
 import { createContributor, getContributor, listContributors, photoMediaType, publicContributor } from "./contributors.ts";
 import { validateContributorPhoto, validateContributorProfile } from "./contributor-input.ts";
+import { approvePortraitCandidate, applyPortraitResult, createPortraitJob, getPortraitCandidate, listPortraitJobs, markPortraitJobStarted } from "./contributor-portraits.ts";
 
 const PUBLIC_DIR = join(import.meta.dir, "..", "public");
 
@@ -380,6 +381,62 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       return new Response(readFileSync(contributor.referencePhotoPath), { headers: { 'content-type': photoMediaType(contributor.referencePhotoPath), 'cache-control': 'private, max-age=300' } });
     } catch {
       return json({ error: "reference photo not found" }, 404);
+    }
+  }
+
+  const contributorPortraitJobsMatch = pathname.match(/^\/api\/contributors\/([^/]+)\/portrait-jobs$/);
+  if (contributorPortraitJobsMatch && req.method === 'GET') {
+    const session = requireSession(req);
+    if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    return json({ jobs: listPortraitJobs(decodeURIComponent(contributorPortraitJobsMatch[1]!)) });
+  }
+  if (contributorPortraitJobsMatch && req.method === 'POST') {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: 'edit access required' }, 403);
+    try { return json(createPortraitJob(decodeURIComponent(contributorPortraitJobsMatch[1]!), session.pubkey, new URL(req.url).origin), 201); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 400); }
+  }
+
+  const portraitJobStartMatch = pathname.match(/^\/api\/contributor-portrait-jobs\/([^/]+)\/started$/);
+  if (portraitJobStartMatch && req.method === 'POST') {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: 'edit access required' }, 403);
+    const body = await readJson(req);
+    const runId = String(body.autopilotRunId || '');
+    if (!runId) return json({ error: 'autopilotRunId is required' }, 400);
+    markPortraitJobStarted(decodeURIComponent(portraitJobStartMatch[1]!), runId);
+    return json({ ok: true });
+  }
+
+  const portraitCandidateImageMatch = pathname.match(/^\/api\/contributor-portrait-candidates\/([^/]+)\/image$/);
+  if (portraitCandidateImageMatch && req.method === 'GET') {
+    const session = requireSession(req);
+    if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    const candidate = getPortraitCandidate(decodeURIComponent(portraitCandidateImageMatch[1]!));
+    if (!candidate) return json({ error: 'portrait candidate not found' }, 404);
+    const file = Bun.file(String(candidate.storage_path));
+    if (!await file.exists()) return json({ error: 'portrait image not found' }, 404);
+    return new Response(file, { headers: { 'content-type': String(candidate.mime_type), 'cache-control': 'private, max-age=300' } });
+  }
+
+  const portraitCandidateApproveMatch = pathname.match(/^\/api\/contributor-portrait-candidates\/([^/]+)\/approve$/);
+  if (portraitCandidateApproveMatch && req.method === 'POST') {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: 'edit access required' }, 403);
+    try { return json({ contributor: publicContributor(approvePortraitCandidate(decodeURIComponent(portraitCandidateApproveMatch[1]!), session.pubkey)) }); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 400); }
+  }
+
+  const portraitWebhookMatch = pathname.match(/^\/api\/contributor-portrait-webhooks\/([^/]+)$/);
+  if (portraitWebhookMatch && req.method === 'POST') {
+    const token = req.headers.get('x-snack-studio-token') || '';
+    try {
+      applyPortraitResult(decodeURIComponent(portraitWebhookMatch[1]!), token, await readJson(req));
+      return json({ ok: true });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 400);
     }
   }
 

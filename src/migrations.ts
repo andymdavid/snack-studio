@@ -873,6 +873,52 @@ const migrations: Migration[] = [
       );
     },
   },
+  {
+    id: "019_contributor_portrait_workflow",
+    description: "Add contributor portrait generation jobs and reviewable candidates",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS contributor_portrait_jobs (
+          id TEXT PRIMARY KEY,
+          contributor_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'prepared' CHECK(status IN (
+            'prepared', 'running', 'in-review', 'approved', 'failed'
+          )),
+          callback_token_hash TEXT NOT NULL,
+          autopilot_run_id TEXT,
+          failure_summary TEXT,
+          prompt_version TEXT NOT NULL,
+          model_name TEXT,
+          created_by_pubkey TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (contributor_id) REFERENCES contributors(id) ON DELETE CASCADE,
+          FOREIGN KEY (created_by_pubkey) REFERENCES users(pubkey)
+        );
+        CREATE INDEX IF NOT EXISTS contributor_portrait_jobs_contributor_index
+          ON contributor_portrait_jobs(contributor_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS contributor_portrait_candidates (
+          id TEXT PRIMARY KEY,
+          job_id TEXT NOT NULL,
+          candidate_number INTEGER NOT NULL CHECK(candidate_number > 0),
+          status TEXT NOT NULL DEFAULT 'generated' CHECK(status IN ('generated', 'approved', 'rejected')),
+          storage_path TEXT NOT NULL,
+          prompt_text TEXT NOT NULL,
+          model_name TEXT,
+          mime_type TEXT NOT NULL,
+          width INTEGER NOT NULL,
+          height INTEGER NOT NULL,
+          size_bytes INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (job_id) REFERENCES contributor_portrait_jobs(id) ON DELETE CASCADE,
+          UNIQUE(job_id, candidate_number)
+        );
+        CREATE INDEX IF NOT EXISTS contributor_portrait_candidates_job_index
+          ON contributor_portrait_candidates(job_id, candidate_number ASC);
+      `);
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

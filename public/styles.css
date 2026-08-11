@@ -2016,6 +2016,14 @@ div.publicationPreparationBlocker { display: flex; align-items: center; justify-
 .contributorProfileFields textarea { resize: vertical; }
 .contributorPhotoField small { color: var(--text-muted); line-height: 1.35; }
 .contributorProfileActions { display: flex; justify-content: flex-end; gap: 8px; }
+.contributorPortraitWorkflow { display: grid; gap: 18px; border: 1px solid var(--border); border-radius: var(--radius-card); padding: 18px; background: var(--surface-1); }
+.contributorPortraitWorkflow > div:first-child { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.contributorPortraitWorkflow h3, .contributorPortraitWorkflow p { margin: 0; }
+.contributorPortraitWorkflow h3 { margin-block: 4px 6px; }
+.contributorPortraitWorkflow > div:first-child p:last-child { color: var(--text-muted); }
+.contributorPortraitGallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; color: var(--text-muted); }
+.contributorPortraitGallery article { display: grid; gap: 8px; }
+.contributorPortraitGallery img { width: 100%; aspect-ratio: 1; border-radius: var(--radius-card); object-fit: cover; background: var(--surface-2); }
 
 .publicationThumbnailQueue {
   display: grid;
@@ -2052,6 +2060,8 @@ div.publicationPreparationBlocker { display: flex; align-items: center; justify-
   .regenerationComparisonGrid { grid-template-columns: 1fr; }
   .contributorProfileFields { grid-template-columns: 1fr; }
   div.publicationPreparationBlocker { align-items: flex-start; flex-direction: column; }
+  .contributorPortraitWorkflow > div:first-child { flex-direction: column; }
+  .contributorPortraitGallery { grid-template-columns: 1fr; }
 }
 .candidateQueueHeader h2,
 .candidateQueueHeader p {

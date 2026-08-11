@@ -44,6 +44,7 @@ const state = {
   episodeAuditEvents: [],
   publicationPreparation: null,
   contributorFormOpen: false,
+  contributorPortraitJobs: {},
 };
 
 const $ = (id) => document.getElementById(id);
@@ -807,10 +808,7 @@ function renderPublicationPreparation(episode, candidates) {
   }
   const portraitsNeeded = preparation.contributorsNeedingPortraits || [];
   if (portraitsNeeded.length) {
-    const note = document.createElement("p");
-    note.className = "publicationPreparationBlocker";
-    note.textContent = portraitsNeeded.map((item) => `${item.name} portrait ${item.portraitStatus.replaceAll('-', ' ')}`).join(" · ");
-    section.appendChild(note);
+    for (const item of portraitsNeeded) section.appendChild(renderContributorPortraitWorkflow(item));
   }
   const queue = document.createElement("div");
   queue.className = "publicationThumbnailQueue";
@@ -826,6 +824,99 @@ function renderPublicationPreparation(episode, candidates) {
   }
   section.appendChild(queue);
   return section;
+}
+
+function renderContributorPortraitWorkflow(item) {
+  const panel = document.createElement('section');
+  panel.className = 'contributorPortraitWorkflow';
+  const heading = document.createElement('div');
+  const copy = document.createElement('div');
+  const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Contributor portrait';
+  const title = document.createElement('h3'); title.textContent = item.name;
+  const detail = document.createElement('p'); detail.textContent = 'Real photo for identity · Pete’s approved portrait for voxel style.';
+  copy.append(eyebrow, title, detail);
+  const generate = document.createElement('button');
+  generate.type = 'button'; generate.className = 'btn btnPrimary';
+  generate.textContent = ['generating', 'in-review'].includes(item.portraitStatus) ? 'Generate another set' : 'Generate portraits';
+  generate.disabled = !state.me?.access?.edit || item.portraitStatus === 'generating';
+  generate.addEventListener('click', () => generateContributorPortraits(item.contributorId));
+  heading.append(copy, generate); panel.appendChild(heading);
+  const gallery = document.createElement('div'); gallery.className = 'contributorPortraitGallery';
+  panel.appendChild(gallery);
+  queueMicrotask(() => loadContributorPortraitJobs(item.contributorId, gallery));
+  return panel;
+}
+
+async function loadContributorPortraitJobs(contributorId, gallery) {
+  try {
+    const payload = await api(`/api/contributors/${encodeURIComponent(contributorId)}/portrait-jobs`);
+    state.contributorPortraitJobs[contributorId] = payload.jobs || [];
+    const job = payload.jobs?.[0];
+    gallery.replaceChildren();
+    if (!job) { gallery.textContent = 'No portrait candidates generated yet.'; return; }
+    if (job.status === 'failed') { gallery.textContent = job.failureSummary || 'Portrait generation failed.'; return; }
+    if (!job.candidates?.length) { gallery.textContent = job.status === 'running' ? 'Generating portrait candidates…' : 'Portrait generation is prepared…'; return; }
+    for (const candidate of job.candidates) {
+      const card = document.createElement('article');
+      const image = document.createElement('img'); image.alt = `${contributorId} portrait candidate ${candidate.candidateNumber}`;
+      fetch(candidate.previewUrl, { headers: state.token ? { authorization: `Bearer ${state.token}` } : {} })
+        .then((response) => response.ok ? response.blob() : Promise.reject(new Error('Image unavailable')))
+        .then((blob) => { image.src = URL.createObjectURL(blob); });
+      const approve = document.createElement('button'); approve.type = 'button'; approve.className = 'btn btnSecondary';
+      approve.textContent = candidate.status === 'approved' ? 'Approved' : 'Use this portrait';
+      approve.disabled = candidate.status === 'approved' || !state.me?.access?.edit;
+      approve.addEventListener('click', () => approveContributorPortrait(candidate.id));
+      card.append(image, approve); gallery.appendChild(card);
+    }
+  } catch (error) { gallery.textContent = error.message; }
+}
+
+async function generateContributorPortraits(contributorId) {
+  setStudioStatus('Preparing contributor portraits…');
+  try {
+    const prepared = await api(`/api/contributors/${encodeURIComponent(contributorId)}/portrait-jobs`, { method: 'POST', body: '{}' });
+    const authorization = await signNip98Request(prepared.triggerRequest);
+    const response = await fetch(prepared.triggerRequest.url, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization }, body: JSON.stringify(prepared.triggerRequest.body),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `Portrait pipeline failed to start (${response.status})`);
+    const autopilotRunId = String(payload.run?.id || payload.runId || '');
+    await api(`/api/contributor-portrait-jobs/${encodeURIComponent(prepared.job.id)}/started`, { method: 'POST', body: JSON.stringify({ autopilotRunId }) });
+    state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
+    renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+    setStudioStatus('Generating contributor portraits…');
+    pollContributorPortrait(contributorId);
+  } catch (error) { setStudioStatus(error.message); }
+}
+
+async function pollContributorPortrait(contributorId) {
+  const startedAt = Date.now();
+  const check = async () => {
+    if (!state.activeEpisode || Date.now() - startedAt > 20 * 60 * 1000) return;
+    try {
+      const payload = await api(`/api/contributors/${encodeURIComponent(contributorId)}/portrait-jobs`);
+      const job = payload.jobs?.[0];
+      if (job && ['in-review', 'approved', 'failed'].includes(job.status)) {
+        state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
+        renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+        setStudioStatus(job.status === 'in-review' ? 'Contributor portraits ready to review' : job.status === 'failed' ? (job.failureSummary || 'Portrait generation failed') : 'Contributor portrait approved');
+        return;
+      }
+    } catch {}
+    window.setTimeout(check, 5000);
+  };
+  window.setTimeout(check, 5000);
+}
+
+async function approveContributorPortrait(candidateId) {
+  setStudioStatus('Approving contributor portrait…');
+  try {
+    await api(`/api/contributor-portrait-candidates/${encodeURIComponent(candidateId)}/approve`, { method: 'POST', body: '{}' });
+    state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
+    renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+    setStudioStatus('Contributor portrait approved');
+  } catch (error) { setStudioStatus(error.message); }
 }
 
 function renderContributorForm(speakerLabel) {
