@@ -23,13 +23,15 @@ export function buildCandidateGenerations(
   const groups = new Map<string, SnackCandidate[]>();
 
   for (const candidate of candidates) {
-    const key = candidate.pipelineRequestId || "fixture";
+    const key = candidate.pipelineRequestId
+      || candidate.revision.pipelineRequestId
+      || (candidate.revision.origin === "fixture" ? "fixture" : "legacy");
     groups.set(key, [...(groups.get(key) || []), candidate]);
   }
 
   return [...groups.entries()]
     .map(([id, generationCandidates]) => {
-      const request = id === "fixture" ? null : requestsById.get(id) || null;
+      const request = ["fixture", "legacy"].includes(id) ? null : requestsById.get(id) || null;
       const newestRun = request?.runs[0] || null;
       return {
         id,

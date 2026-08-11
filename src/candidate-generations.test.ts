@@ -64,4 +64,12 @@ describe("buildCandidateGenerations", () => {
     const generations = buildCandidateGenerations([candidate("fixture-1", null, 50)], []);
     expect(generations[0]).toMatchObject({ id: "fixture", pipelineRequestId: null, sequence: 1, candidateCount: 1 });
   });
+
+  test("recovers pipeline provenance from the revision for historical candidates", () => {
+    const historical = candidate("historical-1", null, 110);
+    historical.revision.origin = "pipeline";
+    historical.revision.pipelineRequestId = "request-1";
+    const generations = buildCandidateGenerations([historical], [request("request-1", 100)]);
+    expect(generations[0]).toMatchObject({ id: "request-1", pipelineRequestId: "request-1", sequence: 1 });
+  });
 });

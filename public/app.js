@@ -76,6 +76,41 @@ function hasCandidateGeneration(id) {
   return id === "approved" || state.candidateGenerations.some((generation) => generation.id === id);
 }
 
+function candidateGenerationId(candidate) {
+  const provenanceId = candidate.pipelineRequestId || candidate.revision?.pipelineRequestId || candidate.revision?.pipelineRunId;
+  if (provenanceId) return provenanceId;
+  return candidate.revision?.origin === "fixture" ? "fixture" : "legacy";
+}
+
+function candidateGenerations(candidates, suppliedGenerations) {
+  if (
+    Array.isArray(suppliedGenerations)
+    && suppliedGenerations.length
+    && candidates.every((candidate) => suppliedGenerations.some((generation) => generation.id === candidateGenerationId(candidate)))
+  ) return suppliedGenerations;
+  const groups = new Map();
+  for (const candidate of candidates) {
+    const id = candidateGenerationId(candidate);
+    const group = groups.get(id) || [];
+    group.push(candidate);
+    groups.set(id, group);
+  }
+  return [...groups.entries()]
+    .map(([id, items]) => ({
+      id,
+      pipelineRequestId: id === "legacy" ? null : id,
+      sequence: 0,
+      createdAt: Math.min(...items.map((candidate) => Number(candidate.createdAt || 0))),
+      candidateCount: items.length,
+      acceptedCount: items.filter((candidate) => candidate.reviewDecision === "accepted").length,
+      promptSuiteVersion: items[0]?.revision?.promptSuiteVersion || null,
+      pipelineVersion: items[0]?.revision?.pipelineVersion || null,
+      pipelineRunId: items[0]?.revision?.pipelineRunId || null,
+    }))
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .map((generation, index) => ({ ...generation, sequence: index + 1 }));
+}
+
 function setStatus(text) {
   $("status").textContent = text;
   if ($("studioStatus")) $("studioStatus").textContent = text;
@@ -411,7 +446,7 @@ async function loadEpisode(id) {
     state.activeTranscript = payload.transcript || null;
     state.transcriptRevisions = payload.transcriptRevisions || [];
     state.candidates = candidatePayload.candidates || [];
-    state.candidateGenerations = candidatePayload.generations || [];
+    state.candidateGenerations = candidateGenerations(state.candidates, candidatePayload.generations);
     state.approvedBatch = candidatePayload.approvedBatch || { ready: false, checks: [], candidateIds: [] };
     if (!hasCandidateGeneration(state.activeGenerationId)) {
       state.activeGenerationId = state.candidateGenerations.at(-1)?.id || "";
@@ -947,7 +982,7 @@ function startEpisodePipelinePolling() {
       state.pipelineRequests = pipelinePayload.pipelineRequests || [];
       state.pipelineTimeoutMs = Number(pipelinePayload.timeoutMs || 0);
       state.candidates = candidatePayload.candidates || [];
-      state.candidateGenerations = candidatePayload.generations || [];
+      state.candidateGenerations = candidateGenerations(state.candidates, candidatePayload.generations);
       state.approvedBatch = candidatePayload.approvedBatch || { ready: false, checks: [], candidateIds: [] };
       if (!hasCandidateGeneration(state.activeGenerationId)) {
         state.activeGenerationId = state.candidateGenerations.at(-1)?.id || "";
@@ -1198,7 +1233,7 @@ function renderCandidateSection(episode, candidates) {
   }
   const visibleCandidates = activeGenerationId === "approved"
     ? candidates.filter((candidate) => candidate.reviewDecision === "accepted").sort((a, b) => (a.approvedPosition || 0) - (b.approvedPosition || 0))
-    : candidates.filter((candidate) => (candidate.pipelineRequestId || "fixture") === activeGenerationId);
+    : candidates.filter((candidate) => candidateGenerationId(candidate) === activeGenerationId);
   for (const candidate of visibleCandidates) {
     const button = document.createElement("button");
     button.type = "button";
@@ -1397,7 +1432,7 @@ async function refreshCandidates() {
   ]);
   state.activeEpisode = episodePayload.episode;
   state.candidates = payload.candidates || [];
-  state.candidateGenerations = payload.generations || [];
+  state.candidateGenerations = candidateGenerations(state.candidates, payload.generations);
   state.approvedBatch = payload.approvedBatch || { ready: false, checks: [], candidateIds: [] };
   if (!hasCandidateGeneration(state.activeGenerationId)) {
     state.activeGenerationId = state.candidateGenerations.at(-1)?.id || "";
