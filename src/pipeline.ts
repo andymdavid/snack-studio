@@ -55,7 +55,7 @@ export type EpisodePipelineTriggerRequest = {
       requestId: string;
       attemptId: string;
       episodeId: string;
-      operation: "transcript-to-snacks" | "transcript-normalization";
+      operation: "transcript-to-snacks" | "transcript-normalization" | "snack-regeneration";
       userNpub: string;
       inputRevisionId: string;
       pipelineVersion: string | null;

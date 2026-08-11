@@ -560,6 +560,61 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: "014_targeted_pipeline_requests",
+    description: "Allow pipeline requests to target an immutable Snack revision",
+    up(db) {
+      db.exec(`
+        PRAGMA defer_foreign_keys = ON;
+        CREATE TABLE pipeline_requests_new (
+          id TEXT PRIMARY KEY,
+          episode_id TEXT NOT NULL,
+          operation TEXT NOT NULL CHECK(operation IN ('transcript-to-snacks', 'transcript-normalization', 'snack-regeneration')),
+          status TEXT NOT NULL DEFAULT 'created' CHECK(status IN (
+            'created', 'awaiting-authorization', 'queued', 'running', 'applying-result',
+            'completed', 'failed', 'timed-out', 'needs-review', 'cancelled'
+          )),
+          actor_pubkey TEXT NOT NULL,
+          input_transcript_revision_id TEXT NOT NULL,
+          input_transcript_sha256 TEXT NOT NULL,
+          autopilot_target_id TEXT NOT NULL,
+          pipeline_name TEXT NOT NULL,
+          pipeline_version TEXT,
+          prompt_suite_version TEXT NOT NULL,
+          result_schema_version TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL UNIQUE,
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          result_applied_at INTEGER,
+          failure_summary TEXT,
+          target_candidate_id TEXT,
+          base_candidate_revision_id TEXT,
+          regeneration_instruction TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (actor_pubkey) REFERENCES users(pubkey),
+          FOREIGN KEY (input_transcript_revision_id) REFERENCES transcript_revisions(id),
+          FOREIGN KEY (autopilot_target_id) REFERENCES autopilot_targets(id),
+          FOREIGN KEY (target_candidate_id) REFERENCES snack_candidates(id) ON DELETE CASCADE,
+          FOREIGN KEY (base_candidate_revision_id) REFERENCES snack_revisions(id)
+        );
+        INSERT INTO pipeline_requests_new(
+          id, episode_id, operation, status, actor_pubkey, input_transcript_revision_id,
+          input_transcript_sha256, autopilot_target_id, pipeline_name, pipeline_version,
+          prompt_suite_version, result_schema_version, idempotency_key, attempt_count,
+          result_applied_at, failure_summary, created_at, updated_at
+        ) SELECT
+          id, episode_id, operation, status, actor_pubkey, input_transcript_revision_id,
+          input_transcript_sha256, autopilot_target_id, pipeline_name, pipeline_version,
+          prompt_suite_version, result_schema_version, idempotency_key, attempt_count,
+          result_applied_at, failure_summary, created_at, updated_at
+        FROM pipeline_requests;
+        DROP TABLE pipeline_requests;
+        ALTER TABLE pipeline_requests_new RENAME TO pipeline_requests;
+        CREATE INDEX pipeline_requests_episode_index ON pipeline_requests(episode_id, created_at DESC);
+      `);
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

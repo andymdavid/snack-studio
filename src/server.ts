@@ -561,6 +561,8 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       promptSuiteVersion: typeof body.promptSuiteVersion === "string" ? body.promptSuiteVersion.trim() || undefined : undefined,
       resultSchemaVersion: typeof body.resultSchemaVersion === "string" ? body.resultSchemaVersion.trim() || undefined : undefined,
       idempotencyKey: typeof body.idempotencyKey === "string" ? body.idempotencyKey.trim() || undefined : undefined,
+      targetCandidateId: typeof body.targetCandidateId === "string" ? body.targetCandidateId.trim() || null : null,
+      regenerationInstruction: typeof body.regenerationInstruction === "string" ? body.regenerationInstruction.trim() || null : null,
     });
     recordAuditEvent({
       actorPubkey: session.pubkey,

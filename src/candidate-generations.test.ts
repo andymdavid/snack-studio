@@ -36,6 +36,7 @@ function request(id: string, createdAt: number): PipelineRequest & { runs: Pipel
     autopilotTargetId: "target", pipelineName: "pipeline", pipelineVersion: "3", promptSuiteVersion: "v3",
     resultSchemaVersion: "1", idempotencyKey: id, attemptCount: 1, resultAppliedAt: createdAt + 10,
     failureSummary: null, createdAt, updatedAt: createdAt + 10,
+    targetCandidateId: null, baseCandidateRevisionId: null, regenerationInstruction: null,
     runs: [{
       id: `${id}-run`, requestId: id, attemptNumber: 1, status: "complete", autopilotRunId: `autopilot-${id}`,
       triggerPayload: null, failureCategory: null, failureSummary: null, progressPercent: 100,

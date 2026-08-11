@@ -3,7 +3,7 @@ import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex } from "@noble/hashes/utils";
 import { db as appDb } from "./db.ts";
 
-export const PIPELINE_OPERATIONS = ["transcript-to-snacks", "transcript-normalization"] as const;
+export const PIPELINE_OPERATIONS = ["transcript-to-snacks", "transcript-normalization", "snack-regeneration"] as const;
 export type PipelineOperation = typeof PIPELINE_OPERATIONS[number];
 
 export const PIPELINE_REQUEST_STATUSES = [
@@ -35,6 +35,9 @@ export type PipelineRequest = {
   attemptCount: number;
   resultAppliedAt: number | null;
   failureSummary: string | null;
+  targetCandidateId: string | null;
+  baseCandidateRevisionId: string | null;
+  regenerationInstruction: string | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -85,6 +88,9 @@ function mapRequest(row: Record<string, unknown>): PipelineRequest {
     attemptCount: Number(row.attempt_count),
     resultAppliedAt: row.result_applied_at == null ? null : Number(row.result_applied_at),
     failureSummary: row.failure_summary == null ? null : String(row.failure_summary),
+    targetCandidateId: row.target_candidate_id == null ? null : String(row.target_candidate_id),
+    baseCandidateRevisionId: row.base_candidate_revision_id == null ? null : String(row.base_candidate_revision_id),
+    regenerationInstruction: row.regeneration_instruction == null ? null : String(row.regeneration_instruction),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
@@ -125,11 +131,23 @@ export function createPipelineRequest(input: {
   promptSuiteVersion?: string;
   resultSchemaVersion?: string;
   idempotencyKey?: string;
+  targetCandidateId?: string | null;
+  regenerationInstruction?: string | null;
 }, database: Database = appDb): PipelineRequest {
   const transcript = database.query("SELECT episode_id, sha256 FROM transcript_revisions WHERE id = ?1").get(input.transcriptRevisionId) as
     | { episode_id: string; sha256: string }
     | null;
   if (!transcript || transcript.episode_id !== input.episodeId) throw new Error("active transcript revision not found for episode");
+  let baseCandidateRevisionId: string | null = null;
+  if (input.operation === "snack-regeneration") {
+    const candidate = database.query("SELECT episode_id, current_revision_id FROM snack_candidates WHERE id = ?1").get(input.targetCandidateId || "") as
+      | { episode_id: string; current_revision_id: string }
+      | null;
+    if (!candidate || candidate.episode_id !== input.episodeId) throw new Error("regeneration candidate does not belong to this episode");
+    baseCandidateRevisionId = candidate.current_revision_id;
+  } else if (input.targetCandidateId) {
+    throw new Error("targetCandidateId is only supported for Snack regeneration");
+  }
   if (input.idempotencyKey) {
     const existingRow = database.query("SELECT * FROM pipeline_requests WHERE idempotency_key = ?1").get(input.idempotencyKey) as Record<string, unknown> | null;
     if (existingRow) {
@@ -138,6 +156,7 @@ export function createPipelineRequest(input: {
         existing.episodeId !== input.episodeId
         || existing.operation !== (input.operation || "transcript-to-snacks")
         || existing.inputTranscriptRevisionId !== input.transcriptRevisionId
+        || existing.targetCandidateId !== (input.targetCandidateId || null)
       ) throw new Error("idempotency key is already used by another pipeline request");
       return existing;
     }
@@ -148,8 +167,9 @@ export function createPipelineRequest(input: {
     INSERT INTO pipeline_requests(
       id, episode_id, operation, status, actor_pubkey, input_transcript_revision_id,
       input_transcript_sha256, autopilot_target_id, pipeline_name, pipeline_version,
-      prompt_suite_version, result_schema_version, idempotency_key, created_at, updated_at
-    ) VALUES (?1, ?2, ?3, 'created', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)
+      prompt_suite_version, result_schema_version, idempotency_key, target_candidate_id,
+      base_candidate_revision_id, regeneration_instruction, created_at, updated_at
+    ) VALUES (?1, ?2, ?3, 'created', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)
   `).run(
     id,
     input.episodeId,
@@ -163,6 +183,9 @@ export function createPipelineRequest(input: {
     input.promptSuiteVersion || "v3-intelligence-snacks-natural-prose",
     input.resultSchemaVersion || "1",
     input.idempotencyKey || crypto.randomUUID(),
+    input.targetCandidateId || null,
+    baseCandidateRevisionId,
+    input.regenerationInstruction?.trim().slice(0, 1000) || null,
     now,
   );
   return getPipelineRequest(id, database)!;
@@ -411,6 +434,14 @@ export function getPipelineRequestContext(requestId: string, database: Database 
     WHERE pr.id = ?1
   `).get(requestId) as Record<string, unknown> | null;
   if (!row) return null;
+  const targetRow = row.target_candidate_id == null ? null : database.query(`
+    SELECT c.id, c.current_revision_id, c.review_decision, r.revision_number, r.public_title,
+      r.editorial_title, r.standfirst, r.body_markdown, r.structure_exception,
+      r.claim_evidence_json, r.transcript_excerpt, r.validation_warnings_json
+    FROM snack_candidates c
+    JOIN snack_revisions r ON r.id = ?1
+    WHERE c.id = ?2 AND c.episode_id = ?3
+  `).get(String(row.base_candidate_revision_id), String(row.target_candidate_id), String(row.episode_id)) as Record<string, unknown> | null;
   return {
     request: mapRequest(row),
     episode: {
@@ -433,6 +464,21 @@ export function getPipelineRequestContext(requestId: string, database: Database 
       createdAt: Number(row.transcript_created_at),
     },
     contributors: [],
+    targetCandidate: targetRow ? {
+      id: String(targetRow.id),
+      baseRevisionId: String(targetRow.current_revision_id),
+      revisionNumber: Number(targetRow.revision_number),
+      reviewDecision: String(targetRow.review_decision),
+      publicTitle: String(targetRow.public_title),
+      editorialTitle: targetRow.editorial_title == null ? null : String(targetRow.editorial_title),
+      standfirst: String(targetRow.standfirst),
+      bodyMarkdown: String(targetRow.body_markdown),
+      structureException: targetRow.structure_exception == null ? null : String(targetRow.structure_exception),
+      claimEvidenceMap: JSON.parse(String(targetRow.claim_evidence_json || "[]")),
+      transcriptExcerpt: targetRow.transcript_excerpt == null ? null : String(targetRow.transcript_excerpt),
+      validationWarnings: JSON.parse(String(targetRow.validation_warnings_json || "[]")),
+      instruction: row.regeneration_instruction == null ? null : String(row.regeneration_instruction),
+    } : null,
   };
 }
 

@@ -33,12 +33,21 @@ function testDatabase(): Database {
       id TEXT PRIMARY KEY, episode_id TEXT NOT NULL, source_id TEXT NOT NULL, revision_number INTEGER NOT NULL,
       transcript_text TEXT NOT NULL, sha256 TEXT NOT NULL, change_note TEXT, created_at INTEGER NOT NULL
     );
+    CREATE TABLE snack_candidates(
+      id TEXT PRIMARY KEY, episode_id TEXT NOT NULL, current_revision_id TEXT NOT NULL, review_decision TEXT NOT NULL
+    );
+    CREATE TABLE snack_revisions(
+      id TEXT PRIMARY KEY, candidate_id TEXT NOT NULL, revision_number INTEGER NOT NULL, public_title TEXT NOT NULL,
+      editorial_title TEXT, standfirst TEXT NOT NULL, body_markdown TEXT NOT NULL, structure_exception TEXT,
+      claim_evidence_json TEXT NOT NULL DEFAULT '[]', transcript_excerpt TEXT, validation_warnings_json TEXT NOT NULL DEFAULT '[]'
+    );
     CREATE TABLE pipeline_requests (
       id TEXT PRIMARY KEY, episode_id TEXT NOT NULL, operation TEXT NOT NULL, status TEXT NOT NULL,
       actor_pubkey TEXT NOT NULL, input_transcript_revision_id TEXT NOT NULL, input_transcript_sha256 TEXT NOT NULL,
       autopilot_target_id TEXT NOT NULL, pipeline_name TEXT NOT NULL, pipeline_version TEXT,
       prompt_suite_version TEXT NOT NULL, result_schema_version TEXT NOT NULL, idempotency_key TEXT NOT NULL UNIQUE,
       attempt_count INTEGER NOT NULL DEFAULT 0, result_applied_at INTEGER, failure_summary TEXT,
+      target_candidate_id TEXT, base_candidate_revision_id TEXT, regeneration_instruction TEXT,
       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     );
     CREATE TABLE pipeline_runs (
@@ -81,6 +90,24 @@ describe("episode pipeline lifecycle", () => {
       requestId: request.id,
       transcriptRevisionId: "revision-1",
       transcriptText: "The immutable transcript",
+    });
+  });
+
+  test("pins targeted regeneration to the current Snack revision", () => {
+    const database = testDatabase();
+    database.query("INSERT INTO snack_candidates VALUES ('candidate-1', 'episode-64', 'snack-revision-2', 'accepted')").run();
+    database.query("INSERT INTO snack_revisions VALUES ('snack-revision-2', 'candidate-1', 2, 'Public title', 'Editorial title', 'Standfirst', 'Paragraph one', NULL, '[{\"claim\":\"Claim\",\"evidenceIds\":[\"evidence-1\"]}]', 'Exact evidence', '[]')").run();
+    const request = createPipelineRequest({
+      episodeId: "episode-64", operation: "snack-regeneration", actorPubkey: "editor",
+      transcriptRevisionId: "revision-1", autopilotTargetId: "rick",
+      pipelineName: "snack-studio-regenerate-snack", targetCandidateId: "candidate-1",
+      regenerationInstruction: "Make the title more concrete",
+    }, database);
+    const context = getPipelineRequestContext(request.id, database);
+    expect(request).toMatchObject({ targetCandidateId: "candidate-1", baseCandidateRevisionId: "snack-revision-2" });
+    expect(context?.targetCandidate).toMatchObject({
+      id: "candidate-1", baseRevisionId: "snack-revision-2", publicTitle: "Public title",
+      instruction: "Make the title more concrete",
     });
   });
 
