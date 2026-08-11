@@ -45,6 +45,7 @@ const state = {
   publicationPreparation: null,
   contributorFormOpen: false,
   contributorPortraitJobs: {},
+  thumbnailPollTimers: {},
 };
 
 const $ = (id) => document.getElementById(id);
@@ -830,9 +831,34 @@ function renderPublicationPreparation(episode, candidates) {
       status.textContent = job.status === 'in-review' ? 'Ready to review' : job.status === 'approved' ? 'Approved' : ['extracting','grounding','generating'].includes(job.status) ? 'Generating…' : job.topicColour ? 'Ready' : topicsRunning ? 'Running' : 'Needs metadata';
     }
     row.append(identity, status); queue.appendChild(row);
+    if (['extracting','grounding','generating'].includes(job.status)) startThumbnailStatusPolling(job.id);
   }
   section.appendChild(queue);
   return section;
+}
+
+function startThumbnailStatusPolling(jobId) {
+  if (state.thumbnailPollTimers[jobId]) return;
+  const poll = async () => {
+    if (!state.activeEpisode || state.episodeStage !== 'publication') {
+      clearInterval(state.thumbnailPollTimers[jobId]);
+      delete state.thumbnailPollTimers[jobId];
+      return;
+    }
+    try {
+      const payload = await api(`/api/thumbnail-jobs/${encodeURIComponent(jobId)}`);
+      if (['extracting','grounding','generating'].includes(payload.job.status)) return;
+      clearInterval(state.thumbnailPollTimers[jobId]);
+      delete state.thumbnailPollTimers[jobId];
+      state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
+      renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+      setStudioStatus(payload.job.status === 'failed' ? `Thumbnail failed: ${payload.job.failureSummary || 'Generation did not complete'}` : 'Thumbnail ready to review');
+    } catch {
+      // A transient request failure should not stop status updates.
+    }
+  };
+  state.thumbnailPollTimers[jobId] = setInterval(poll, 4000);
+  void poll();
 }
 
 function setButtonBusy(button, label) {

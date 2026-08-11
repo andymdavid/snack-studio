@@ -201,6 +201,13 @@ export function approveThumbnailCandidate(candidateId: string, actorPubkey: stri
 }
 
 export function listThumbnailJobs(episodeId: string): ThumbnailJob[] {
+  // Pipeline-level failures can occur before the definition reaches its webhook.
+  // Never leave those jobs presenting as active forever.
+  const staleBefore = Date.now() - 30 * 60 * 1000;
+  db.query(`UPDATE thumbnail_jobs
+    SET status='failed', failure_summary='Thumbnail generation stopped without returning a result. Retry the thumbnail.', updated_at=?1
+    WHERE episode_id=?2 AND status IN ('extracting','grounding','generating') AND updated_at < ?3`)
+    .run(Date.now(), episodeId, staleBefore);
   return (db.query("SELECT * FROM thumbnail_jobs WHERE episode_id = ?1 ORDER BY created_at DESC")
     .all(episodeId) as Record<string, unknown>[]).map(mapThumbnailJob);
 }
