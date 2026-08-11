@@ -35,6 +35,7 @@ import { clearPendingImport, exportSnapshot, getDbStatus, snapshotPath, stageSna
 import { validateEpisodeInput } from "./episode-input.ts";
 import { validateCandidateRevision, validateReviewDecision } from "./candidate-input.ts";
 import { activateCandidateRevision, createCandidateRevision, generateFixtureCandidates, getCandidate, listCandidates, updateCandidateDecision } from "./candidates.ts";
+import { buildCandidateGenerations } from "./candidate-generations.ts";
 import { createFixtureRelationshipSuggestions, createRelationship, deleteRelationship, getCuration, RELATIONSHIP_TYPES, setNewsletterItems, updateRelationshipState } from "./curation.ts";
 import { normalizeTranscriptText, validateEpisodeMetadata, validateTranscriptUpload } from "./transcript-input.ts";
 import {
@@ -469,7 +470,11 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     if (!hasAccess(session.pubkey, "read")) return json({ error: "read access required" }, 403);
     const episodeId = decodeURIComponent(episodeCandidatesMatch[1]!);
     if (!getEpisode(episodeId)) return json({ error: "episode not found" }, 404);
-    return json({ candidates: listCandidates(episodeId) });
+    const candidates = listCandidates(episodeId);
+    return json({
+      candidates,
+      generations: buildCandidateGenerations(candidates, listEpisodePipelineRequests(episodeId)),
+    });
   }
 
   const fixtureCandidatesMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/fixture-candidates$/);
