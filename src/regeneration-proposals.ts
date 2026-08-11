@@ -116,6 +116,12 @@ export function applySuccessfulRegenerationResult(input: { localRunId: string; r
   const now = Date.now();
   let proposal!: RegenerationProposal;
   db.transaction(() => {
+    db.query(`INSERT INTO pipeline_artifacts(id, request_id, run_id, artifact_type, schema_version, content_json, created_at)
+      VALUES (?1, ?2, ?3, 'evidence', ?4, ?5, ?6)`)
+      .run(crypto.randomUUID(), request.id, run.id, input.result.resultSchemaVersion, JSON.stringify({ evidence: input.result.evidence }), now);
+    db.query(`INSERT INTO pipeline_artifacts(id, request_id, run_id, artifact_type, schema_version, content_json, created_at)
+      VALUES (?1, ?2, ?3, 'regeneration-proposal', ?4, ?5, ?6)`)
+      .run(crypto.randomUUID(), request.id, run.id, input.result.resultSchemaVersion, JSON.stringify({ candidate: input.result.candidate, rationale: input.result.rationale }), now);
     proposal = createRegenerationProposal({
       candidateId: input.result.candidateId, baseRevisionId: input.result.baseRevisionId,
       pipelineRequestId: request.id, instruction: request.regenerationInstruction,

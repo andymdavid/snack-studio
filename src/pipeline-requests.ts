@@ -437,11 +437,25 @@ export function getPipelineRequestContext(requestId: string, database: Database 
   const targetRow = row.target_candidate_id == null ? null : database.query(`
     SELECT c.id, c.current_revision_id, c.review_decision, r.revision_number, r.public_title,
       r.editorial_title, r.standfirst, r.body_markdown, r.structure_exception,
-      r.claim_evidence_json, r.transcript_excerpt, r.validation_warnings_json
+      r.claim_evidence_json, r.transcript_excerpt, r.validation_warnings_json, r.pipeline_request_id
     FROM snack_candidates c
     JOIN snack_revisions r ON r.id = ?1
     WHERE c.id = ?2 AND c.episode_id = ?3
   `).get(String(row.base_candidate_revision_id), String(row.target_candidate_id), String(row.episode_id)) as Record<string, unknown> | null;
+  const claimEvidenceMap = targetRow ? JSON.parse(String(targetRow.claim_evidence_json || "[]")) as Array<{ evidenceIds?: string[] }> : [];
+  const originalEvidenceIds = new Set(claimEvidenceMap.flatMap((mapping) => Array.isArray(mapping.evidenceIds) ? mapping.evidenceIds.map(String) : []));
+  const evidenceArtifact = targetRow?.pipeline_request_id == null ? null : database.query(`
+    SELECT content_json FROM pipeline_artifacts
+    WHERE request_id = ?1 AND artifact_type = 'evidence'
+    ORDER BY created_at DESC LIMIT 1
+  `).get(String(targetRow.pipeline_request_id)) as { content_json: string } | null;
+  let verifiedEvidence: unknown[] = [];
+  try {
+    const content = evidenceArtifact ? JSON.parse(evidenceArtifact.content_json) as Record<string, unknown> : {};
+    verifiedEvidence = Array.isArray(content.evidence)
+      ? content.evidence.filter((item) => item && typeof item === "object" && originalEvidenceIds.has(String((item as Record<string, unknown>).evidenceId || "")))
+      : [];
+  } catch {}
   return {
     request: mapRequest(row),
     episode: {
@@ -474,7 +488,8 @@ export function getPipelineRequestContext(requestId: string, database: Database 
       standfirst: String(targetRow.standfirst),
       bodyMarkdown: String(targetRow.body_markdown),
       structureException: targetRow.structure_exception == null ? null : String(targetRow.structure_exception),
-      claimEvidenceMap: JSON.parse(String(targetRow.claim_evidence_json || "[]")),
+      claimEvidenceMap,
+      verifiedEvidence,
       transcriptExcerpt: targetRow.transcript_excerpt == null ? null : String(targetRow.transcript_excerpt),
       validationWarnings: JSON.parse(String(targetRow.validation_warnings_json || "[]")),
       instruction: row.regeneration_instruction == null ? null : String(row.regeneration_instruction),

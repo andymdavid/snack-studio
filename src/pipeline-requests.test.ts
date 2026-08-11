@@ -39,7 +39,7 @@ function testDatabase(): Database {
     CREATE TABLE snack_revisions(
       id TEXT PRIMARY KEY, candidate_id TEXT NOT NULL, revision_number INTEGER NOT NULL, public_title TEXT NOT NULL,
       editorial_title TEXT, standfirst TEXT NOT NULL, body_markdown TEXT NOT NULL, structure_exception TEXT,
-      claim_evidence_json TEXT NOT NULL DEFAULT '[]', transcript_excerpt TEXT, validation_warnings_json TEXT NOT NULL DEFAULT '[]'
+      claim_evidence_json TEXT NOT NULL DEFAULT '[]', transcript_excerpt TEXT, validation_warnings_json TEXT NOT NULL DEFAULT '[]', pipeline_request_id TEXT
     );
     CREATE TABLE pipeline_requests (
       id TEXT PRIMARY KEY, episode_id TEXT NOT NULL, operation TEXT NOT NULL, status TEXT NOT NULL,
@@ -58,6 +58,7 @@ function testDatabase(): Database {
       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
       UNIQUE(request_id, attempt_number)
     );
+    CREATE TABLE pipeline_artifacts(id TEXT PRIMARY KEY, request_id TEXT NOT NULL, artifact_type TEXT NOT NULL, content_json TEXT NOT NULL, created_at INTEGER NOT NULL);
   `);
   database.query("INSERT INTO users(pubkey) VALUES ('editor')").run();
   database.query("INSERT INTO autopilot_targets(id) VALUES ('rick')").run();
@@ -96,7 +97,7 @@ describe("episode pipeline lifecycle", () => {
   test("pins targeted regeneration to the current Snack revision", () => {
     const database = testDatabase();
     database.query("INSERT INTO snack_candidates VALUES ('candidate-1', 'episode-64', 'snack-revision-2', 'accepted')").run();
-    database.query("INSERT INTO snack_revisions VALUES ('snack-revision-2', 'candidate-1', 2, 'Public title', 'Editorial title', 'Standfirst', 'Paragraph one', NULL, '[{\"claim\":\"Claim\",\"evidenceIds\":[\"evidence-1\"]}]', 'Exact evidence', '[]')").run();
+    database.query("INSERT INTO snack_revisions VALUES ('snack-revision-2', 'candidate-1', 2, 'Public title', 'Editorial title', 'Standfirst', 'Paragraph one', NULL, '[{\"claim\":\"Claim\",\"evidenceIds\":[\"evidence-1\"]}]', 'Exact evidence', '[]', NULL)").run();
     const request = createPipelineRequest({
       episodeId: "episode-64", operation: "snack-regeneration", actorPubkey: "editor",
       transcriptRevisionId: "revision-1", autopilotTargetId: "rick",
