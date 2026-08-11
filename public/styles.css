@@ -1900,13 +1900,31 @@ textarea {
   background: var(--surface-2);
 }
 .candidateQueueHeader {
-  display: grid;
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
   gap: 3px;
   margin: -8px -8px 6px;
   padding: 14px 18px;
   border-bottom: 1px solid var(--border);
   background: var(--surface-1);
 }
+.candidateGenerationControls {
+  display: grid;
+  gap: 7px;
+  justify-items: stretch;
+}
+.candidateGenerationControls select {
+  min-width: 150px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  padding: 7px 9px;
+  font: inherit;
+  font-size: var(--text-xs);
+}
+.candidateGenerationControls .btn { padding-block: 7px; }
 .candidateQueueHeader h2,
 .candidateQueueHeader p {
   margin: 0;

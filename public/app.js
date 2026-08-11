@@ -31,6 +31,8 @@ const state = {
   activeTranscript: null,
   transcriptRevisions: [],
   candidates: [],
+  candidateGenerations: [],
+  activeGenerationId: "",
   activeCandidateId: "",
   curation: { newsletterItems: [], relationships: [], validation: { ready: false, checks: [], counts: {} } },
   pipelineRequests: [],
@@ -404,6 +406,11 @@ async function loadEpisode(id) {
     state.activeTranscript = payload.transcript || null;
     state.transcriptRevisions = payload.transcriptRevisions || [];
     state.candidates = candidatePayload.candidates || [];
+    state.candidateGenerations = candidatePayload.generations || [];
+    if (!state.candidateGenerations.some((generation) => generation.id === state.activeGenerationId)) {
+      state.activeGenerationId = state.candidateGenerations.at(-1)?.id || "";
+      state.activeCandidateId = "";
+    }
     state.curation = curationPayload;
     state.pipelineRequests = pipelinePayload.pipelineRequests || [];
     state.pipelineTimeoutMs = Number(pipelinePayload.timeoutMs || 0);
@@ -894,6 +901,8 @@ async function retryPipelineRequest(requestId) {
 
 async function authorizePreparedEpisodeRun(prepared) {
   state.pipelineRequests = [prepared.pipelineRequest, ...state.pipelineRequests.filter((request) => request.id !== prepared.pipelineRequest.id)];
+  state.activeGenerationId = "";
+  state.activeCandidateId = "";
   state.episodeStage = "processing";
   renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
   if (!prepared.requiresAutopilotAuth || !prepared.triggerRequest) throw new Error("Autopilot trigger was not prepared");
@@ -932,6 +941,11 @@ function startEpisodePipelinePolling() {
       state.pipelineRequests = pipelinePayload.pipelineRequests || [];
       state.pipelineTimeoutMs = Number(pipelinePayload.timeoutMs || 0);
       state.candidates = candidatePayload.candidates || [];
+      state.candidateGenerations = candidatePayload.generations || [];
+      if (!state.candidateGenerations.some((generation) => generation.id === state.activeGenerationId)) {
+        state.activeGenerationId = state.candidateGenerations.at(-1)?.id || "";
+        state.activeCandidateId = "";
+      }
       state.curation = curationPayload;
       if (state.candidates.length) state.episodeStage = "output";
       renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
@@ -1122,13 +1136,40 @@ function renderCandidateSection(episode, candidates) {
   list.className = "candidateQueue";
   const listHeader = document.createElement("header");
   listHeader.className = "candidateQueueHeader";
+  const listHeading = document.createElement("div");
   const listTitle = document.createElement("h2");
   listTitle.textContent = "Episode Snacks";
   const listSummary = document.createElement("p");
-  listSummary.textContent = `${candidates.length} Snacks · ${counts.accepted || 0} accepted`;
-  listHeader.append(listTitle, listSummary);
+  listSummary.textContent = `${counts.accepted || 0} accepted across ${state.candidateGenerations.length} run${state.candidateGenerations.length === 1 ? "" : "s"}`;
+  listHeading.append(listTitle, listSummary);
+  const generationControls = document.createElement("div");
+  generationControls.className = "candidateGenerationControls";
+  const generationSelect = document.createElement("select");
+  generationSelect.setAttribute("aria-label", "Snack generation run");
+  for (const generation of [...state.candidateGenerations].reverse()) {
+    const option = document.createElement("option");
+    option.value = generation.id;
+    option.textContent = `Run ${generation.sequence} · ${generation.candidateCount} Snacks`;
+    generationSelect.appendChild(option);
+  }
+  generationSelect.value = state.activeGenerationId || state.candidateGenerations.at(-1)?.id || "";
+  generationSelect.addEventListener("change", () => {
+    state.activeGenerationId = generationSelect.value;
+    state.activeCandidateId = "";
+    renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
+  });
+  const generateAgain = document.createElement("button");
+  generateAgain.type = "button";
+  generateAgain.className = "btn btnSecondary";
+  generateAgain.textContent = "Generate again";
+  generateAgain.disabled = !state.me?.access?.edit || state.pipelineRequests.some((request) => ["created", "awaiting-authorization", "queued", "running", "applying-result"].includes(request.status));
+  generateAgain.addEventListener("click", startEpisodeExtraction);
+  generationControls.append(generationSelect, generateAgain);
+  listHeader.append(listHeading, generationControls);
   list.appendChild(listHeader);
-  for (const candidate of candidates) {
+  const activeGenerationId = generationSelect.value;
+  const visibleCandidates = candidates.filter((candidate) => (candidate.pipelineRequestId || "fixture") === activeGenerationId);
+  for (const candidate of visibleCandidates) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `candidateQueueItem${candidate.id === state.activeCandidateId ? " active" : ""}`;
@@ -1144,7 +1185,15 @@ function renderCandidateSection(episode, candidates) {
     list.appendChild(button);
   }
   layout.appendChild(list);
-  const active = candidates.find((candidate) => candidate.id === state.activeCandidateId) || candidates[0];
+  const active = visibleCandidates.find((candidate) => candidate.id === state.activeCandidateId) || visibleCandidates[0];
+  if (!active) {
+    const empty = document.createElement("div");
+    empty.className = "candidateEmpty";
+    empty.textContent = "This run has no generated Snacks.";
+    layout.appendChild(empty);
+    section.appendChild(layout);
+    return section;
+  }
   if (!state.activeCandidateId) state.activeCandidateId = active.id;
   layout.appendChild(renderCandidateReader(active));
   section.appendChild(layout);
@@ -1316,6 +1365,11 @@ async function refreshCandidates() {
     api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/curation`),
   ]);
   state.candidates = payload.candidates || [];
+  state.candidateGenerations = payload.generations || [];
+  if (!state.candidateGenerations.some((generation) => generation.id === state.activeGenerationId)) {
+    state.activeGenerationId = state.candidateGenerations.at(-1)?.id || "";
+    state.activeCandidateId = "";
+  }
   state.curation = curation;
   renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
 }
