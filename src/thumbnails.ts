@@ -117,7 +117,7 @@ export function createThumbnailGeneration(jobId: string, actorPubkey: string, pu
   }, null, 2));
   const token = `${crypto.randomUUID().replaceAll('-', '')}${crypto.randomUUID().replaceAll('-', '')}`;
   const { pipeline, version } = thumbnailPipelineRoute(job.assetKind);
-  db.query("UPDATE thumbnail_jobs SET status=?1, callback_token_hash=?2, generation_round=?3, pipeline_name=?4, pipeline_version=?5, failure_summary=NULL, updated_at=?6 WHERE id=?7")
+  db.query("UPDATE thumbnail_jobs SET status=?1, callback_token_hash=?2, generation_round=?3, pipeline_name=?4, pipeline_version=?5, autopilot_run_id=NULL, failure_summary=NULL, updated_at=?6 WHERE id=?7")
     .run(job.assetKind === 'episode' ? 'generating' : 'extracting', hashToken(token), round, pipeline, version, Date.now(), job.id);
   if (targetedNote) db.query('UPDATE thumbnail_jobs SET review_notes=?1 WHERE id=?2').run(targetedNote, job.id);
   recordAuditEvent({ actorPubkey, action: 'thumbnail.generation.started', entityType: 'thumbnail-job', entityId: job.id, detail: { round } });
@@ -151,7 +151,7 @@ export function verifyThumbnailGenerationTrigger(jobId: string, trigger: Record<
 }
 
 export function markThumbnailGenerationFailed(jobId: string, summary: string) {
-  db.query("UPDATE thumbnail_jobs SET status='failed', failure_summary=?1, updated_at=?2 WHERE id=?3")
+  db.query("UPDATE thumbnail_jobs SET status='failed', autopilot_run_id=NULL, failure_summary=?1, updated_at=?2 WHERE id=?3")
     .run(summary.slice(0, 1000), Date.now(), jobId);
 }
 

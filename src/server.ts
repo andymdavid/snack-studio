@@ -662,7 +662,11 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
     const body = await readJson(req); const trigger = body.triggerRequest && typeof body.triggerRequest === 'object' ? body.triggerRequest as Record<string, unknown> : {};
     const jobId = decodeURIComponent(thumbnailStartMatch[1]!);
-    if (!verifyThumbnailGenerationTrigger(jobId, trigger)) return json({ error: 'thumbnail trigger does not match the prepared job' }, 400);
+    if (!verifyThumbnailGenerationTrigger(jobId, trigger)) {
+      const summary = 'Thumbnail trigger did not match the prepared job. Retry generation.';
+      markThumbnailGenerationFailed(jobId, summary);
+      return json({ error: 'thumbnail trigger does not match the prepared job' }, 400);
+    }
     try {
       const result = await startPreparedWappPipeline(trigger as { url: string; method: 'POST'; body: Record<string, unknown> }, String(body.autopilotAuthorization || ''));
       markThumbnailGenerationStarted(jobId, result.runId); return json(result);
