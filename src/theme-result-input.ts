@@ -4,7 +4,7 @@ export type SuccessfulThemeResult = {
   requestId: string; attemptId: string; runId: string | null; episodeId: string;
   operation: 'publication-metadata'; inputRevisionId: string; resultSchemaVersion: string; pipelineVersion: string;
   episodeThemes: Array<{ key: string; existingThemeId: string | null; name: string; description: string; rationale: string; evidenceExcerpt: string }>;
-  snackAssignments: Array<{ candidateId: string; revisionId: string; themeKeys: string[]; visualThemeKey: string; rationale: string }>;
+  snackAssignments: Array<{ candidateId: string; revisionId: string; themeKey: string; rationale: string }>;
 };
 
 export function validateSuccessfulThemeResult(value: Record<string, unknown>): { ok: true; value: SuccessfulThemeResult } | { ok: false; error: string } {
@@ -26,11 +26,10 @@ export function validateSuccessfulThemeResult(value: Record<string, unknown>): {
     const snackAssignments = value.snackAssignments.map((item, index) => {
       if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`Snack assignment ${index + 1} must be an object`);
       const row = item as Record<string, unknown>; const candidateId = String(row.candidateId || '').trim(); const revisionId = String(row.revisionId || '').trim();
-      const themeKeys = Array.isArray(row.themeKeys) ? [...new Set(row.themeKeys.map(String).map((entry) => entry.trim()).filter(Boolean))] : [];
-      const visualThemeKey = String(row.visualThemeKey || '').trim(); const rationale = String(row.rationale || '').trim();
-      if (!candidateId || !revisionId || !themeKeys.length || themeKeys.length > 4 || !rationale) throw new Error(`Snack assignment ${index + 1} is incomplete`);
-      if (themeKeys.some((key) => !keys.has(key)) || !themeKeys.includes(visualThemeKey)) throw new Error(`Snack assignment ${index + 1} must use episode theme keys and include its visual theme`);
-      return { candidateId, revisionId, themeKeys, visualThemeKey, rationale };
+      const themeKey = String(row.themeKey || '').trim(); const rationale = String(row.rationale || '').trim();
+      if (!candidateId || !revisionId || !themeKey || !rationale) throw new Error(`Snack assignment ${index + 1} is incomplete`);
+      if (!keys.has(themeKey)) throw new Error(`Snack assignment ${index + 1} must use one resolved episode theme`);
+      return { candidateId, revisionId, themeKey, rationale };
     });
     return { ok: true, value: { requestId: required('requestId'), attemptId: required('attemptId'), runId: typeof value.runId === 'string' ? value.runId : null, episodeId: required('episodeId'), operation: 'publication-metadata', inputRevisionId: required('inputRevisionId'), resultSchemaVersion: required('resultSchemaVersion'), pipelineVersion: required('pipelineVersion'), episodeThemes, snackAssignments } };
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }

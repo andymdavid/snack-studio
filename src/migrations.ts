@@ -1125,6 +1125,33 @@ const migrations: Migration[] = [
       seed.run('agents', 'Agents', 'The systems, harnesses and feedback loops that allow models to act through tools.', '#d1ddd3', now);
     },
   },
+  {
+    id: '029_single_snack_theme',
+    description: 'Require each Snack revision to belong to exactly one episode theme',
+    up(db) {
+      db.exec(`
+        CREATE TABLE snack_theme_assignments_new (
+          snack_revision_id TEXT PRIMARY KEY,
+          candidate_id TEXT NOT NULL,
+          episode_id TEXT NOT NULL,
+          theme_id TEXT NOT NULL,
+          rationale TEXT NOT NULL,
+          pipeline_request_id TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (snack_revision_id) REFERENCES snack_revisions(id) ON DELETE CASCADE,
+          FOREIGN KEY (candidate_id) REFERENCES snack_candidates(id) ON DELETE CASCADE,
+          FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (theme_id) REFERENCES themes(id),
+          FOREIGN KEY (pipeline_request_id) REFERENCES pipeline_requests(id)
+        );
+        INSERT OR IGNORE INTO snack_theme_assignments_new(snack_revision_id,candidate_id,episode_id,theme_id,rationale,pipeline_request_id,created_at)
+          SELECT snack_revision_id,candidate_id,episode_id,theme_id,rationale,pipeline_request_id,created_at
+          FROM snack_theme_assignments WHERE visual_theme=1;
+        DROP TABLE snack_theme_assignments;
+        ALTER TABLE snack_theme_assignments_new RENAME TO snack_theme_assignments;
+      `);
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

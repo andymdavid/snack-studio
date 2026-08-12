@@ -30,10 +30,10 @@ export function applySuccessfulThemeResult(input: { localRunId: string; result: 
       .run(request.episodeId, keyToTheme.get(theme.key)!.id, theme.rationale, theme.evidenceExcerpt, request.id, now);
     for (const item of input.result.snackAssignments) {
       database.query('DELETE FROM snack_theme_assignments WHERE snack_revision_id=?1').run(item.revisionId);
-      for (const key of item.themeKeys) database.query('INSERT INTO snack_theme_assignments(snack_revision_id,candidate_id,episode_id,theme_id,visual_theme,rationale,pipeline_request_id,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)')
-        .run(item.revisionId, item.candidateId, request.episodeId, keyToTheme.get(key)!.id, key === item.visualThemeKey ? 1 : 0, item.rationale, request.id, now);
-      const visual = keyToTheme.get(item.visualThemeKey)!;
-      database.query('UPDATE thumbnail_jobs SET topic_colour=?1,updated_at=?2 WHERE snack_revision_id=?3').run(visual.colour, now, item.revisionId);
+      const theme = keyToTheme.get(item.themeKey)!;
+      database.query('INSERT INTO snack_theme_assignments(snack_revision_id,candidate_id,episode_id,theme_id,rationale,pipeline_request_id,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7)')
+        .run(item.revisionId, item.candidateId, request.episodeId, theme.id, item.rationale, request.id, now);
+      database.query('UPDATE thumbnail_jobs SET topic_colour=?1,updated_at=?2 WHERE snack_revision_id=?3').run(theme.colour, now, item.revisionId);
     }
     database.query("UPDATE pipeline_runs SET status='complete',progress_percent=100,progress_label='Themes ready',completed_at=?1,updated_at=?1 WHERE id=?2").run(now, run.id);
     database.query("UPDATE pipeline_requests SET status='completed',pipeline_version=COALESCE(?1,pipeline_version),result_applied_at=?2,failure_summary=NULL,updated_at=?2 WHERE id=?3").run(input.result.pipelineVersion, now, request.id);

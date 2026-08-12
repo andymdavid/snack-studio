@@ -8,7 +8,7 @@ const result = {
     { key: 'agents', existingThemeId: 'agents', name: 'Agents', description: 'Agent systems', rationale: 'Repeated throughout', evidenceExcerpt: 'agent harness' },
     { key: 'new', existingThemeId: null, name: 'Operational Discovery', description: 'Knowledge discovered through operational use.', rationale: 'Repeated throughout', evidenceExcerpt: 'learned in production' },
   ],
-  snackAssignments: [{ candidateId: 'candidate-1', revisionId: 'revision-1', themeKeys: ['agents', 'new'], visualThemeKey: 'agents', rationale: 'The Snack concerns agent systems.' }],
+  snackAssignments: [{ candidateId: 'candidate-1', revisionId: 'revision-1', themeKey: 'agents', rationale: 'The Snack concerns agent systems.' }],
 };
 
 describe('theme metadata callback', () => {
@@ -16,8 +16,8 @@ describe('theme metadata callback', () => {
     expect(validateSuccessfulThemeResult(result).ok).toBe(true);
   });
 
-  test('rejects a visual theme outside the Snack theme set', () => {
-    const validation = validateSuccessfulThemeResult({ ...result, snackAssignments: [{ ...result.snackAssignments[0], themeKeys: ['new'] }] });
-    expect(validation).toEqual({ ok: false, error: 'Snack assignment 1 must use episode theme keys and include its visual theme' });
+  test('rejects a Snack theme outside the resolved episode set', () => {
+    const validation = validateSuccessfulThemeResult({ ...result, snackAssignments: [{ ...result.snackAssignments[0], themeKey: 'unresolved' }] });
+    expect(validation).toEqual({ ok: false, error: 'Snack assignment 1 must use one resolved episode theme' });
   });
 });

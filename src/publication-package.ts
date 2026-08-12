@@ -73,11 +73,11 @@ export function buildPublicationPackage(episodeId: string) {
 
   const snacks = approved.candidateIds.map(getCandidate).filter(Boolean).map((candidate) => {
     const revision = candidate!.revision;
-    const assignments = db.query('SELECT theme_id,visual_theme FROM snack_theme_assignments WHERE snack_revision_id=?1 ORDER BY visual_theme DESC,theme_id').all(revision.id) as Array<{ theme_id: string; visual_theme: number }>;
-    const themeIds = assignments.map((item) => item.theme_id); const visualTheme = assignments.find((item) => Boolean(item.visual_theme))?.theme_id || '';
+    const assignment = db.query('SELECT theme_id FROM snack_theme_assignments WHERE snack_revision_id=?1').get(revision.id) as { theme_id: string } | null;
+    const theme = assignment?.theme_id || '';
     const slug = publicationSlug(revision.publicTitle);
     if (!slug) blockers.push({ code: 'snack-slug-missing', message: `Could not derive a slug for ${revision.publicTitle}.`, sourceId: candidate!.id });
-    if (!themeIds.length || !visualTheme) blockers.push({ code: 'snack-themes-missing', message: `${revision.publicTitle} needs themes derived from the episode.`, sourceId: candidate!.id });
+    if (!theme) blockers.push({ code: 'snack-theme-missing', message: `${revision.publicTitle} needs one theme from the episode.`, sourceId: candidate!.id });
     const job = db.query("SELECT * FROM thumbnail_jobs WHERE episode_id=?1 AND asset_kind='snack' AND snack_revision_id=?2 ORDER BY created_at DESC LIMIT 1")
       .get(episodeId, revision.id) as Record<string, unknown> | null;
     const asset = job && String(job.status) === 'approved' ? selectedFinishedAsset(String(job.id)) : null;
@@ -88,7 +88,7 @@ export function buildPublicationPackage(episodeId: string) {
       candidateId: candidate!.id, revisionId: revision.id, position: candidate!.approvedPosition,
       slug, title: revision.publicTitle, editorialTitle: revision.editorialTitle, standfirst: revision.standfirst,
       bodyMarkdown: revision.bodyMarkdown, attribution: revision.attribution || `Developed from a conversation between ${people.map((person) => person.name).join(', ').replace(/, ([^,]*)$/, ' and $1')}`,
-      themes: themeIds, visualTheme,
+      theme,
       transcriptStart: revision.transcriptTimestamp, seo: { title: revision.seoTitle, description: revision.seoDescription },
       thumbnail: asset ? `/images/snacks/${slug}.webp` : null,
     };

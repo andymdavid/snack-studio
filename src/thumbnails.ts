@@ -402,7 +402,7 @@ export function preparePublicationThumbnails(episodeId: string, actorPubkey: str
   db.transaction(() => {
     for (const candidateId of approved.candidateIds) {
       const candidate = getCandidate(candidateId)!;
-      const assignment = db.query('SELECT theme_id FROM snack_theme_assignments WHERE snack_revision_id=?1 AND visual_theme=1').get(candidate.currentRevisionId) as { theme_id: string } | null;
+      const assignment = db.query('SELECT theme_id FROM snack_theme_assignments WHERE snack_revision_id=?1').get(candidate.currentRevisionId) as { theme_id: string } | null;
       const theme = assignment ? getTheme(assignment.theme_id) : null;
       db.query(`INSERT OR IGNORE INTO thumbnail_jobs(
         id, episode_id, asset_kind, snack_candidate_id, snack_revision_id, transcript_revision_id,

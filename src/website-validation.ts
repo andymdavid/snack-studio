@@ -26,7 +26,7 @@ function renderEpisode(value: ReturnType<typeof buildPublicationPackage>['episod
 }
 
 function renderSnack(value: ReturnType<typeof buildPublicationPackage>['snacks'][number], episodeSlug: string) {
-  return `---\ntitle: ${yamlString(value.title)}\n${yamlOptional('editorialTitle', value.editorialTitle)}thumbnail: ${yamlString(value.thumbnail || '')}\nstandfirst: ${yamlString(value.standfirst)}\nstatus: published\nsourceEpisode: ${episodeSlug}\n${yamlList('themes', value.themes)}visualTheme: ${value.visualTheme}\nattribution: ${yamlString(value.attribution || '')}\n${yamlOptional('transcriptStart', value.transcriptStart)}relationships: []\nfeatured: false\nfixture: false\n${value.seo.title || value.seo.description ? `seo:\n${value.seo.title ? `  title: ${yamlString(value.seo.title)}\n` : ''}${value.seo.description ? `  description: ${yamlString(value.seo.description)}\n` : ''}` : ''}---\n\n${value.bodyMarkdown.trim()}\n`;
+  return `---\ntitle: ${yamlString(value.title)}\n${yamlOptional('editorialTitle', value.editorialTitle)}thumbnail: ${yamlString(value.thumbnail || '')}\nstandfirst: ${yamlString(value.standfirst)}\nstatus: published\nsourceEpisode: ${episodeSlug}\ntheme: ${value.theme}\nattribution: ${yamlString(value.attribution || '')}\n${yamlOptional('transcriptStart', value.transcriptStart)}relationships: []\nfeatured: false\nfixture: false\n${value.seo.title || value.seo.description ? `seo:\n${value.seo.title ? `  title: ${yamlString(value.seo.title)}\n` : ''}${value.seo.description ? `  description: ${yamlString(value.seo.description)}\n` : ''}` : ''}---\n\n${value.bodyMarkdown.trim()}\n`;
 }
 
 function renderTheme(value: ReturnType<typeof buildPublicationPackage>['themes'][number]) {
