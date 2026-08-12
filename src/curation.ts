@@ -11,7 +11,7 @@ export type Relationship = {
   id: string; episodeId: string; sourceCandidateId: string; targetCandidateId: string;
   sourceTitle: string; targetTitle: string; relationshipType: RelationshipType;
   explanation: string | null; origin: "manual" | "fixture" | "pipeline";
-  reviewState: RelationshipState; createdAt: number; updatedAt: number;
+  evidenceExcerpt: string | null; reviewState: RelationshipState; createdAt: number; updatedAt: number;
 };
 
 function ensureNewsletter(episodeId: string) {
@@ -63,6 +63,7 @@ function mapRelationship(row: Record<string, unknown>): Relationship {
     targetCandidateId: String(row.target_candidate_id), sourceTitle: String(row.source_title), targetTitle: String(row.target_title),
     relationshipType: String(row.relationship_type) as RelationshipType,
     explanation: row.explanation == null ? null : String(row.explanation), origin: String(row.origin) as Relationship["origin"],
+    evidenceExcerpt: row.evidence_excerpt == null ? null : String(row.evidence_excerpt),
     reviewState: String(row.review_state) as RelationshipState, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at),
   };
 }
@@ -82,25 +83,41 @@ export function listRelationships(episodeId: string): Relationship[] {
 
 export function createRelationship(input: {
   episodeId: string; sourceCandidateId: string; targetCandidateId: string; relationshipType: RelationshipType;
-  explanation: string | null; origin: "manual" | "fixture" | "pipeline"; reviewState: RelationshipState; actorPubkey: string;
+  explanation: string | null; evidenceExcerpt?: string | null; origin: "manual" | "fixture" | "pipeline"; reviewState: RelationshipState; actorPubkey: string;
 }): Relationship {
   if (input.sourceCandidateId === input.targetCandidateId) throw new Error("A snack cannot relate to itself");
-  for (const id of [input.sourceCandidateId, input.targetCandidateId]) {
-    const candidate = getCandidate(id);
-    if (!candidate || candidate.episodeId !== input.episodeId) throw new Error("Relationship candidates must belong to this episode");
-  }
+  const source = getCandidate(input.sourceCandidateId); const target = getCandidate(input.targetCandidateId);
+  if (!source || source.episodeId !== input.episodeId) throw new Error('Relationship source must belong to this episode');
+  if (!target) throw new Error('Relationship target was not found');
+  if (source.reviewDecision !== 'accepted' || target.reviewDecision !== 'accepted') throw new Error('Relationships can only connect accepted Snacks');
   const id = crypto.randomUUID();
   const now = Date.now();
   db.transaction(() => {
     db.query(`INSERT INTO relationships(
       id, episode_id, source_candidate_id, target_candidate_id, relationship_type,
-      explanation, origin, review_state, created_by_pubkey, created_at, updated_at
-    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)`)
+      explanation, evidence_excerpt, origin, review_state, created_by_pubkey, created_at, updated_at
+    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)`)
       .run(id, input.episodeId, input.sourceCandidateId, input.targetCandidateId, input.relationshipType,
-        input.explanation, input.origin, input.reviewState, input.actorPubkey, now);
+        input.explanation, input.evidenceExcerpt || null, input.origin, input.reviewState, input.actorPubkey, now);
     recordAuditEvent({ actorPubkey: input.actorPubkey, action: "relationship.created", entityType: "episode", entityId: input.episodeId, detail: { relationshipId: id, type: input.relationshipType, origin: input.origin } });
   })();
   return listRelationships(input.episodeId).find((item) => item.id === id)!;
+}
+
+export function listGraphCandidates() {
+  return (db.query(`SELECT c.id AS candidate_id,c.episode_id,c.review_decision,r.public_title,r.standfirst,e.episode_number,e.working_title
+    FROM snack_candidates c JOIN snack_revisions r ON r.id=c.current_revision_id JOIN episodes e ON e.id=c.episode_id
+    WHERE c.review_decision='accepted' ORDER BY e.episode_number,c.approved_position`).all() as Record<string, unknown>[]).map((row) => ({
+      candidateId: String(row.candidate_id), episodeId: String(row.episode_id), title: String(row.public_title), standfirst: String(row.standfirst), episodeNumber: row.episode_number == null ? null : Number(row.episode_number), episodeTitle: String(row.working_title),
+    }));
+}
+
+export function listAllRelationships() {
+  const rows = db.query(`SELECT rel.*,source_revision.public_title AS source_title,target_revision.public_title AS target_title
+    FROM relationships rel JOIN snack_candidates source ON source.id=rel.source_candidate_id JOIN snack_revisions source_revision ON source_revision.id=source.current_revision_id
+    JOIN snack_candidates target ON target.id=rel.target_candidate_id JOIN snack_revisions target_revision ON target_revision.id=target.current_revision_id
+    ORDER BY rel.updated_at DESC`).all() as Record<string, unknown>[];
+  return rows.map(mapRelationship);
 }
 
 export function updateRelationshipState(id: string, state: RelationshipState, actorPubkey: string): Relationship | null {

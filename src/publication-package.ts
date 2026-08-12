@@ -6,9 +6,11 @@ import { getContributor } from './contributors.ts';
 import { getActiveTranscriptRevision, getEpisode } from './episodes.ts';
 import { resolveTranscriptParticipants } from './publication-metadata.ts';
 import { getTheme } from './themes.ts';
+import { getApprovedPublicTranscript } from './public-transcripts.ts';
+import { listNewsletterItems, listRelationships } from './curation.ts';
 
 export type PublicationPackageFile = {
-  kind: 'episode' | 'snack' | 'person' | 'theme' | 'transcript' | 'episode-thumbnail' | 'snack-thumbnail' | 'person-portrait';
+  kind: 'episode' | 'snack' | 'person' | 'theme' | 'newsletter' | 'transcript' | 'episode-thumbnail' | 'snack-thumbnail' | 'person-portrait';
   destination: string;
   sourceId: string;
   sourceRevisionId?: string;
@@ -39,11 +41,13 @@ export function buildPublicationPackage(episodeId: string) {
   const episode = getEpisode(episodeId);
   if (!episode) throw new Error('Episode not found');
   const transcript = getActiveTranscriptRevision(episodeId);
+  const publicTranscript = getApprovedPublicTranscript(episodeId);
   const approved = validateApprovedCandidateBatch(episodeId);
   const blockers: PublicationBlocker[] = [];
   if (episode.status !== 'approved') blockers.push({ code: 'episode-not-approved', message: 'Approve the final Snack set before preparing the website package.' });
   if (!episode.episodeNumber) blockers.push({ code: 'episode-number-missing', message: 'The episode needs a publication number.' });
   if (!transcript) blockers.push({ code: 'transcript-missing', message: 'The episode needs an active transcript revision.' });
+  if (!publicTranscript) blockers.push({ code: 'public-transcript-missing', message: 'Review and approve the cleaned public transcript.' });
   for (const check of approved.checks.filter((item) => !item.ok)) blockers.push({ code: `approved-${check.key}`, message: check.message });
 
   const episodeNumber = episode.episodeNumber || 0;
@@ -61,7 +65,7 @@ export function buildPublicationPackage(episodeId: string) {
 
   const files: PublicationPackageFile[] = [];
   if (episodeNumber) files.push({ kind: 'episode', destination: `src/content/episodes/${episodeSlug}.md`, sourceId: episode.id });
-  if (transcript && episodeNumber) files.push({ kind: 'transcript', destination: `src/content/transcripts/${episodeSlug}.txt`, sourceId: transcript.id, sourceRevisionId: transcript.id, sizeBytes: transcript.sizeBytes });
+  if (publicTranscript && episodeNumber) files.push({ kind: 'transcript', destination: `src/content/transcripts/${episodeSlug}.txt`, sourceId: publicTranscript.id, sourceRevisionId: publicTranscript.sourceTranscriptRevisionId, sizeBytes: new TextEncoder().encode(publicTranscript.transcriptText).byteLength });
   for (const person of people.filter((item) => item.source === 'studio')) {
     files.push({ kind: 'person', destination: `src/content/people/${person.id}.md`, sourceId: person.id });
     if (person.portraitPath) files.push({ kind: 'person-portrait', destination: `public/images/${person.id}-voxel.webp`, sourceId: person.id, sourcePath: person.portraitPath });
@@ -93,6 +97,17 @@ export function buildPublicationPackage(episodeId: string) {
       thumbnail: asset ? `/images/snacks/${slug}.webp` : null,
     };
   });
+  const snackSlugs = new Map(snacks.map((snack) => [snack.candidateId, snack.slug]));
+  const newsletterItems = listNewsletterItems(episodeId);
+  if (newsletterItems.length < 3 || newsletterItems.length > 4) blockers.push({ code: 'newsletter-selection-incomplete', message: 'Select three or four Snacks for the newsletter edition.' });
+  const newsletter = newsletterItems.length ? { slug: episodeSlug, title: `Intelligence Snacks ${episodeNumber}`, sourceEpisode: episodeSlug, snacks: newsletterItems.map((item) => snackSlugs.get(item.candidateId) || '').filter(Boolean) } : null;
+  if (newsletter && episodeNumber) files.push({ kind: 'newsletter', destination: `src/content/newsletters/${episodeSlug}.md`, sourceId: episode.id });
+
+  const relationships = listRelationships(episodeId).filter((item) => item.reviewState === 'approved').map((item) => ({
+    sourceCandidateId: item.sourceCandidateId, targetCandidateId: item.targetCandidateId,
+    sourceSlug: publicationSlug(getCandidate(item.sourceCandidateId)?.revision.publicTitle || ''), targetSlug: publicationSlug(getCandidate(item.targetCandidateId)?.revision.publicTitle || ''),
+    type: item.relationshipType, note: item.explanation,
+  }));
 
   const episodeJob = db.query("SELECT * FROM thumbnail_jobs WHERE episode_id=?1 AND asset_kind='episode' ORDER BY created_at DESC LIMIT 1").get(episodeId) as Record<string, unknown> | null;
   const episodeAsset = episodeJob && String(episodeJob.status) === 'approved' ? selectedFinishedAsset(String(episodeJob.id)) : null;
@@ -108,10 +123,10 @@ export function buildPublicationPackage(episodeId: string) {
       id: episode.id, slug: episodeSlug, number: episode.episodeNumber, title: episode.workingTitle,
       summary, status: 'published', participants: contributorIds, themes: themes.map((theme) => theme.id),
       recordedOn: episode.recordedOn, audioUrl: episode.audioUrl, youtubeUrl: episode.videoUrl,
-      transcript: transcript && episodeNumber ? episodeSlug : null,
+      transcript: publicTranscript && episodeNumber ? episodeSlug : null,
       thumbnail: episodeAsset && episodeNumber ? `/images/episodes/${episodeSlug}-thumbnail.webp` : null,
     },
-    snacks, people, themes, transcript: transcript ? { revisionId: transcript.id, sha256: transcript.sha256, sizeBytes: transcript.sizeBytes } : null,
+    snacks, people, themes, newsletter, relationships, transcript: publicTranscript ? { id: publicTranscript.id, sourceRevisionId: publicTranscript.sourceTranscriptRevisionId, status: publicTranscript.status, transcriptText: publicTranscript.transcriptText } : null,
     files: files.sort((a, b) => a.destination.localeCompare(b.destination)),
   };
   const fingerprint = bytesToHex(sha256(new TextEncoder().encode(JSON.stringify(packageValue))));

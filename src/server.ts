@@ -37,7 +37,7 @@ import { validateEpisodeInput } from "./episode-input.ts";
 import { validateCandidateRevision, validateReviewDecision } from "./candidate-input.ts";
 import { activateCandidateRevision, approveCandidateBatch, createCandidateRevision, generateFixtureCandidates, getCandidate, listCandidates, setApprovedCandidateOrder, updateCandidateDecision, validateApprovedCandidateBatch } from "./candidates.ts";
 import { buildCandidateGenerations } from "./candidate-generations.ts";
-import { createFixtureRelationshipSuggestions, createRelationship, deleteRelationship, getCuration, RELATIONSHIP_TYPES, setNewsletterItems, updateRelationshipState } from "./curation.ts";
+import { createFixtureRelationshipSuggestions, createRelationship, deleteRelationship, getCuration, listAllRelationships, listGraphCandidates, RELATIONSHIP_TYPES, setNewsletterItems, updateRelationshipState } from "./curation.ts";
 import { normalizeTranscriptText, validateEpisodeMetadata, validateTranscriptUpload } from "./transcript-input.ts";
 import {
   activateTranscriptRevision,
@@ -93,6 +93,11 @@ import { validateSuccessfulPublicationMetadataResult } from "./publication-metad
 import { applySuccessfulPublicationMetadataResult } from "./publication-metadata-results.ts";
 import { validateSuccessfulThemeResult } from './theme-result-input.ts';
 import { applySuccessfulThemeResult } from './theme-results.ts';
+import { validateSuccessfulPublicTranscriptResult } from './public-transcript-result-input.ts';
+import { applySuccessfulPublicTranscriptResult } from './public-transcript-results.ts';
+import { getLatestPublicTranscript, reviewPublicTranscript } from './public-transcripts.ts';
+import { validateSuccessfulGraphResult } from './graph-result-input.ts';
+import { applySuccessfulGraphResult } from './graph-results.ts';
 import { buildPublicationPackage } from "./publication-package.ts";
 import { getLatestWebsiteValidation, stageAndValidateWebsitePackage } from './website-validation.ts';
 import { getLatestGitPublication, publishValidatedPackageToMain } from './git-publication.ts';
@@ -273,12 +278,31 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
     return json({ episodes: listEpisodeWorkflows() });
   }
+  if (pathname === '/api/graph' && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    return json({ candidates: listGraphCandidates(), relationships: listAllRelationships() });
+  }
   const episodeWorkflowMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/workflow$/);
   if (episodeWorkflowMatch && req.method === 'GET') {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
     if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
     try { return json({ workflow: getEpisodeWorkflow(decodeURIComponent(episodeWorkflowMatch[1]!)) }); }
     catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 404); }
+  }
+  const publicTranscriptMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/public-transcript$/);
+  if (publicTranscriptMatch && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    return json({ publicTranscript: getLatestPublicTranscript(decodeURIComponent(publicTranscriptMatch[1]!)) });
+  }
+  const publicTranscriptReviewMatch = pathname.match(/^\/api\/public-transcripts\/([^/]+)$/);
+  if (publicTranscriptReviewMatch && req.method === 'PATCH') {
+    const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
+    const body = await readJson(req); const status = body.status === 'approved' || body.status === 'rejected' ? body.status : null;
+    if (!status) return json({ error: 'status must be approved or rejected' }, 400);
+    try { return json({ publicTranscript: reviewPublicTranscript({ id: decodeURIComponent(publicTranscriptReviewMatch[1]!), status, transcriptText: typeof body.transcriptText === 'string' ? body.transcriptText : undefined, actorPubkey: session.pubkey }) }); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 400); }
   }
 
   if (pathname === "/api/health" && req.method === "GET") {
@@ -1493,8 +1517,10 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
 
       const validation = pipelineRequest.operation === "snack-regeneration"
         ? validateSuccessfulRegenerationResult(body)
+        : pipelineRequest.operation === 'transcript-normalization'
+          ? validateSuccessfulPublicTranscriptResult(body)
         : pipelineRequest.operation === "publication-metadata"
-          ? pipelineRequest.resultSchemaVersion === '2' ? validateSuccessfulThemeResult(body) : validateSuccessfulPublicationMetadataResult(body)
+          ? pipelineRequest.resultSchemaVersion === '3' ? validateSuccessfulGraphResult(body) : pipelineRequest.resultSchemaVersion === '2' ? validateSuccessfulThemeResult(body) : validateSuccessfulPublicationMetadataResult(body)
           : validateSuccessfulPipelineResult(body);
       if (!validation.ok) {
         markPipelineResultRejected({ runId: run.id, summary: validation.error });
@@ -1513,7 +1539,16 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
           recordAuditEvent({ action: "candidate.regeneration.proposed", entityType: "episode", entityId: pipelineRequest.episodeId, detail: { requestId, runId: run.id, candidateId: proposal.candidateId, proposalId: proposal.id } });
           return json({ ok: true, requestId, status: "completed", proposalId: proposal.id });
         }
+        if (pipelineRequest.operation === 'transcript-normalization') {
+          const applied = applySuccessfulPublicTranscriptResult({ localRunId: run.id, result: validation.value as import('./public-transcript-result-input.ts').SuccessfulPublicTranscriptResult });
+          recordAuditEvent({ action: 'public-transcript.proposed', entityType: 'episode', entityId: pipelineRequest.episodeId, detail: { requestId, runId: run.id, publicTranscriptId: applied.publicTranscriptId } });
+          return json({ ok: true, requestId, status: 'completed', ...applied });
+        }
         if (pipelineRequest.operation === "publication-metadata") {
+          if (pipelineRequest.resultSchemaVersion === '3') {
+            const applied = applySuccessfulGraphResult({ localRunId: run.id, result: validation.value as import('./graph-result-input.ts').SuccessfulGraphResult });
+            return json({ ok: true, requestId, status: 'completed', ...applied });
+          }
           const applied = pipelineRequest.resultSchemaVersion === '2'
             ? applySuccessfulThemeResult({ localRunId: run.id, result: validation.value as import('./theme-result-input.ts').SuccessfulThemeResult })
             : applySuccessfulPublicationMetadataResult({ localRunId: run.id, result: validation.value as import("./publication-metadata-result-input.ts").SuccessfulPublicationMetadataResult });

@@ -1152,6 +1152,42 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: "030_public_transcript_workflow",
+    description: "Store derived public transcripts separately from immutable source revisions",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS public_transcripts (
+          id TEXT PRIMARY KEY,
+          episode_id TEXT NOT NULL,
+          source_transcript_revision_id TEXT NOT NULL,
+          transcript_text TEXT NOT NULL,
+          cleanup_summary_json TEXT NOT NULL DEFAULT '[]',
+          status TEXT NOT NULL CHECK(status IN ('proposed', 'approved', 'rejected')),
+          pipeline_request_id TEXT,
+          pipeline_run_id TEXT,
+          created_by_pubkey TEXT,
+          approved_by_pubkey TEXT,
+          approved_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (source_transcript_revision_id) REFERENCES transcript_revisions(id),
+          FOREIGN KEY (pipeline_request_id) REFERENCES pipeline_requests(id),
+          FOREIGN KEY (pipeline_run_id) REFERENCES pipeline_runs(id)
+        );
+        CREATE INDEX IF NOT EXISTS public_transcripts_episode_index
+          ON public_transcripts(episode_id, created_at DESC);
+      `);
+    },
+  },
+  {
+    id: '031_relationship_evidence',
+    description: 'Keep private evidence with proposed graph relationships',
+    up(db) {
+      if (!hasColumn(db, 'relationships', 'evidence_excerpt')) db.exec('ALTER TABLE relationships ADD COLUMN evidence_excerpt TEXT');
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

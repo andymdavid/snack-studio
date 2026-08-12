@@ -37,6 +37,7 @@ const state = {
   activeWorkflow: null,
   activeEpisode: null,
   activeTranscript: null,
+  publicTranscript: null,
   transcriptRevisions: [],
   candidates: [],
   candidateGenerations: [],
@@ -200,12 +201,12 @@ function showOnly(id) {
 }
 
 function showStudioPage(id, breadcrumb) {
-  for (const pageId of ["episodesPage", "episodePage", "reviewQueuePage", "publicationsPage", "studioSettingsPage"]) {
+  for (const pageId of ["episodesPage", "episodePage", "reviewQueuePage", "publicationsPage", "graphPage", "studioSettingsPage"]) {
     $(pageId).classList.toggle("hidden", pageId !== id);
   }
   $("studioBreadcrumb").textContent = breadcrumb;
   for (const button of document.querySelectorAll("[data-studio-route]")) {
-    const activeRoute = id === "studioSettingsPage" ? "/settings" : id === "reviewQueuePage" ? "/review" : id === "publicationsPage" ? "/publications" : id === "episodePage" ? state.workspaceOrigin || "/" : "/";
+    const activeRoute = id === "studioSettingsPage" ? "/settings" : id === 'graphPage' ? '/graph' : id === "reviewQueuePage" ? "/review" : id === "publicationsPage" ? "/publications" : id === "episodePage" ? state.workspaceOrigin || "/" : "/";
     button.classList.toggle("active", button.dataset.studioRoute === activeRoute);
   }
 }
@@ -249,6 +250,7 @@ async function renderRoute() {
   if (state.route.startsWith('/publications')) {
     showOnly('home'); await loadWorkflowRoute('publications'); return;
   }
+  if (state.route === '/graph') { showOnly('home'); await loadGraph(); return; }
 
   showOnly("home");
   await loadEpisodeRoute();
@@ -437,6 +439,26 @@ function renderWorkflowQueue(kind, errorMessage = '') {
   }
 }
 
+async function loadGraph() {
+  showStudioPage('graphPage', 'Snack Studio / Graph'); setStudioStatus('Loading graph…');
+  try { const payload = await api('/api/graph'); renderGraph(payload); setStudioStatus('Ready'); } catch (error) { $('graphWorkspace').textContent = error.message; setStudioStatus(error.message); }
+}
+
+function renderGraph(payload) {
+  const container = $('graphWorkspace'); container.innerHTML = '';
+  const relationships = payload.relationships || [];
+  if (!relationships.length) { const empty = document.createElement('div'); empty.className = 'workflowQueueEmpty'; empty.innerHTML = '<strong>No relationship suggestions yet</strong><span>Grounded suggestions are created automatically as approved episodes enter Publications.</span>'; container.appendChild(empty); return; }
+  for (const relationship of relationships) {
+    const row = document.createElement('article'); row.className = 'workflowQueueItem graphRelationship';
+    const copy = document.createElement('div'); const title = document.createElement('strong'); title.textContent = `${relationship.sourceTitle} → ${formatEpisodeStatus(relationship.relationshipType)} → ${relationship.targetTitle}`;
+    const note = document.createElement('span'); note.textContent = relationship.explanation || 'No explanation supplied'; copy.append(title, note);
+    if (relationship.evidenceExcerpt) { const evidence = document.createElement('span'); evidence.className = 'metadata'; evidence.textContent = `Evidence: ${relationship.evidenceExcerpt}`; copy.appendChild(evidence); }
+    const actions = document.createElement('div'); const pill = document.createElement('span'); pill.className = `statusPill ${relationship.reviewState === 'approved' ? 'statusSuccess' : relationship.reviewState === 'rejected' ? 'statusDanger' : 'statusPending'}`; pill.textContent = formatEpisodeStatus(relationship.reviewState); actions.appendChild(pill);
+    if (relationship.reviewState === 'draft') for (const [reviewState, label] of [['approved','Approve'],['rejected','Reject']]) { const button = document.createElement('button'); button.type = 'button'; button.className = reviewState === 'approved' ? 'btn btnPrimary' : 'btn btnSecondary'; button.textContent = label; button.addEventListener('click', async () => { await api(`/api/relationships/${encodeURIComponent(relationship.id)}`, { method: 'PATCH', body: JSON.stringify({ reviewState }) }); await loadGraph(); }); actions.appendChild(button); }
+    row.append(copy, actions); container.appendChild(row);
+  }
+}
+
 async function loadEpisodes() {
   showStudioPage("episodesPage", "Snack Studio / Episodes");
   setStudioStatus("Loading episodes…");
@@ -520,7 +542,7 @@ async function loadEpisode(id, options = {}) {
   showStudioPage("episodePage", `Snack Studio / ${state.workspaceOrigin === '/review' ? 'Review Queue' : state.workspaceOrigin === '/publications' ? 'Publications' : 'Episodes'} / Workspace`);
   setStudioStatus("Loading workspace…");
   try {
-    const [payload, candidatePayload, curationPayload, pipelinePayload, publicationPayload, packagePayload, validationPayload, gitPublicationPayload, gitDeploymentPayload, workflowPayload] = await Promise.all([
+    const [payload, candidatePayload, curationPayload, pipelinePayload, publicationPayload, packagePayload, validationPayload, gitPublicationPayload, gitDeploymentPayload, workflowPayload, publicTranscriptPayload] = await Promise.all([
       api(`/api/episodes/${encodeURIComponent(id)}`),
       api(`/api/episodes/${encodeURIComponent(id)}/candidates`),
       api(`/api/episodes/${encodeURIComponent(id)}/curation`),
@@ -531,9 +553,11 @@ async function loadEpisode(id, options = {}) {
       api(`/api/episodes/${encodeURIComponent(id)}/git-publication`).catch(() => ({ publication: null })),
       api(`/api/episodes/${encodeURIComponent(id)}/git-deployment`).catch(() => ({ deployment: null })),
       api(`/api/episodes/${encodeURIComponent(id)}/workflow`).catch(() => ({ workflow: null })),
+      api(`/api/episodes/${encodeURIComponent(id)}/public-transcript`).catch(() => ({ publicTranscript: null })),
     ]);
     state.activeEpisode = payload.episode;
     state.activeTranscript = payload.transcript || null;
+    state.publicTranscript = publicTranscriptPayload.publicTranscript || null;
     state.transcriptRevisions = payload.transcriptRevisions || [];
     state.candidates = candidatePayload.candidates || [];
     state.candidateGenerations = candidateGenerations(state.candidates, candidatePayload.generations);
@@ -920,6 +944,8 @@ function renderPublicationPreparation(episode, candidates) {
     item.append(name, valueNode); facts.appendChild(item);
   }
   section.appendChild(facts);
+  section.appendChild(renderPublicTranscriptWorkflow());
+  section.appendChild(renderNewsletterWorkflow(candidates));
   if (preparation.themes?.length) {
     const themeList = document.createElement('div'); themeList.className = 'episodeThemeList';
     for (const theme of preparation.themes) { const item = document.createElement('span'); const swatch = document.createElement('i'); swatch.className = 'topicSwatch'; swatch.style.backgroundColor = theme.colour; item.append(swatch, theme.name); item.title = theme.description; themeList.appendChild(item); }
@@ -1599,13 +1625,15 @@ function startEpisodePipelinePolling() {
   }
   const episodeId = state.activeEpisode.id;
   state.pollTimer = setInterval(async () => {
-    if (state.activeEpisode?.id !== episodeId || !/^\/episodes\//.test(window.location.pathname)) return stopPolling();
+    if (state.activeEpisode?.id !== episodeId || !/^\/(episodes|review|publications)\//.test(window.location.pathname)) return stopPolling();
     try {
-      const [pipelinePayload, candidatePayload, curationPayload, publicationPayload] = await Promise.all([
+      const [pipelinePayload, candidatePayload, curationPayload, publicationPayload, publicTranscriptPayload, packagePayload] = await Promise.all([
         api(`/api/episodes/${encodeURIComponent(episodeId)}/pipeline-requests`),
         api(`/api/episodes/${encodeURIComponent(episodeId)}/candidates`),
         api(`/api/episodes/${encodeURIComponent(episodeId)}/curation`),
         api(`/api/episodes/${encodeURIComponent(episodeId)}/publication-preparation`).catch(() => ({ preparation: state.publicationPreparation })),
+        api(`/api/episodes/${encodeURIComponent(episodeId)}/public-transcript`).catch(() => ({ publicTranscript: state.publicTranscript })),
+        api(`/api/episodes/${encodeURIComponent(episodeId)}/publication-package`).catch(() => ({ package: state.publicationPackage })),
       ]);
       state.pipelineRequests = pipelinePayload.pipelineRequests || [];
       state.pipelineTimeoutMs = Number(pipelinePayload.timeoutMs || 0);
@@ -1619,6 +1647,8 @@ function startEpisodePipelinePolling() {
       }
       state.curation = curationPayload;
       state.publicationPreparation = publicationPayload.preparation || state.publicationPreparation;
+      state.publicTranscript = publicTranscriptPayload.publicTranscript || state.publicTranscript;
+      state.publicationPackage = packagePayload.package || state.publicationPackage;
       if (state.candidates.length && state.episodeStage === "processing") state.episodeStage = "output";
       renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
       if (!state.pipelineRequests.some((request) => ["queued", "running", "applying-result"].includes(request.status))) stopPolling();
@@ -2224,14 +2254,78 @@ async function preparePublication() {
     state.episodeStage = "publication";
     renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
     const metadataActive = state.pipelineRequests.some((request) => request.operation === "publication-metadata" && ["created", "awaiting-authorization", "queued", "running", "applying-result"].includes(request.status));
-    if (state.publicationPreparation.needsTopicClassification?.length && !metadataActive) {
-      await startPublicationMetadataClassification();
-    } else {
-      setStudioStatus("Ready");
-    }
+    const cleanupActive = state.pipelineRequests.some((request) => request.operation === 'transcript-normalization' && ['created','awaiting-authorization','queued','running','applying-result'].includes(request.status));
+    if (!state.publicTranscript && !cleanupActive) await startPublicTranscriptCleanup();
+    if (state.publicationPreparation.needsTopicClassification?.length && !metadataActive) await startPublicationMetadataClassification();
+    const graphRequested = state.pipelineRequests.some((request) => request.pipelineName === 'snack-studio-graph-relationships');
+    if (!graphRequested) await startGraphRelationshipSuggestions();
+    else setStudioStatus("Ready");
   } catch (error) {
     setStudioStatus(error.message);
   }
+}
+
+function renderPublicTranscriptWorkflow() {
+  const panel = document.createElement('section'); panel.className = 'publicTranscriptPanel';
+  const header = document.createElement('div'); header.className = 'curationPanelHeader';
+  const copy = document.createElement('div'); const title = document.createElement('h3'); title.textContent = 'Website transcript';
+  const help = document.createElement('p'); help.textContent = 'A cleaned reading copy derived from the immutable source transcript.'; copy.append(title, help); header.appendChild(copy); panel.appendChild(header);
+  const running = state.pipelineRequests.find((request) => request.operation === 'transcript-normalization' && ['created','awaiting-authorization','queued','running','applying-result'].includes(request.status));
+  if (running) { const status = document.createElement('span'); status.className = 'statusPill statusInfo'; status.textContent = 'Preparing…'; header.appendChild(status); return panel; }
+  if (!state.publicTranscript) { const pending = document.createElement('p'); pending.textContent = 'Cleanup will start automatically as the publication is prepared.'; panel.appendChild(pending); return panel; }
+  const editor = document.createElement('textarea'); editor.className = 'transcriptEditor'; editor.rows = 14; editor.value = state.publicTranscript.transcriptText; editor.disabled = !state.me?.access?.edit || state.publicTranscript.status === 'approved';
+  const summary = document.createElement('p'); summary.className = 'metadata'; summary.textContent = state.publicTranscript.cleanupSummary?.join(' · ') || 'Formatting and verbal debris cleaned without changing meaning.';
+  const actions = document.createElement('div'); actions.className = 'candidateReaderDecisions';
+  const status = document.createElement('span'); status.className = `statusPill ${state.publicTranscript.status === 'approved' ? 'statusSuccess' : 'statusPending'}`; status.textContent = formatEpisodeStatus(state.publicTranscript.status); actions.appendChild(status);
+  if (state.publicTranscript.status === 'proposed') {
+    const approve = document.createElement('button'); approve.type = 'button'; approve.className = 'btn btnPrimary'; approve.textContent = 'Approve public transcript'; approve.disabled = !state.me?.access?.edit;
+    approve.addEventListener('click', async () => { const clear = setButtonBusy(approve, 'Approving…'); try { state.publicTranscript = (await api(`/api/public-transcripts/${encodeURIComponent(state.publicTranscript.id)}`, { method: 'PATCH', body: JSON.stringify({ status: 'approved', transcriptText: editor.value }) })).publicTranscript; state.publicationPackage = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-package`)).package; renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates); } catch (error) { setStudioStatus(error.message); } finally { clear(); } }); actions.appendChild(approve);
+  }
+  panel.append(summary, editor, actions); return panel;
+}
+
+function renderNewsletterWorkflow(candidates) {
+  const panel = document.createElement('section'); panel.className = 'curationPanel';
+  const title = document.createElement('h3'); title.textContent = 'Newsletter edition';
+  const help = document.createElement('p'); help.textContent = 'Choose and order the strongest three or four approved Snacks. This doesn’t affect which Snacks publish on the website.';
+  panel.append(title, help);
+  const selectedIds = (state.curation.newsletterItems || []).map((item) => item.candidateId);
+  const choices = document.createElement('div'); choices.className = 'newsletterChoices';
+  for (const candidate of candidates.filter((item) => item.reviewDecision === 'accepted')) {
+    const row = document.createElement('label'); const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = selectedIds.includes(candidate.id);
+    checkbox.disabled = !state.me?.access?.edit || (!checkbox.checked && selectedIds.length >= 4);
+    checkbox.addEventListener('change', () => void saveNewsletterOrder(checkbox.checked ? [...selectedIds, candidate.id] : selectedIds.filter((id) => id !== candidate.id)));
+    const label = document.createElement('span'); label.textContent = candidate.revision.publicTitle; row.append(checkbox, label); choices.appendChild(row);
+  }
+  panel.appendChild(choices);
+  if (state.curation.newsletterItems?.length) {
+    const order = document.createElement('div'); order.className = 'newsletterOrder';
+    for (const item of state.curation.newsletterItems) {
+      const row = document.createElement('div'); const label = document.createElement('span'); label.textContent = `${item.position}. ${item.title}`; const actions = document.createElement('div');
+      for (const [direction, text] of [[-1, 'Move up'], [1, 'Move down']]) { const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btnTransparent'; button.textContent = text; button.disabled = !state.me?.access?.edit || item.position + direction < 1 || item.position + direction > selectedIds.length; button.addEventListener('click', () => moveNewsletterItem(item.candidateId, direction)); actions.appendChild(button); }
+      row.append(label, actions); order.appendChild(row);
+    }
+    panel.appendChild(order);
+  }
+  return panel;
+}
+
+async function startPublicTranscriptCleanup() {
+  setStudioStatus('Preparing website transcript…');
+  const prepared = await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/pipeline-requests`, { method: 'POST', body: JSON.stringify({ operation: 'transcript-normalization', pipelineName: 'snack-studio-transcript-cleanup', pipelineVersion: '1', promptSuiteVersion: 'v1-public-transcript-cleanup', resultSchemaVersion: '1', idempotencyKey: crypto.randomUUID(), autopilotTargetId: state.activeAutopilotTargetId || undefined }) });
+  const triggerRequest = structuredClone(prepared.triggerRequest);
+  for (const reference of triggerRequest.body?.input?.localContext?.references || []) reference.authorization = await signNip98Request({ url: reference.url, method: 'GET' });
+  const autopilotAuthorization = await signNip98Request(triggerRequest);
+  await api(`/api/episode-pipeline-runs/${encodeURIComponent(prepared.runId)}/start`, { method: 'POST', body: JSON.stringify({ autopilotAuthorization, triggerRequest }) });
+  await loadEpisode(state.activeEpisode.id); setStudioStatus('Preparing website transcript…');
+}
+
+async function startGraphRelationshipSuggestions() {
+  setStudioStatus('Preparing graph suggestions…');
+  const prepared = await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/pipeline-requests`, { method: 'POST', body: JSON.stringify({ operation: 'publication-metadata', pipelineName: 'snack-studio-graph-relationships', pipelineVersion: '1', promptSuiteVersion: 'v1-graph-relationships', resultSchemaVersion: '3', idempotencyKey: crypto.randomUUID(), autopilotTargetId: state.activeAutopilotTargetId || undefined }) });
+  const triggerRequest = structuredClone(prepared.triggerRequest); for (const reference of triggerRequest.body?.input?.localContext?.references || []) reference.authorization = await signNip98Request({ url: reference.url, method: 'GET' });
+  const autopilotAuthorization = await signNip98Request(triggerRequest); await api(`/api/episode-pipeline-runs/${encodeURIComponent(prepared.runId)}/start`, { method: 'POST', body: JSON.stringify({ autopilotAuthorization, triggerRequest }) });
+  await loadEpisode(state.activeEpisode.id);
 }
 
 async function startPublicationMetadataClassification() {
@@ -2263,7 +2357,8 @@ async function startPublicationMetadataClassification() {
 }
 
 async function refreshCuration() {
-  state.curation = await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/curation`);
+  const [curation, packagePayload] = await Promise.all([api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/curation`), api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-package`).catch(() => ({ package: state.publicationPackage }))]);
+  state.curation = curation; state.publicationPackage = packagePayload.package || state.publicationPackage;
   renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
 }
 

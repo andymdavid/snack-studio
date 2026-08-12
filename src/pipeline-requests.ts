@@ -474,6 +474,12 @@ export function getPipelineRequestContext(requestId: string, database: Database 
         primaryTopic: candidate.primary_topic == null ? null : String(candidate.primary_topic),
       }))
     : [];
+  const graphCandidates = String(row.operation) === 'publication-metadata' && String(row.result_schema_version) === '3'
+    ? (database.query(`SELECT c.id AS candidate_id,c.episode_id,c.current_revision_id,r.public_title,r.standfirst,r.body_markdown,t.theme_id
+        FROM snack_candidates c JOIN snack_revisions r ON r.id=c.current_revision_id
+        LEFT JOIN snack_theme_assignments t ON t.snack_revision_id=r.id
+        WHERE c.review_decision='accepted' ORDER BY c.episode_id,c.approved_position`).all() as Record<string, unknown>[]).map((item) => ({ candidateId: String(item.candidate_id), episodeId: String(item.episode_id), revisionId: String(item.current_revision_id), publicTitle: String(item.public_title), standfirst: String(item.standfirst), bodyMarkdown: String(item.body_markdown), themeId: item.theme_id == null ? null : String(item.theme_id) }))
+    : [];
   return {
     request: mapRequest(row),
     episode: {
@@ -497,6 +503,7 @@ export function getPipelineRequestContext(requestId: string, database: Database 
     },
     contributors: [],
     approvedCandidates,
+    graphCandidates,
     canonicalTopics: String(row.operation) === "publication-metadata" ? THUMBNAIL_TOPICS : [],
     canonicalThemes: String(row.operation) === 'publication-metadata' ? listThemes(database) : [],
     targetCandidate: targetRow ? {

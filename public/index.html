@@ -45,6 +45,7 @@
             <button class="active" type="button" data-studio-route="/">Episodes</button>
             <button type="button" data-studio-route="/review">Review queue</button>
             <button type="button" data-studio-route="/publications">Publications</button>
+            <button type="button" data-studio-route="/graph">Graph</button>
             <button type="button" data-studio-route="/settings">Settings</button>
           </nav>
           <div class="studioUser">
@@ -115,6 +116,11 @@
               </div>
             </header>
             <section class="workflowQueue" id="publicationsQueue" aria-live="polite"></section>
+          </div>
+
+          <div class="studioContent hidden" id="graphPage">
+            <header class="studioPageHeader"><div><p class="eyebrow">Knowledge system</p><h1>Graph</h1><p>Review evidence-backed conceptual links across approved Snacks.</p></div></header>
+            <section class="workflowQueue" id="graphWorkspace" aria-live="polite"></section>
           </div>
 
           <div class="studioContent hidden" id="studioSettingsPage">
