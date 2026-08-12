@@ -5,6 +5,11 @@ const PIPELINES_CACHE_KEY = "snack_studio_pipelines_v1";
 const PROFILE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const CURRENT_SNACK_PROMPT_SUITE = "v3-intelligence-snacks-natural-prose";
 const CURRENT_SNACK_PIPELINE_VERSION = "3";
+const TOPIC_CATALOG = {
+  'ai-coding': { name: 'AI Coding', colour: '#fe7141' },
+  'software-systems': { name: 'Software Systems', colour: '#cdabfe' },
+  agents: { name: 'Agents', colour: '#d1ddd3' },
+};
 const PROFILE_RELAYS = [
   "wss://relay.damus.io",
   "wss://nos.lol",
@@ -481,9 +486,9 @@ function renderEpisodes() {
   }
 
   for (const episode of episodes) {
-    const row = document.createElement("button");
-    row.type = "button";
+    const row = document.createElement("div");
     row.className = "episodeRow";
+    row.tabIndex = 0; row.setAttribute('role', 'link');
     const identity = document.createElement("span");
     identity.className = "episodeIdentity";
     const title = document.createElement("strong");
@@ -497,10 +502,15 @@ function renderEpisodes() {
     const updated = document.createElement("span");
     updated.className = "episodeUpdated metadata";
     updated.textContent = formatActivity(episode.updatedAt);
-    const chevron = document.createElement("span");
-    chevron.textContent = "→";
-    row.append(identity, status, updated, chevron);
-    row.addEventListener("click", () => navigate(`/episodes/${encodeURIComponent(episode.id)}`));
+    const menu = document.createElement('details'); menu.className = 'episodeRowMenu';
+    const trigger = document.createElement('summary'); trigger.setAttribute('aria-label', `Options for ${episode.workingTitle}`); trigger.textContent = '⋮';
+    const options = document.createElement('div');
+    const open = document.createElement('button'); open.type = 'button'; open.textContent = 'Open details'; open.addEventListener('click', (event) => { event.stopPropagation(); navigate(`/episodes/${encodeURIComponent(episode.id)}`); });
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'danger'; remove.textContent = 'Delete workspace'; remove.disabled = !state.me?.access?.edit; remove.addEventListener('click', (event) => { event.stopPropagation(); void deleteEpisodeWorkspace(episode); });
+    options.append(open, remove); menu.append(trigger, options);
+    row.append(identity, status, updated, menu);
+    row.addEventListener("click", (event) => { if (!event.target.closest('.episodeRowMenu')) navigate(`/episodes/${encodeURIComponent(episode.id)}`); });
+    row.addEventListener('keydown', (event) => { if ((event.key === 'Enter' || event.key === ' ') && !event.target.closest('.episodeRowMenu')) navigate(`/episodes/${encodeURIComponent(episode.id)}`); });
     list.appendChild(row);
   }
 }
@@ -628,30 +638,23 @@ function renderEpisodeWorkspace(episode, transcript, transcriptRevisions, auditE
   metadataForm.className = "workspaceSection metadataForm";
   const metadataHeader = document.createElement("div");
   metadataHeader.className = "workspaceSectionHeader";
-  metadataHeader.innerHTML = "<div><h2>Episode metadata</h2><p>Private preparation fields can be refined before publication.</p></div>";
+  metadataHeader.innerHTML = "<div><h2>Episode details</h2><p>Only source details that cannot be reliably inferred belong here.</p></div>";
   const metadataSave = document.createElement("button");
   metadataSave.type = "submit";
   metadataSave.className = "btn btnPrimary";
-  metadataSave.textContent = "Save metadata";
-  metadataSave.disabled = !state.me?.access?.edit;
+  metadataSave.textContent = "Save changes";
+  metadataSave.hidden = true;
+  metadataSave.disabled = true;
   metadataHeader.appendChild(metadataSave);
   const fields = document.createElement("div");
   fields.className = "workspaceFieldGrid";
   fields.append(
     makeWorkspaceField("Episode number", workspaceInput("workspaceEpisodeNumber", "number", episode.episodeNumber)),
-    makeWorkspaceField("Working title", workspaceInput("workspaceWorkingTitle", "text", episode.workingTitle)),
-    makeWorkspaceField("Public title", workspaceInput("workspacePublicTitle", "text", episode.publicTitle, "Optional canonical title")),
-    makeWorkspaceField('Primary topic', (() => { const select = document.createElement('select'); select.id = 'workspacePrimaryTopic'; for (const [value, label] of [['','Select topic'],['ai-coding','AI Coding'],['agents','Agents'],['software-systems','Software Systems']]) { const option = document.createElement('option'); option.value = value; option.textContent = label; option.selected = episode.primaryTopic === value; select.appendChild(option); } select.disabled = !state.me?.access?.edit; return select; })()),
+    makeWorkspaceField("Episode title", workspaceInput("workspaceWorkingTitle", "text", episode.workingTitle)),
     makeWorkspaceField("Recorded on", workspaceInput("workspaceRecordedOn", "date", episode.recordedOn)),
     makeWorkspaceField("Audio URL", workspaceInput("workspaceAudioUrl", "url", episode.audioUrl, "https://…")),
     makeWorkspaceField("Video URL", workspaceInput("workspaceVideoUrl", "url", episode.videoUrl, "https://…")),
   );
-  const publicSummary = document.createElement('textarea');
-  publicSummary.id = 'workspacePublicSummary';
-  publicSummary.rows = 3;
-  publicSummary.value = episode.publicSummary || '';
-  publicSummary.placeholder = 'Short public description used on the episode page and in metadata';
-  publicSummary.disabled = !state.me?.access?.edit;
   const notes = document.createElement("textarea");
   notes.id = "workspaceEditorialNotes";
   notes.rows = 4;
@@ -661,8 +664,9 @@ function renderEpisodeWorkspace(episode, transcript, transcriptRevisions, auditE
   const metadataError = document.createElement("p");
   metadataError.className = "formError";
   metadataError.id = "metadataFormError";
-  metadataForm.append(metadataHeader, fields, makeWorkspaceField('Public summary', publicSummary), makeWorkspaceField("Editorial notes", notes), metadataError);
+  metadataForm.append(metadataHeader, fields, makeWorkspaceField("Editorial notes", notes), metadataError);
   metadataForm.addEventListener("submit", saveEpisodeMetadata);
+  metadataForm.addEventListener('input', () => { metadataSave.hidden = false; metadataSave.disabled = !state.me?.access?.edit; });
 
   const transcriptForm = document.createElement("form");
   transcriptForm.className = "workspaceSection transcriptForm";
@@ -824,9 +828,18 @@ function renderEpisodeWorkspace(episode, transcript, transcriptRevisions, auditE
   publicationStage.append(renderPublicationPreparation(episode, candidates));
   const detailsStage = document.createElement("div");
   detailsStage.className = "episodeStage episodeDetailsStage";
-  detailsStage.append(metadataForm, transcriptForm, history, pipelineSection, curationSection, renderDeleteEpisodeSection(episode));
+  const transcriptDetails = document.createElement('section'); transcriptDetails.className = 'workspaceSection transcriptDetailsSummary';
+  const transcriptDetailsHeader = document.createElement('div'); transcriptDetailsHeader.className = 'workspaceSectionHeader';
+  transcriptDetailsHeader.innerHTML = `<div><h2>Transcript source</h2><p>${transcript ? `${transcript.originalFilename || 'Pasted transcript'} · revision ${transcript.revisionNumber} · ${Math.round(transcript.sizeBytes / 1024)} KB` : 'No transcript uploaded'}</p></div>`;
+  const transcriptNote = document.createElement('p'); transcriptNote.className = 'metadata'; transcriptNote.textContent = 'The source transcript is preserved unchanged. A separate cleanup step for the public website transcript is planned for the publishing flow and has not yet been implemented.';
+  transcriptDetails.append(transcriptDetailsHeader, transcriptNote);
+  detailsStage.append(metadataForm, transcriptDetails, history);
   if (state.workspaceOrigin === '/') {
     workspace.append(header, state.episodeStage === 'details' ? detailsStage : transcript ? renderEpisodeOverview(episode, transcript, candidates, processingStage) : setupStage);
+  } else if (state.workspaceOrigin === '/publications') {
+    workspace.append(header, state.episodeStage === 'details' ? detailsStage : publicationStage);
+  } else if (state.workspaceOrigin === '/review') {
+    workspace.append(header, state.episodeStage === 'details' ? detailsStage : state.episodeStage === 'publication' ? publicationStage : outputStage);
   } else {
     workspace.append(header, flow, state.episodeStage === "details" ? detailsStage : state.episodeStage === "publication" ? publicationStage : state.episodeStage === "processing" ? processingStage : state.episodeStage === "output" ? outputStage : setupStage);
   }
@@ -876,12 +889,7 @@ function renderPublicationPreparation(episode, candidates) {
   const help = document.createElement("p");
   help.textContent = "Snack Studio is assembling canonical topics, contributor portraits and transcript-grounded thumbnail work for the approved set.";
   copy.append(eyebrow, title, help);
-  const back = document.createElement("button");
-  back.type = "button";
-  back.className = "btn btnSecondary";
-  back.textContent = "Back to Snacks";
-  back.addEventListener("click", () => setEpisodeStage("output"));
-  header.append(copy, back);
+  header.append(copy);
   section.appendChild(header);
 
   const preparation = state.publicationPreparation;
@@ -942,7 +950,10 @@ function renderPublicationPreparation(episode, candidates) {
     const row = document.createElement("div");
     const identity = document.createElement("div");
     const name = document.createElement("strong"); name.textContent = candidate?.revision?.publicTitle || "Approved Snack";
-    const detail = document.createElement("span"); detail.textContent = job.topicColour ? `Topic colour ${job.topicColour}` : topicsRunning ? "Topic classification running" : "Topic classification pending";
+    const detail = document.createElement("span");
+    const topic = Object.values(TOPIC_CATALOG).find((item) => item.colour.toLowerCase() === job.topicColour?.toLowerCase());
+    detail.textContent = topic ? topic.name : topicsRunning ? "Classifying theme" : job.topicColour ? 'Theme assigned' : "Theme classification pending";
+    if (topic) { const swatch = document.createElement('i'); swatch.className = 'topicSwatch'; swatch.style.backgroundColor = topic.colour; detail.prepend(swatch); }
     identity.append(name, detail);
     const actionable = job.topicColour && resolved.length && !portraitsNeeded.length && ['draft','failed','in-review','approved'].includes(job.status);
     const status = document.createElement(actionable ? 'button' : 'span');
@@ -968,7 +979,7 @@ function renderPublicationPackageManifest(packageValue) {
   const header = document.createElement('header');
   const copy = document.createElement('div');
   const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Website package';
-  const title = document.createElement('h3'); title.textContent = packageValue.ready ? 'Ready to stage' : 'Package needs attention';
+  const title = document.createElement('h3'); title.textContent = packageValue.ready ? 'Ready to validate' : 'Package needs attention';
   const detail = document.createElement('p'); detail.textContent = `${packageValue.snacks?.length || 0} Snacks · ${packageValue.people?.length || 0} contributors · ${packageValue.files?.length || 0} destination files`;
   copy.append(eyebrow, title, detail);
   const meta = document.createElement('div'); meta.className = 'publicationPackageMeta';
@@ -976,7 +987,7 @@ function renderPublicationPackageManifest(packageValue) {
   fingerprint.title = packageValue.fingerprint || '';
   const refresh = document.createElement('button'); refresh.type = 'button'; refresh.className = 'btn btnSecondary'; refresh.textContent = 'Refresh package';
   refresh.addEventListener('click', async () => { const clear = setButtonBusy(refresh, 'Refreshing…'); try { state.publicationPackage = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-package`)).package; renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates); } catch (error) { setStudioStatus(error.message); } finally { clear(); } });
-  const stage = document.createElement('button'); stage.type = 'button'; stage.className = 'btn btnPrimary'; stage.textContent = 'Stage and validate'; stage.disabled = !packageValue.ready || !state.me?.access?.edit;
+  const stage = document.createElement('button'); stage.type = 'button'; stage.className = 'btn btnPrimary'; stage.textContent = 'Validate publication'; stage.disabled = !packageValue.ready || !state.me?.access?.edit;
   stage.addEventListener('click', async () => { const clear = setButtonBusy(stage, 'Validating website…'); setStudioStatus('Staging website package and running the production build…'); try { state.websiteValidation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/website-validation`, { method:'POST', body:'{}' })).validation; renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates); setStudioStatus(state.websiteValidation.status === 'passed' ? 'Website package validated' : 'Website validation failed'); } catch (error) { setStudioStatus(error.message); } finally { clear(); } });
   meta.append(fingerprint, refresh, stage); header.append(copy, meta); panel.appendChild(header);
   const blockers = packageValue.blockers || [];
@@ -1017,7 +1028,7 @@ function renderWebsiteValidation(validation, packageValue, publication, deployme
   if (validation.status === 'passed' && current && !published) {
     const actions = document.createElement('div'); actions.className = 'gitPublicationActions';
     const note = document.createElement('p'); note.textContent = 'Creates a commit from this exact validated package, verifies a clean production build, then pushes it to website main. This does not deploy it.';
-    const publish = document.createElement('button'); publish.type = 'button'; publish.className = 'btn btnPrimary'; publish.textContent = matchingPublication && publication.status !== 'failed' ? 'Publishing…' : 'Publish to main';
+    const publish = document.createElement('button'); publish.type = 'button'; publish.className = 'btn btnPrimary'; publish.textContent = matchingPublication && publication.status !== 'failed' ? 'Publishing…' : 'Publish website update';
     publish.disabled = !state.me?.access?.edit || (matchingPublication && !['failed'].includes(publication.status));
     publish.addEventListener('click', async () => {
       if (!window.confirm('Publish this validated package to the Intelligence Snacks main branch? This creates and pushes a Git commit, but does not deploy the website.')) return;
@@ -2386,9 +2397,9 @@ async function saveEpisodeMetadata(event) {
       body: JSON.stringify({
         episodeNumber: $("workspaceEpisodeNumber").value,
         workingTitle: $("workspaceWorkingTitle").value,
-        publicTitle: $("workspacePublicTitle").value,
-        publicSummary: $('workspacePublicSummary').value,
-        primaryTopic: $('workspacePrimaryTopic').value,
+        publicTitle: null,
+        publicSummary: state.activeEpisode.publicSummary,
+        primaryTopic: null,
         recordedOn: $("workspaceRecordedOn").value,
         audioUrl: $("workspaceAudioUrl").value,
         videoUrl: $("workspaceVideoUrl").value,
@@ -2397,7 +2408,7 @@ async function saveEpisodeMetadata(event) {
     });
     state.activeEpisode = payload.episode;
     setStudioStatus("Metadata saved");
-    await loadEpisode(payload.episode.id);
+    await loadEpisode(payload.episode.id, { origin: state.workspaceOrigin, stage: 'details' });
   } catch (requestError) {
     error.textContent = requestError.message;
     setStudioStatus("Metadata not saved");

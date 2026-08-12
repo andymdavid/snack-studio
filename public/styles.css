@@ -723,6 +723,8 @@ textarea {
 .episodeOverviewFacts > div { display:grid; gap:5px; padding:16px; border-right:1px solid var(--border); }
 .episodeOverviewFacts > div:last-child { border-right:0; }
 .episodeOverviewFacts span { color:var(--text-muted); font-size:var(--text-sm); }
+.publicationThumbnailQueue span:has(.topicSwatch) { display:inline-flex; align-items:center; gap:7px; }
+.topicSwatch { width:10px; height:10px; display:inline-block; border:1px solid rgba(36,36,36,.2); border-radius:50%; }
 @media (max-width: 900px) {
   .workflowQueueItem, .episodeOverviewStatus { align-items:flex-start; flex-direction:column; }
   .workflowQueueItem > div:last-child { justify-items:start; }
@@ -1159,6 +1161,15 @@ textarea {
 .episodeRow:hover {
   background: var(--surface-2);
 }
+.episodeRow { cursor:pointer; }
+.episodeRowMenu { position:relative; justify-self:end; }
+.episodeRowMenu summary { width:28px; height:32px; display:grid; place-items:center; border-radius:var(--radius-small); cursor:pointer; font-size:22px; line-height:1; list-style:none; }
+.episodeRowMenu summary::-webkit-details-marker { display:none; }
+.episodeRowMenu summary:hover { background:var(--surface-3); color:var(--text); }
+.episodeRowMenu > div { position:absolute; z-index:20; top:36px; right:0; width:170px; padding:6px; border:1px solid var(--border); border-radius:var(--radius-small); background:var(--surface-1); box-shadow:var(--shadow-card); }
+.episodeRowMenu button { width:100%; min-height:34px; padding:7px 9px; border:0; background:transparent; color:var(--text); text-align:left; }
+.episodeRowMenu button:hover { background:var(--surface-2); }
+.episodeRowMenu button.danger { color:var(--danger); }
 
 .episodeIdentity {
   min-width: 0;
