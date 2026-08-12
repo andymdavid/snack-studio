@@ -2033,6 +2033,18 @@ div.publicationPreparationBlocker { display: flex; align-items: center; justify-
 .thumbnailReviewGallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .thumbnailReviewGallery article { min-width: 0; display: grid; gap: 8px; }
 .thumbnailReviewGallery img { width: 100%; aspect-ratio: 3 / 2; border-radius: var(--radius-card); object-fit: cover; background: var(--surface-2); }
+.episodeThumbnailReviewDialog { width: min(1480px, calc(100vw - 24px)); }
+.episodeThumbnailReviewShell { gap: 18px; }
+.episodeThumbnailReviewGallery { display: block; }
+.episodeThumbnailReviewGallery article { width: 100%; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 16px; }
+.episodeThumbnailReviewGallery article > img { grid-column: 1 / -1; max-height: min(68vh, 820px); aspect-ratio: 16 / 9; object-fit: contain; border: 1px solid var(--border); background: var(--surface-2); }
+.episodeThumbnailPreviews { min-width: 0; display: flex; align-items: end; gap: 18px; overflow-x: auto; padding-bottom: 4px; }
+.episodeThumbnailPreviews figure { flex:none; display:grid; gap:6px; margin:0; }
+.episodeThumbnailPreviews img { display:block; aspect-ratio:16 / 9; border:1px solid var(--border); border-radius:var(--radius-control); object-fit:cover; }
+.episodeThumbnailPreviews figcaption { color:var(--text-muted); font-size:var(--text-xs); }
+.episodePreviewHomepage img { width:320px; }
+.episodePreviewMobile img { width:180px; }
+.episodePreviewSocial img { width:260px; }
 .thumbnailEvidence { display: grid; gap: 10px; border-top: 1px solid var(--border); padding-top: 20px; }
 .thumbnailEvidence h3 { margin: 0; }
 .thumbnailEvidence article { display: grid; gap: 3px; border-left: 3px solid var(--success); padding: 8px 12px; background: var(--surface-2); }
@@ -2088,6 +2100,8 @@ div.publicationPreparationBlocker { display: flex; align-items: center; justify-
   .contributorPortraitWorkflow > div:first-child { flex-direction: column; }
   .contributorPortraitGallery { grid-template-columns: 1fr; }
   .thumbnailReviewGallery { grid-template-columns: 1fr; }
+  .episodeThumbnailReviewGallery article { grid-template-columns: 1fr; }
+  .episodeThumbnailPreviews { grid-column: 1; }
   .thumbnailRegenerate { grid-template-columns: 1fr; }
 }
 .candidateQueueHeader h2,

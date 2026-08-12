@@ -915,8 +915,8 @@ async function openThumbnailReview(jobId, snackTitle, triggerButton = null, isEp
   try {
     const payload = await api(`/api/thumbnail-jobs/${encodeURIComponent(jobId)}`);
     document.querySelector('.thumbnailReviewDialog')?.remove();
-    const dialog = document.createElement('dialog'); dialog.className = 'thumbnailReviewDialog';
-    const shell = document.createElement('div'); shell.className = 'thumbnailReviewShell';
+    const dialog = document.createElement('dialog'); dialog.className = `thumbnailReviewDialog${isEpisode ? ' episodeThumbnailReviewDialog' : ''}`;
+    const shell = document.createElement('div'); shell.className = `thumbnailReviewShell${isEpisode ? ' episodeThumbnailReviewShell' : ''}`;
     const header = document.createElement('header');
     const copy = document.createElement('div');
     const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = isEpisode ? 'Episode thumbnail review' : 'Thumbnail review';
@@ -926,7 +926,7 @@ async function openThumbnailReview(jobId, snackTitle, triggerButton = null, isEp
     header.append(copy, close); shell.appendChild(header);
     const currentRound = Math.max(0, ...payload.job.candidates.map((item) => item.generationRound));
     const candidates = payload.job.candidates.filter((item) => item.generationRound === currentRound);
-    const gallery = document.createElement('div'); gallery.className = 'thumbnailReviewGallery';
+    const gallery = document.createElement('div'); gallery.className = `thumbnailReviewGallery${isEpisode ? ' episodeThumbnailReviewGallery' : ''}`;
     for (const candidate of candidates) {
       const card = document.createElement('article');
       const image = document.createElement('img'); image.alt = `Thumbnail candidate ${candidate.candidateNumber}`;
@@ -934,7 +934,18 @@ async function openThumbnailReview(jobId, snackTitle, triggerButton = null, isEp
       const action = document.createElement('button'); action.type = 'button'; action.className = candidate.status === 'approved' ? 'btn btnPrimary' : 'btn btnSecondary';
       action.textContent = candidate.status === 'approved' ? 'Approved' : 'Approve this thumbnail'; action.disabled = candidate.status === 'approved' || !state.me?.access?.edit;
       action.addEventListener('click', () => approveSnackThumbnail(candidate.id, dialog, action));
-      card.append(image, action); gallery.appendChild(card);
+      if (isEpisode) {
+        const previews = document.createElement('div'); previews.className = 'episodeThumbnailPreviews';
+        for (const [label, className] of [['Homepage', 'episodePreviewHomepage'], ['Mobile', 'episodePreviewMobile'], ['Social', 'episodePreviewSocial']]) {
+          const preview = document.createElement('figure'); preview.className = className;
+          const previewImage = document.createElement('img'); previewImage.alt = `${label} preview`; previewImage.src = image.src;
+          image.addEventListener('load', () => { previewImage.src = image.src; }, { once: true });
+          const caption = document.createElement('figcaption'); caption.textContent = label;
+          preview.append(previewImage, caption); previews.appendChild(preview);
+        }
+        card.append(image, previews, action);
+      } else card.append(image, action);
+      gallery.appendChild(card);
     }
     shell.appendChild(gallery);
     const evidence = document.createElement('section'); evidence.className = 'thumbnailEvidence';
