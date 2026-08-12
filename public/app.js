@@ -45,6 +45,7 @@ const state = {
   publicationPreparation: null,
   publicationPackage: null,
   websiteValidation: null,
+  gitPublication: null,
   contributorFormOpen: false,
   contributorPortraitJobs: {},
   thumbnailPollTimers: {},
@@ -452,7 +453,7 @@ async function loadEpisode(id) {
   showStudioPage("episodePage", "Snack Studio / Episodes / Workspace");
   setStudioStatus("Loading workspace…");
   try {
-    const [payload, candidatePayload, curationPayload, pipelinePayload, publicationPayload, packagePayload, validationPayload] = await Promise.all([
+    const [payload, candidatePayload, curationPayload, pipelinePayload, publicationPayload, packagePayload, validationPayload, gitPublicationPayload] = await Promise.all([
       api(`/api/episodes/${encodeURIComponent(id)}`),
       api(`/api/episodes/${encodeURIComponent(id)}/candidates`),
       api(`/api/episodes/${encodeURIComponent(id)}/curation`),
@@ -460,6 +461,7 @@ async function loadEpisode(id) {
       api(`/api/episodes/${encodeURIComponent(id)}/publication-preparation`).catch(() => ({ preparation: null })),
       api(`/api/episodes/${encodeURIComponent(id)}/publication-package`).catch(() => ({ package: null })),
       api(`/api/episodes/${encodeURIComponent(id)}/website-validation`).catch(() => ({ validation: null })),
+      api(`/api/episodes/${encodeURIComponent(id)}/git-publication`).catch(() => ({ publication: null })),
     ]);
     state.activeEpisode = payload.episode;
     state.activeTranscript = payload.transcript || null;
@@ -479,6 +481,7 @@ async function loadEpisode(id) {
     state.publicationPreparation = publicationPayload.preparation || null;
     state.publicationPackage = packagePayload.package || null;
     state.websiteValidation = validationPayload.validation || null;
+    state.gitPublication = gitPublicationPayload.publication || null;
     if (!state.episodeStage || state.episodeStageId !== id) {
       state.episodeStage = episodeWorkspaceStage();
       state.episodeStageId = id;
@@ -891,11 +894,11 @@ function renderPublicationPackageManifest(packageValue) {
   const fileList = document.createElement('ul'); fileList.className = 'publicationPackageFiles';
   for (const file of packageValue.files || []) { const item = document.createElement('li'); const kind = document.createElement('span'); kind.textContent = file.kind; const path = document.createElement('code'); path.textContent = file.destination; item.append(kind, path); fileList.appendChild(item); }
   paths.append(summary, fileList); panel.appendChild(paths);
-  if (state.websiteValidation) panel.appendChild(renderWebsiteValidation(state.websiteValidation, packageValue));
+  if (state.websiteValidation) panel.appendChild(renderWebsiteValidation(state.websiteValidation, packageValue, state.gitPublication));
   return panel;
 }
 
-function renderWebsiteValidation(validation, packageValue) {
+function renderWebsiteValidation(validation, packageValue, publication) {
   const result = document.createElement('section'); result.className = 'websiteValidationResult';
   const current = validation.packageFingerprint === packageValue.fingerprint;
   const header = document.createElement('div');
@@ -906,6 +909,31 @@ function renderWebsiteValidation(validation, packageValue) {
   if (validation.failureSummary) { const failure = document.createElement('pre'); failure.textContent = validation.failureSummary; result.appendChild(failure); }
   if (validation.diffStat) { const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'File change summary'; const pre = document.createElement('pre'); pre.textContent = validation.diffStat; details.append(summary, pre); result.appendChild(details); }
   if (validation.textDiff) { const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Content diff'; const pre = document.createElement('pre'); pre.textContent = validation.textDiff; details.append(summary, pre); result.appendChild(details); }
+  const matchingPublication = publication?.validationAttemptId === validation.id && publication.packageFingerprint === packageValue.fingerprint;
+  const published = matchingPublication && publication.status === 'published' && publication.mainPushed;
+  if (matchingPublication) {
+    const publicationResult = document.createElement('div'); publicationResult.className = `gitPublicationResult ${published ? 'isPublished' : publication.status === 'failed' ? 'isFailed' : ''}`;
+    const copy = document.createElement('div');
+    const heading = document.createElement('strong'); heading.textContent = published ? 'Published to website main' : publication.status === 'failed' ? 'Publication failed' : 'Publication in progress';
+    const detail = document.createElement('p'); detail.textContent = published ? `Commit ${publication.commitSha?.slice(0, 12) || ''} is on main. The deployed branch has not been changed.` : publication.failureSummary || publication.status;
+    copy.append(heading, detail); publicationResult.appendChild(copy); result.appendChild(publicationResult);
+  }
+  if (validation.status === 'passed' && current && !published) {
+    const actions = document.createElement('div'); actions.className = 'gitPublicationActions';
+    const note = document.createElement('p'); note.textContent = 'Creates a commit from this exact validated package, verifies a clean production build, then pushes it to website main. This does not deploy it.';
+    const publish = document.createElement('button'); publish.type = 'button'; publish.className = 'btn btnPrimary'; publish.textContent = matchingPublication && publication.status !== 'failed' ? 'Publishing…' : 'Publish to main';
+    publish.disabled = !state.me?.access?.edit || (matchingPublication && !['failed'].includes(publication.status));
+    publish.addEventListener('click', async () => {
+      if (!window.confirm('Publish this validated package to the Intelligence Snacks main branch? This creates and pushes a Git commit, but does not deploy the website.')) return;
+      const clear = setButtonBusy(publish, 'Publishing to main…'); setStudioStatus('Building the exact commit and publishing it to website main…');
+      try {
+        state.gitPublication = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/git-publication`, { method:'POST', body:'{}' })).publication;
+        renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+        setStudioStatus(state.gitPublication.status === 'published' ? 'Published to website main' : state.gitPublication.failureSummary || 'Publication failed');
+      } catch (error) { setStudioStatus(error.message); } finally { clear(); }
+    });
+    actions.append(note, publish); result.appendChild(actions);
+  }
   return result;
 }
 

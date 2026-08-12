@@ -2022,6 +2022,13 @@ textarea {
 .websiteValidationResult p { color:var(--text-muted); }
 .websiteValidationResult details { background:var(--surface-1); }
 .websiteValidationResult pre { max-height:360px; overflow:auto; margin:0; padding:14px; border-top:1px solid var(--border); font-size:var(--text-xs); line-height:1.5; white-space:pre-wrap; }
+.gitPublicationActions { display:flex; align-items:center; justify-content:space-between; gap:18px; padding-top:12px; border-top:1px solid var(--border); }
+.gitPublicationActions p { max-width:680px; }
+.gitPublicationActions .btn { flex:0 0 auto; }
+.gitPublicationResult { padding:12px 14px; border-left:3px solid var(--warning); background:var(--surface-1); }
+.gitPublicationResult.isPublished { border-left-color:var(--success); }
+.gitPublicationResult.isFailed { border-left-color:var(--danger); }
+.gitPublicationResult p { margin-top:4px; }
 div.publicationPreparationBlocker { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .publicationPreparationBlocker p { margin: 0; }
 

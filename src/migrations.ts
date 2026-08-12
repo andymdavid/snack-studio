@@ -1019,6 +1019,35 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: '026_git_publication_attempts',
+    description: 'Record guarded Intelligence Snacks main-branch publication attempts',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS git_publication_attempts (
+          id TEXT PRIMARY KEY,
+          episode_id TEXT NOT NULL,
+          validation_attempt_id TEXT NOT NULL,
+          package_fingerprint TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('committing','validating-commit','pushing-main','published','failed')),
+          base_commit TEXT NOT NULL,
+          commit_sha TEXT,
+          commit_message TEXT NOT NULL,
+          main_pushed INTEGER NOT NULL DEFAULT 0 CHECK(main_pushed IN (0,1)),
+          clean_build_output TEXT,
+          failure_summary TEXT,
+          actor_pubkey TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (validation_attempt_id) REFERENCES website_validation_attempts(id),
+          FOREIGN KEY (actor_pubkey) REFERENCES users(pubkey)
+        );
+        CREATE INDEX IF NOT EXISTS git_publication_attempts_episode_index
+          ON git_publication_attempts(episode_id, created_at DESC);
+      `);
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

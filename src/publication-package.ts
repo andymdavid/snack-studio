@@ -106,7 +106,7 @@ export function buildPublicationPackage(episodeId: string) {
     schemaVersion: 1,
     episode: {
       id: episode.id, slug: episodeSlug, number: episode.episodeNumber, title: episode.publicTitle || episode.workingTitle,
-      summary: episode.publicSummary, status: 'review', participants: contributorIds, primaryTopic,
+      summary: episode.publicSummary, status: 'published', participants: contributorIds, primaryTopic,
       relatedTopics: [...new Set(snacks.flatMap((snack) => snack.relatedTopics))].filter((topic) => topic !== primaryTopic),
       recordedOn: episode.recordedOn, audioUrl: episode.audioUrl, youtubeUrl: episode.videoUrl,
       transcript: transcript && episodeNumber ? episodeSlug : null,
