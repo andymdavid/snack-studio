@@ -268,7 +268,7 @@ export function finishEpisodeThumbnail(row: Record<string, unknown>, destination
     const guestLayer = guestLine ? renderLabel('guest', guestLine, displayFont, 78, '#242424', 740) : null;
     const brandLayer = renderLabel('brand', 'INTELLIGENCE SNACKS', pixelFont, 58, '#f2f2f2', 460);
     const episodeLayer = renderLabel('episode', `- EP ${episode.episodeNumber || ''}`, pixelFont, 58, '#ff751f', 170);
-    const accentX = 62; const accentY = 420; const accentPadX = 24; const accentPadY = 16;
+    const accentX = 62; const accentY = 420; const accentPadX = 24; const accentPadY = 24;
     const brandX = 62; const brandY = 830; const brandPadX = 18; const brandPadY = 10;
     const args = ['magick', String(row.source_uri), '-resize', '1672x941^', '-gravity', 'center', '-extent', '1672x941',
       '-gravity', 'northwest',
