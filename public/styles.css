@@ -2037,10 +2037,11 @@ div.publicationPreparationBlocker { display: flex; align-items: center; justify-
 .episodeThumbnailReviewShell { gap: 18px; }
 .episodeThumbnailReviewGallery { display: block; }
 .episodeThumbnailReviewGallery article { width: 100%; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 16px; }
-.episodeThumbnailReviewGallery article > img { grid-column: 1 / -1; max-height: min(68vh, 820px); aspect-ratio: 16 / 9; object-fit: contain; border: 1px solid var(--border); background: var(--surface-2); }
+.episodeThumbnailCanvasStage { grid-column:1 / -1; min-height:0; display:flex; align-items:center; justify-content:center; padding:18px; border-radius:var(--radius-card); background:#222624; box-shadow:inset 0 0 0 1px rgba(255,255,255,.12); }
+.episodeThumbnailCanvasStage > img { display:block; width:auto; max-width:100%; height:auto; max-height:min(64vh, 760px); aspect-ratio:auto; border:1px solid rgba(255,255,255,.3); border-radius:2px; object-fit:contain; background:#f5f4ef; box-shadow:0 12px 30px rgba(0,0,0,.28); }
 .episodeThumbnailPreviews { min-width: 0; display: flex; align-items: end; gap: 18px; overflow-x: auto; padding-bottom: 4px; }
 .episodeThumbnailPreviews figure { flex:none; display:grid; gap:6px; margin:0; }
-.episodeThumbnailPreviews img { display:block; aspect-ratio:16 / 9; border:1px solid var(--border); border-radius:var(--radius-control); object-fit:cover; }
+.episodeThumbnailPreviews img { display:block; aspect-ratio:16 / 9; border:2px solid var(--ink); border-radius:var(--radius-control); object-fit:cover; box-shadow:0 3px 10px rgba(0,0,0,.14); }
 .episodeThumbnailPreviews figcaption { color:var(--text-muted); font-size:var(--text-xs); }
 .episodePreviewHomepage img { width:320px; }
 .episodePreviewMobile img { width:180px; }

@@ -935,6 +935,7 @@ async function openThumbnailReview(jobId, snackTitle, triggerButton = null, isEp
       action.textContent = candidate.status === 'approved' ? 'Approved' : 'Approve this thumbnail'; action.disabled = candidate.status === 'approved' || !state.me?.access?.edit;
       action.addEventListener('click', () => approveSnackThumbnail(candidate.id, dialog, action));
       if (isEpisode) {
+        const stage = document.createElement('div'); stage.className = 'episodeThumbnailCanvasStage'; stage.appendChild(image);
         const previews = document.createElement('div'); previews.className = 'episodeThumbnailPreviews';
         for (const [label, className] of [['Homepage', 'episodePreviewHomepage'], ['Mobile', 'episodePreviewMobile'], ['Social', 'episodePreviewSocial']]) {
           const preview = document.createElement('figure'); preview.className = className;
@@ -943,7 +944,7 @@ async function openThumbnailReview(jobId, snackTitle, triggerButton = null, isEp
           const caption = document.createElement('figcaption'); caption.textContent = label;
           preview.append(previewImage, caption); previews.appendChild(preview);
         }
-        card.append(image, previews, action);
+        card.append(stage, previews, action);
       } else card.append(image, action);
       gallery.appendChild(card);
     }
