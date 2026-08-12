@@ -94,6 +94,7 @@ import { applySuccessfulPublicationMetadataResult } from "./publication-metadata
 import { buildPublicationPackage } from "./publication-package.ts";
 import { getLatestWebsiteValidation, stageAndValidateWebsitePackage } from './website-validation.ts';
 import { getLatestGitPublication, publishValidatedPackageToMain } from './git-publication.ts';
+import { deployPublishedCommit, getLatestGitDeployment } from './git-deployment.ts';
 import { createContributor, getContributor, listContributors, photoMediaType, publicContributor } from "./contributors.ts";
 import { validateContributorPhoto, validateContributorProfile } from "./contributor-input.ts";
 import { approvePortraitCandidate, applyPortraitResult, createPortraitJob, getPortraitCandidate, listPortraitJobs, markPortraitJobStarted, verifyPortraitTrigger } from "./contributor-portraits.ts";
@@ -736,6 +737,17 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
   if (gitPublicationMatch && req.method === 'POST') {
     const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
     try { return json({ publication: publishValidatedPackageToMain(decodeURIComponent(gitPublicationMatch[1]!), session.pubkey) }, 201); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 409); }
+  }
+  const gitDeploymentMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/git-deployment$/);
+  if (gitDeploymentMatch && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    return json({ deployment: getLatestGitDeployment(decodeURIComponent(gitDeploymentMatch[1]!)) });
+  }
+  if (gitDeploymentMatch && req.method === 'POST') {
+    const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
+    try { return json({ deployment: deployPublishedCommit(decodeURIComponent(gitDeploymentMatch[1]!), session.pubkey) }, 201); }
     catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 409); }
   }
 

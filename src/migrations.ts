@@ -1048,6 +1048,33 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: '027_git_deployment_attempts',
+    description: 'Record explicit Intelligence Snacks deployed-branch fast-forwards',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS git_deployment_attempts (
+          id TEXT PRIMARY KEY,
+          episode_id TEXT NOT NULL,
+          publication_attempt_id TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('validating','pushing-deployed','deployed','failed')),
+          source_commit TEXT NOT NULL,
+          previous_deployed_commit TEXT,
+          deployed_pushed INTEGER NOT NULL DEFAULT 0 CHECK(deployed_pushed IN (0,1)),
+          production_verified INTEGER NOT NULL DEFAULT 0 CHECK(production_verified IN (0,1)),
+          failure_summary TEXT,
+          actor_pubkey TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (publication_attempt_id) REFERENCES git_publication_attempts(id),
+          FOREIGN KEY (actor_pubkey) REFERENCES users(pubkey)
+        );
+        CREATE INDEX IF NOT EXISTS git_deployment_attempts_episode_index
+          ON git_deployment_attempts(episode_id, created_at DESC);
+      `);
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

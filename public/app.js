@@ -46,6 +46,7 @@ const state = {
   publicationPackage: null,
   websiteValidation: null,
   gitPublication: null,
+  gitDeployment: null,
   contributorFormOpen: false,
   contributorPortraitJobs: {},
   thumbnailPollTimers: {},
@@ -453,7 +454,7 @@ async function loadEpisode(id) {
   showStudioPage("episodePage", "Snack Studio / Episodes / Workspace");
   setStudioStatus("Loading workspace…");
   try {
-    const [payload, candidatePayload, curationPayload, pipelinePayload, publicationPayload, packagePayload, validationPayload, gitPublicationPayload] = await Promise.all([
+    const [payload, candidatePayload, curationPayload, pipelinePayload, publicationPayload, packagePayload, validationPayload, gitPublicationPayload, gitDeploymentPayload] = await Promise.all([
       api(`/api/episodes/${encodeURIComponent(id)}`),
       api(`/api/episodes/${encodeURIComponent(id)}/candidates`),
       api(`/api/episodes/${encodeURIComponent(id)}/curation`),
@@ -462,6 +463,7 @@ async function loadEpisode(id) {
       api(`/api/episodes/${encodeURIComponent(id)}/publication-package`).catch(() => ({ package: null })),
       api(`/api/episodes/${encodeURIComponent(id)}/website-validation`).catch(() => ({ validation: null })),
       api(`/api/episodes/${encodeURIComponent(id)}/git-publication`).catch(() => ({ publication: null })),
+      api(`/api/episodes/${encodeURIComponent(id)}/git-deployment`).catch(() => ({ deployment: null })),
     ]);
     state.activeEpisode = payload.episode;
     state.activeTranscript = payload.transcript || null;
@@ -482,6 +484,7 @@ async function loadEpisode(id) {
     state.publicationPackage = packagePayload.package || null;
     state.websiteValidation = validationPayload.validation || null;
     state.gitPublication = gitPublicationPayload.publication || null;
+    state.gitDeployment = gitDeploymentPayload.deployment || null;
     if (!state.episodeStage || state.episodeStageId !== id) {
       state.episodeStage = episodeWorkspaceStage();
       state.episodeStageId = id;
@@ -894,11 +897,11 @@ function renderPublicationPackageManifest(packageValue) {
   const fileList = document.createElement('ul'); fileList.className = 'publicationPackageFiles';
   for (const file of packageValue.files || []) { const item = document.createElement('li'); const kind = document.createElement('span'); kind.textContent = file.kind; const path = document.createElement('code'); path.textContent = file.destination; item.append(kind, path); fileList.appendChild(item); }
   paths.append(summary, fileList); panel.appendChild(paths);
-  if (state.websiteValidation) panel.appendChild(renderWebsiteValidation(state.websiteValidation, packageValue, state.gitPublication));
+  if (state.websiteValidation) panel.appendChild(renderWebsiteValidation(state.websiteValidation, packageValue, state.gitPublication, state.gitDeployment));
   return panel;
 }
 
-function renderWebsiteValidation(validation, packageValue, publication) {
+function renderWebsiteValidation(validation, packageValue, publication, deployment) {
   const result = document.createElement('section'); result.className = 'websiteValidationResult';
   const current = validation.packageFingerprint === packageValue.fingerprint;
   const header = document.createElement('div');
@@ -933,6 +936,32 @@ function renderWebsiteValidation(validation, packageValue, publication) {
       } catch (error) { setStudioStatus(error.message); } finally { clear(); }
     });
     actions.append(note, publish); result.appendChild(actions);
+  }
+  if (published) {
+    const matchingDeployment = deployment?.publicationAttemptId === publication.id && deployment.sourceCommit === publication.commitSha;
+    const deployed = matchingDeployment && deployment.status === 'deployed' && deployment.deployedPushed;
+    if (matchingDeployment) {
+      const deploymentResult = document.createElement('div'); deploymentResult.className = `gitPublicationResult ${deployed ? 'isPublished' : deployment.status === 'failed' ? 'isFailed' : ''}`;
+      const copy = document.createElement('div'); const heading = document.createElement('strong'); heading.textContent = deployed ? 'Deployment triggered' : deployment.status === 'failed' ? 'Deployment failed' : 'Deployment in progress';
+      const detail = document.createElement('p'); detail.textContent = deployed ? `The deployed branch now points to ${deployment.sourceCommit.slice(0, 12)}. Production verification remains external.` : deployment.failureSummary || deployment.status;
+      copy.append(heading, detail); deploymentResult.appendChild(copy); result.appendChild(deploymentResult);
+    }
+    if (!deployed) {
+      const actions = document.createElement('div'); actions.className = 'gitPublicationActions';
+      const note = document.createElement('p'); note.textContent = 'Fast-forwards the website deployed branch to this exact published commit. Pushing the branch triggers the production deployment.';
+      const deploy = document.createElement('button'); deploy.type = 'button'; deploy.className = 'btn btnPrimary'; deploy.textContent = matchingDeployment && deployment.status !== 'failed' ? 'Deploying…' : 'Deploy website';
+      deploy.disabled = !state.me?.access?.edit || (matchingDeployment && deployment.status !== 'failed');
+      deploy.addEventListener('click', async () => {
+        if (!window.confirm(`Deploy website commit ${publication.commitSha.slice(0, 12)}? This fast-forwards and pushes the deployed branch, triggering the live production build.`)) return;
+        const clear = setButtonBusy(deploy, 'Deploying website…'); setStudioStatus('Fast-forwarding the website deployed branch…');
+        try {
+          state.gitDeployment = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/git-deployment`, { method:'POST', body:'{}' })).deployment;
+          renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+          setStudioStatus(state.gitDeployment.status === 'deployed' ? 'Website deployment triggered' : state.gitDeployment.failureSummary || 'Deployment failed');
+        } catch (error) { setStudioStatus(error.message); } finally { clear(); }
+      });
+      actions.append(note, deploy); result.appendChild(actions);
+    }
   }
   return result;
 }
