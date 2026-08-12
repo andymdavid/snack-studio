@@ -214,23 +214,29 @@ export function approveThumbnailCandidate(candidateId: string, actorPubkey: stri
   return getThumbnailJobDetail(jobId)!;
 }
 
-function escapeSvg(value: string) { return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;'); }
-
 function finishEpisodeThumbnail(row: Record<string, unknown>, destination: string) {
   const episode = getEpisode(String(row.episode_id));
   if (!episode) throw new Error('Episode not found');
-  const words = String(episode.publicTitle || episode.workingTitle).toUpperCase().split(/\s+/).filter(Boolean);
+  const displayTitle = String(episode.publicTitle || episode.workingTitle)
+    .replace(/^episode\s+\d+\s*:\s*/i, '').replace(/\s+v\d+$/i, '').trim();
+  const words = displayTitle.toUpperCase().split(/\s+/).filter(Boolean);
   const split = Math.max(1, Math.ceil(words.length * .48));
-  const lead = escapeSvg(words.slice(0, split).join(' '));
-  const accent = escapeSvg(words.slice(split).join(' ') || words.slice(0, split).join(' '));
+  const lead = words.slice(0, split).join(' ');
+  const accent = words.slice(split).join(' ') || words.slice(0, split).join(' ');
   const contributorIds = parseStringArray(row.contributor_ids_json);
   const guests = contributorIds.map(getContributor).filter((item) => item && !['pete-winn','andy-david'].includes(item.id));
-  const guestLine = guests.length ? `FEAT. ${escapeSvg(guests.map((item) => item!.name).join(' & ').toUpperCase())}` : '';
+  const guestLine = guests.length ? `FEAT. ${guests.map((item) => item!.name).join(' & ').toUpperCase()}` : '';
+  const leadSize = String(Math.max(58, Math.min(130, Math.floor(900 / Math.max(1, lead.length * .48)))));
+  const accentSize = String(Math.max(56, Math.min(126, Math.floor(870 / Math.max(1, accent.length * .48)))));
   const cassette = resolve('public/images/intelligence-snacks-cassette-transparent-hd.webp');
-  const overlayPath = join(resolve(destination, '..'), 'overlay.svg');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1672" height="941"><style>text{font-family:'DejaVu Sans';font-weight:700;letter-spacing:-4px}</style><rect x="52" y="48" width="250" height="70" rx="5" fill="#fe5a16"/><text x="74" y="99" font-size="45" fill="#111">IS - ${episode.episodeNumber || ''}</text><text x="64" y="360" font-size="116" fill="#111">${lead}</text><rect x="56" y="390" width="930" height="170" fill="#fe5a16"/><text x="78" y="518" font-size="112" fill="#fff">${accent}</text>${guestLine ? `<text x="68" y="690" font-size="58" fill="#111">${guestLine}</text>` : ''}</svg>`;
-  writeFileSync(overlayPath, svg);
-  const args = ['magick', String(row.source_uri), '-resize', '1672x941^', '-gravity', 'center', '-extent', '1672x941', overlayPath, '-composite'];
+  const font = resolve('public/fonts/BebasNeue-Regular.ttf');
+  const args = ['magick', String(row.source_uri), '-resize', '1672x941^', '-gravity', 'center', '-extent', '1672x941',
+    '-gravity', 'northwest', '-fill', '#fe5a16', '-draw', 'roundrectangle 52,48 302,118 5,5',
+    '-font', font, '-fill', '#111111', '-pointsize', '45', '-annotate', '+74+56', `IS - ${episode.episodeNumber || ''}`,
+    '-pointsize', leadSize, '-annotate', '+64+245', lead,
+    '-fill', '#fe5a16', '-draw', 'rectangle 56,390 986,560',
+    '-fill', '#ffffff', '-pointsize', accentSize, '-annotate', '+78+410', accent];
+  if (guestLine) args.push('-fill', '#111111', '-pointsize', '58', '-annotate', '+68+620', guestLine);
   if (existsSync(cassette)) args.push('(', cassette, '-resize', '94x61', ')', '-gravity', 'southwest', '-geometry', '+65+50', '-composite');
   args.push('-strip', '-quality', '84', destination);
   return Bun.spawnSync(args);
@@ -247,7 +253,7 @@ export async function uploadEpisodeThumbnail(jobId: string, file: File, actorPub
   const row = db.query('SELECT * FROM thumbnail_jobs WHERE id=?1').get(job.id) as Record<string, unknown>;
   const finished = finishEpisodeThumbnail({ ...row, source_uri: source }, preview); if (finished.exitCode !== 0) throw new Error('Episode thumbnail preview could not be composed');
   const dimensions = thumbnailDimensions(preview, 'episode'); const now = Date.now(); const id = crypto.randomUUID();
-  db.transaction(() => { db.query(`INSERT INTO thumbnail_candidates(id,job_id,generation_round,candidate_number,source_uri,prompt_text,model_name,width,height,mime_type,size_bytes,created_at) VALUES(?1,?2,?3,1,?4,'Editorial upload','upload',?5,?6,'image/webp',?7,?8)`).run(id, job.id, round, preview, dimensions.width, dimensions.height, statSync(preview).size, now); db.query("UPDATE thumbnail_jobs SET status='in-review',generation_round=?1,updated_at=?2 WHERE id=?3").run(round, now, job.id); recordAuditEvent({ actorPubkey, action:'thumbnail.episode.uploaded', entityType:'thumbnail-job', entityId:job.id }); });
+  db.transaction(() => { db.query(`INSERT INTO thumbnail_candidates(id,job_id,generation_round,candidate_number,source_uri,prompt_text,model_name,width,height,mime_type,size_bytes,created_at) VALUES(?1,?2,?3,1,?4,'Editorial upload','upload',?5,?6,'image/webp',?7,?8)`).run(id, job.id, round, preview, dimensions.width, dimensions.height, statSync(preview).size, now); db.query("UPDATE thumbnail_jobs SET status='in-review',generation_round=?1,updated_at=?2 WHERE id=?3").run(round, now, job.id); recordAuditEvent({ actorPubkey, action:'thumbnail.episode.uploaded', entityType:'thumbnail-job', entityId:job.id }); })();
   return getThumbnailJobDetail(job.id)!;
 }
 
