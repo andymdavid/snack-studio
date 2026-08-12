@@ -18,6 +18,11 @@ describe("publication metadata", () => {
     expect(transcriptSpeakerLabels(transcript)).toEqual(["Pete Winn", "dpc", "New Guest"]);
   });
 
+  test("extracts timestamp-first speaker labels used by current transcripts", () => {
+    const current = `[00:00:01] Pete\nWelcome.\n\n[00:00:08]\nAndy\nHello.\n\n[00:00:14] Anthony\nThanks.\n\n[00:00:20] Pete\nContinue.`;
+    expect(transcriptSpeakerLabels(current)).toEqual(["Pete", "Andy", "Anthony"]);
+  });
+
   test("resolves approved portraits and isolates a genuinely new guest", () => {
     const result = resolveTranscriptParticipants(transcript);
     expect(result.resolved.map(({ contributorId }) => contributorId)).toEqual(["pete-winn", "dpc"]);

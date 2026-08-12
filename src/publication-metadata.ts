@@ -15,8 +15,13 @@ function normalizedLabel(value: string): string {
 export function transcriptSpeakerLabels(transcriptText: string): string[] {
   const labels: string[] = [];
   const seen = new Set<string>();
-  for (const match of transcriptText.matchAll(/^([^\n()]{1,100})\s+\((?:\d{1,2}:)?\d{2}\)\s*$/gm)) {
-    const label = match[1]!.trim();
+  const matches = [
+    ...[...transcriptText.matchAll(/^([^\n()]{1,100})\s+\((?:\d{1,2}:)?\d{2}\)\s*$/gm)].map((match) => ({ index: match.index, label: match[1] })),
+    ...[...transcriptText.matchAll(/^\[(?:\d{1,2}:)?\d{2}(?::\d{2})?\][ \t]*([^\n]{1,100})[ \t]*$/gm)].map((match) => ({ index: match.index, label: match[1] })),
+    ...[...transcriptText.matchAll(/^\[(?:\d{1,2}:)?\d{2}(?::\d{2})?\][ \t]*\n([^\n]{1,100})[ \t]*$/gm)].map((match) => ({ index: match.index, label: match[1] })),
+  ].sort((a, b) => a.index - b.index);
+  for (const match of matches) {
+    const label = match.label!.trim();
     const key = normalizedLabel(label);
     if (!key || seen.has(key)) continue;
     seen.add(key);
