@@ -27,6 +27,12 @@ export function episodePublicationSlug(number: number) {
   return `episode-${String(number).padStart(3, '0')}`;
 }
 
+export function deriveEpisodeTopics(topicIds: string[]) {
+  const counts = topicIds.reduce((result, topic) => result.set(topic, (result.get(topic) || 0) + 1), new Map<string, number>());
+  const primaryTopic = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] || 'software-systems';
+  return { primaryTopic, relatedTopics: [...counts.keys()].filter((topic) => topic !== primaryTopic) };
+}
+
 function selectedFinishedAsset(jobId: string) {
   return db.query(`SELECT a.* FROM thumbnail_assets a
     JOIN thumbnail_jobs j ON j.id=a.job_id
@@ -42,10 +48,6 @@ export function buildPublicationPackage(episodeId: string) {
   const blockers: PublicationBlocker[] = [];
   if (episode.status !== 'approved') blockers.push({ code: 'episode-not-approved', message: 'Approve the final Snack set before preparing the website package.' });
   if (!episode.episodeNumber) blockers.push({ code: 'episode-number-missing', message: 'The episode needs a publication number.' });
-  if (!episode.publicTitle?.trim()) blockers.push({ code: 'episode-title-missing', message: 'The episode needs a public title.' });
-  if (!episode.publicSummary?.trim()) blockers.push({ code: 'episode-summary-missing', message: 'The episode needs a public summary.' });
-  const explicitEpisodeTopic = resolveCanonicalTopic(episode.primaryTopic)?.id || '';
-  if (!explicitEpisodeTopic) blockers.push({ code: 'episode-topic-missing', message: 'The episode needs a canonical primary topic.' });
   if (!transcript) blockers.push({ code: 'transcript-missing', message: 'The episode needs an active transcript revision.' });
   for (const check of approved.checks.filter((item) => !item.ok)) blockers.push({ code: `approved-${check.key}`, message: check.message });
 
@@ -99,15 +101,17 @@ export function buildPublicationPackage(episodeId: string) {
   if (!episodeAsset) blockers.push({ code: 'episode-thumbnail-missing', message: 'The episode needs an approved finished thumbnail.' });
   if (episodeAsset && episodeNumber) files.push({ kind: 'episode-thumbnail', destination: `public/images/episodes/${episodeSlug}-thumbnail.webp`, sourceId: episode.id, sourcePath: String(episodeAsset.storage_path), sizeBytes: Number(episodeAsset.size_bytes) });
 
-  const primaryTopic = explicitEpisodeTopic;
+  const episodeTopicSet = deriveEpisodeTopics(snacks.map((snack) => snack.primaryTopic));
+  const primaryTopic = episodeTopicSet.primaryTopic;
+  const summary = episode.publicSummary?.trim() || snacks.slice(0, 2).map((snack) => snack.standfirst.trim()).filter(Boolean).join(' ').slice(0, 500);
   const duplicateDestinations = files.map((file) => file.destination).filter((path, index, all) => all.indexOf(path) !== index);
   for (const destination of new Set(duplicateDestinations)) blockers.push({ code: 'destination-collision', message: `More than one package item targets ${destination}.` });
   const packageValue = {
     schemaVersion: 1,
     episode: {
-      id: episode.id, slug: episodeSlug, number: episode.episodeNumber, title: episode.publicTitle || episode.workingTitle,
-      summary: episode.publicSummary, status: 'published', participants: contributorIds, primaryTopic,
-      relatedTopics: [...new Set(snacks.flatMap((snack) => snack.relatedTopics))].filter((topic) => topic !== primaryTopic),
+      id: episode.id, slug: episodeSlug, number: episode.episodeNumber, title: episode.workingTitle,
+      summary, status: 'published', participants: contributorIds, primaryTopic,
+      relatedTopics: [...new Set([...episodeTopicSet.relatedTopics, ...snacks.flatMap((snack) => snack.relatedTopics)])].filter((topic) => topic !== primaryTopic),
       recordedOn: episode.recordedOn, audioUrl: episode.audioUrl, youtubeUrl: episode.videoUrl,
       transcript: transcript && episodeNumber ? episodeSlug : null,
       thumbnail: episodeAsset && episodeNumber ? `/images/episodes/${episodeSlug}-thumbnail.webp` : null,
