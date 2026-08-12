@@ -12,8 +12,8 @@ describe('thumbnail generation trigger verification', () => {
   test('pins the current episode-thumbnail pipeline route', () => {
     expect(thumbnailPipelineRoute('episode')).toEqual({
       pipeline: 'snack-studio-episode-thumbnail',
-      version: '3',
-      path: '/snack-studio-episode-thumbnail.v3',
+      version: '4',
+      path: '/snack-studio-episode-thumbnail.v4',
     });
   });
 });
