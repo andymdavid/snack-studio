@@ -1,0 +1,5 @@
+Copyright 2011 The Anton Project Authors (https://github.com/googlefonts/AntonFont)
+Copyright 2023 The Jersey Project Authors (https://github.com/scfried/soft-type-jersey)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is available with a FAQ at: https://openfontlicense.org
