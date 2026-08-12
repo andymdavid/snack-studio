@@ -406,7 +406,7 @@ async function loadWorkflowRoute(kind) {
       state.episodeStage = 'publication';
       renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
     }
-    if (kind === 'publications' && state.activeEpisode?.status === 'approved' && !state.publicationPreparation) await preparePublication();
+    if (kind === 'publications' && state.activeEpisode?.status === 'approved' && !state.publicationPreparation?.jobs?.length) await preparePublication();
     return;
   }
   state.workspaceOrigin = kind === 'review' ? '/review' : '/publications';
@@ -2247,7 +2247,7 @@ async function preparePublication() {
   if (!state.activeEpisode) return;
   setStudioStatus("Preparing publication…");
   try {
-    const payload = state.publicationPreparation
+    const payload = state.publicationPreparation?.jobs?.length
       ? { preparation: state.publicationPreparation }
       : await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`, { method: "POST", body: JSON.stringify({}) });
     state.publicationPreparation = payload.preparation;
@@ -2317,7 +2317,7 @@ async function startPublicTranscriptCleanup() {
   for (const reference of triggerRequest.body?.input?.localContext?.references || []) reference.authorization = await signNip98Request({ url: reference.url, method: 'GET' });
   const autopilotAuthorization = await signNip98Request(triggerRequest);
   await api(`/api/episode-pipeline-runs/${encodeURIComponent(prepared.runId)}/start`, { method: 'POST', body: JSON.stringify({ autopilotAuthorization, triggerRequest }) });
-  await loadEpisode(state.activeEpisode.id); setStudioStatus('Preparing website transcript…');
+  await loadEpisode(state.activeEpisode.id, { stage: 'publication', origin: '/publications' }); setStudioStatus('Preparing website transcript…');
 }
 
 async function startGraphRelationshipSuggestions() {
@@ -2325,7 +2325,7 @@ async function startGraphRelationshipSuggestions() {
   const prepared = await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/pipeline-requests`, { method: 'POST', body: JSON.stringify({ operation: 'publication-metadata', pipelineName: 'snack-studio-graph-relationships', pipelineVersion: '1', promptSuiteVersion: 'v1-graph-relationships', resultSchemaVersion: '3', idempotencyKey: crypto.randomUUID(), autopilotTargetId: state.activeAutopilotTargetId || undefined }) });
   const triggerRequest = structuredClone(prepared.triggerRequest); for (const reference of triggerRequest.body?.input?.localContext?.references || []) reference.authorization = await signNip98Request({ url: reference.url, method: 'GET' });
   const autopilotAuthorization = await signNip98Request(triggerRequest); await api(`/api/episode-pipeline-runs/${encodeURIComponent(prepared.runId)}/start`, { method: 'POST', body: JSON.stringify({ autopilotAuthorization, triggerRequest }) });
-  await loadEpisode(state.activeEpisode.id);
+  await loadEpisode(state.activeEpisode.id, { stage: 'publication', origin: '/publications' });
 }
 
 async function startPublicationMetadataClassification() {
@@ -2352,7 +2352,7 @@ async function startPublicationMetadataClassification() {
   await api(`/api/episode-pipeline-runs/${encodeURIComponent(prepared.runId)}/start`, {
     method: "POST", body: JSON.stringify({ autopilotAuthorization, triggerRequest }),
   });
-  await loadEpisode(state.activeEpisode.id);
+  await loadEpisode(state.activeEpisode.id, { stage: 'publication', origin: '/publications' });
   setStudioStatus("Deriving episode themes from the transcript…");
 }
 
