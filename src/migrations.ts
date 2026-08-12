@@ -939,6 +939,19 @@ const migrations: Migration[] = [
         CREATE UNIQUE INDEX IF NOT EXISTS thumbnail_jobs_episode_asset_unique
           ON thumbnail_jobs(episode_id)
           WHERE asset_kind = 'episode';
+
+        INSERT OR IGNORE INTO thumbnail_jobs(
+          id, episode_id, asset_kind, transcript_revision_id, status,
+          contributor_ids_json, created_by_pubkey, created_at, updated_at
+        )
+        SELECT
+          'episode-thumbnail-' || episode.id, episode.id, 'episode', episode.active_transcript_revision_id, 'draft',
+          COALESCE((SELECT contributor_ids_json FROM thumbnail_jobs snack WHERE snack.episode_id = episode.id AND snack.asset_kind = 'snack' LIMIT 1), '[]'),
+          episode.owner_pubkey,
+          CAST(strftime('%s','now') AS INTEGER) * 1000,
+          CAST(strftime('%s','now') AS INTEGER) * 1000
+        FROM episodes episode
+        WHERE episode.status = 'approved' AND episode.active_transcript_revision_id IS NOT NULL;
       `);
     },
   },
