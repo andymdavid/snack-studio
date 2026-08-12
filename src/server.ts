@@ -92,6 +92,7 @@ import { THUMBNAIL_CANDIDATES_PER_ROUND, THUMBNAIL_TOPICS } from "./thumbnail-ca
 import { validateSuccessfulPublicationMetadataResult } from "./publication-metadata-result-input.ts";
 import { applySuccessfulPublicationMetadataResult } from "./publication-metadata-results.ts";
 import { buildPublicationPackage } from "./publication-package.ts";
+import { getLatestWebsiteValidation, stageAndValidateWebsitePackage } from './website-validation.ts';
 import { createContributor, getContributor, listContributors, photoMediaType, publicContributor } from "./contributors.ts";
 import { validateContributorPhoto, validateContributorProfile } from "./contributor-input.ts";
 import { approvePortraitCandidate, applyPortraitResult, createPortraitJob, getPortraitCandidate, listPortraitJobs, markPortraitJobStarted, verifyPortraitTrigger } from "./contributor-portraits.ts";
@@ -713,6 +714,17 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
     try { return json({ package: buildPublicationPackage(decodeURIComponent(publicationPackageMatch[1]!)) }); }
     catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 400); }
+  }
+  const websiteValidationMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/website-validation$/);
+  if (websiteValidationMatch && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    return json({ validation: getLatestWebsiteValidation(decodeURIComponent(websiteValidationMatch[1]!)) });
+  }
+  if (websiteValidationMatch && req.method === 'POST') {
+    const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
+    try { return json({ validation: stageAndValidateWebsitePackage(decodeURIComponent(websiteValidationMatch[1]!), session.pubkey) }, 201); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 409); }
   }
 
   if (publicationPreparationMatch && req.method === "POST") {

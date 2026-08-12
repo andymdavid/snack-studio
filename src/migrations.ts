@@ -989,6 +989,36 @@ const migrations: Migration[] = [
       if (!hasColumn(db, 'episodes', 'primary_topic')) db.exec('ALTER TABLE episodes ADD COLUMN primary_topic TEXT');
     },
   },
+  {
+    id: '025_website_validation_attempts',
+    description: 'Record immutable website package staging and build validation attempts',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS website_validation_attempts (
+          id TEXT PRIMARY KEY,
+          episode_id TEXT NOT NULL,
+          package_fingerprint TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('staging','validating','passed','failed')),
+          website_repo TEXT NOT NULL,
+          worktree_path TEXT NOT NULL,
+          base_commit TEXT,
+          package_json TEXT NOT NULL,
+          changed_files_json TEXT NOT NULL DEFAULT '[]',
+          diff_stat TEXT,
+          text_diff TEXT,
+          build_output TEXT,
+          failure_summary TEXT,
+          actor_pubkey TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (actor_pubkey) REFERENCES users(pubkey)
+        );
+        CREATE INDEX IF NOT EXISTS website_validation_attempts_episode_index
+          ON website_validation_attempts(episode_id, created_at DESC);
+      `);
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

@@ -44,6 +44,7 @@ const state = {
   episodeAuditEvents: [],
   publicationPreparation: null,
   publicationPackage: null,
+  websiteValidation: null,
   contributorFormOpen: false,
   contributorPortraitJobs: {},
   thumbnailPollTimers: {},
@@ -451,13 +452,14 @@ async function loadEpisode(id) {
   showStudioPage("episodePage", "Snack Studio / Episodes / Workspace");
   setStudioStatus("Loading workspace…");
   try {
-    const [payload, candidatePayload, curationPayload, pipelinePayload, publicationPayload, packagePayload] = await Promise.all([
+    const [payload, candidatePayload, curationPayload, pipelinePayload, publicationPayload, packagePayload, validationPayload] = await Promise.all([
       api(`/api/episodes/${encodeURIComponent(id)}`),
       api(`/api/episodes/${encodeURIComponent(id)}/candidates`),
       api(`/api/episodes/${encodeURIComponent(id)}/curation`),
       api(`/api/episodes/${encodeURIComponent(id)}/pipeline-requests`),
       api(`/api/episodes/${encodeURIComponent(id)}/publication-preparation`).catch(() => ({ preparation: null })),
       api(`/api/episodes/${encodeURIComponent(id)}/publication-package`).catch(() => ({ package: null })),
+      api(`/api/episodes/${encodeURIComponent(id)}/website-validation`).catch(() => ({ validation: null })),
     ]);
     state.activeEpisode = payload.episode;
     state.activeTranscript = payload.transcript || null;
@@ -476,6 +478,7 @@ async function loadEpisode(id) {
     state.episodeAuditEvents = payload.auditEvents || [];
     state.publicationPreparation = publicationPayload.preparation || null;
     state.publicationPackage = packagePayload.package || null;
+    state.websiteValidation = validationPayload.validation || null;
     if (!state.episodeStage || state.episodeStageId !== id) {
       state.episodeStage = episodeWorkspaceStage();
       state.episodeStageId = id;
@@ -874,7 +877,9 @@ function renderPublicationPackageManifest(packageValue) {
   fingerprint.title = packageValue.fingerprint || '';
   const refresh = document.createElement('button'); refresh.type = 'button'; refresh.className = 'btn btnSecondary'; refresh.textContent = 'Refresh package';
   refresh.addEventListener('click', async () => { const clear = setButtonBusy(refresh, 'Refreshing…'); try { state.publicationPackage = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-package`)).package; renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates); } catch (error) { setStudioStatus(error.message); } finally { clear(); } });
-  meta.append(fingerprint, refresh); header.append(copy, meta); panel.appendChild(header);
+  const stage = document.createElement('button'); stage.type = 'button'; stage.className = 'btn btnPrimary'; stage.textContent = 'Stage and validate'; stage.disabled = !packageValue.ready || !state.me?.access?.edit;
+  stage.addEventListener('click', async () => { const clear = setButtonBusy(stage, 'Validating website…'); setStudioStatus('Staging website package and running the production build…'); try { state.websiteValidation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/website-validation`, { method:'POST', body:'{}' })).validation; renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates); setStudioStatus(state.websiteValidation.status === 'passed' ? 'Website package validated' : 'Website validation failed'); } catch (error) { setStudioStatus(error.message); } finally { clear(); } });
+  meta.append(fingerprint, refresh, stage); header.append(copy, meta); panel.appendChild(header);
   const blockers = packageValue.blockers || [];
   if (blockers.length) {
     const list = document.createElement('ul'); list.className = 'publicationPackageBlockers';
@@ -886,7 +891,22 @@ function renderPublicationPackageManifest(packageValue) {
   const fileList = document.createElement('ul'); fileList.className = 'publicationPackageFiles';
   for (const file of packageValue.files || []) { const item = document.createElement('li'); const kind = document.createElement('span'); kind.textContent = file.kind; const path = document.createElement('code'); path.textContent = file.destination; item.append(kind, path); fileList.appendChild(item); }
   paths.append(summary, fileList); panel.appendChild(paths);
+  if (state.websiteValidation) panel.appendChild(renderWebsiteValidation(state.websiteValidation, packageValue));
   return panel;
+}
+
+function renderWebsiteValidation(validation, packageValue) {
+  const result = document.createElement('section'); result.className = 'websiteValidationResult';
+  const current = validation.packageFingerprint === packageValue.fingerprint;
+  const header = document.createElement('div');
+  const title = document.createElement('strong'); title.textContent = validation.status === 'passed' && current ? 'Website build passed' : validation.status === 'failed' ? 'Website build failed' : 'Previous package validation';
+  const status = document.createElement('span'); status.className = `statusPill ${validation.status === 'passed' && current ? 'statusSuccess' : 'statusWarning'}`; status.textContent = !current ? 'Package changed' : validation.status;
+  header.append(title, status); result.appendChild(header);
+  const meta = document.createElement('p'); meta.textContent = `${validation.changedFiles?.length || 0} changed files · base ${validation.baseCommit?.slice(0, 12) || 'not resolved'}`; result.appendChild(meta);
+  if (validation.failureSummary) { const failure = document.createElement('pre'); failure.textContent = validation.failureSummary; result.appendChild(failure); }
+  if (validation.diffStat) { const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'File change summary'; const pre = document.createElement('pre'); pre.textContent = validation.diffStat; details.append(summary, pre); result.appendChild(details); }
+  if (validation.textDiff) { const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Content diff'; const pre = document.createElement('pre'); pre.textContent = validation.textDiff; details.append(summary, pre); result.appendChild(details); }
+  return result;
 }
 
 function renderEpisodeThumbnailWorkflow(episode, job, resolved, portraitsNeeded) {
