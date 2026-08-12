@@ -91,6 +91,7 @@ import { approveThumbnailCandidate, applyThumbnailResult, createThumbnailGenerat
 import { THUMBNAIL_CANDIDATES_PER_ROUND, THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
 import { validateSuccessfulPublicationMetadataResult } from "./publication-metadata-result-input.ts";
 import { applySuccessfulPublicationMetadataResult } from "./publication-metadata-results.ts";
+import { buildPublicationPackage } from "./publication-package.ts";
 import { createContributor, getContributor, listContributors, photoMediaType, publicContributor } from "./contributors.ts";
 import { validateContributorPhoto, validateContributorProfile } from "./contributor-input.ts";
 import { approvePortraitCandidate, applyPortraitResult, createPortraitJob, getPortraitCandidate, listPortraitJobs, markPortraitJobStarted, verifyPortraitTrigger } from "./contributor-portraits.ts";
@@ -705,6 +706,13 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 409);
     }
+  }
+  const publicationPackageMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/publication-package$/);
+  if (publicationPackageMatch && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    try { return json({ package: buildPublicationPackage(decodeURIComponent(publicationPackageMatch[1]!)) }); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 400); }
   }
 
   if (publicationPreparationMatch && req.method === "POST") {

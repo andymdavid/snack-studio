@@ -27,7 +27,7 @@ export function normalizeTranscriptText(value: unknown):
 }
 
 export function validateEpisodeMetadata(body: Record<string, unknown>):
-  | { ok: true; value: { episodeNumber: number | null; workingTitle: string; publicTitle: string | null; recordedOn: string | null; audioUrl: string | null; videoUrl: string | null; editorialNotes: string | null } }
+  | { ok: true; value: { episodeNumber: number | null; workingTitle: string; publicTitle: string | null; publicSummary: string | null; primaryTopic: string | null; recordedOn: string | null; audioUrl: string | null; videoUrl: string | null; editorialNotes: string | null } }
   | { ok: false; error: string } {
   const workingTitle = typeof body.workingTitle === "string" ? body.workingTitle.trim() : "";
   if (!workingTitle) return { ok: false, error: "workingTitle is required" };
@@ -48,15 +48,20 @@ export function validateEpisodeMetadata(body: Record<string, unknown>):
     return value.length <= max ? value || null : false;
   };
   const publicTitle = optionalText("publicTitle", 200);
+  const publicSummary = optionalText('publicSummary', 500);
+  const primaryTopic = optionalText('primaryTopic', 100);
   const recordedOn = optionalText("recordedOn", 10);
   const audioUrl = optionalText("audioUrl", 2000);
   const videoUrl = optionalText("videoUrl", 2000);
   const editorialNotes = optionalText("editorialNotes", 20_000);
-  if ([publicTitle, recordedOn, audioUrl, videoUrl, editorialNotes].includes(false)) {
+  if ([publicTitle, publicSummary, primaryTopic, recordedOn, audioUrl, videoUrl, editorialNotes].includes(false)) {
     return { ok: false, error: "One or more metadata fields exceed their allowed length" };
   }
   if (recordedOn && !/^\d{4}-\d{2}-\d{2}$/.test(recordedOn)) {
     return { ok: false, error: "recordedOn must use YYYY-MM-DD" };
+  }
+  if (primaryTopic && !['ai-coding', 'agents', 'software-systems'].includes(primaryTopic)) {
+    return { ok: false, error: 'primaryTopic must be a canonical website topic' };
   }
   for (const [label, value] of [["audioUrl", audioUrl], ["videoUrl", videoUrl]] as const) {
     if (!value) continue;
@@ -73,6 +78,8 @@ export function validateEpisodeMetadata(body: Record<string, unknown>):
       workingTitle,
       episodeNumber,
       publicTitle: publicTitle as string | null,
+      publicSummary: publicSummary as string | null,
+      primaryTopic: primaryTopic as string | null,
       recordedOn: recordedOn as string | null,
       audioUrl: audioUrl as string | null,
       videoUrl: videoUrl as string | null,

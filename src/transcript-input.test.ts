@@ -20,6 +20,8 @@ describe("validateEpisodeMetadata", () => {
     expect(validateEpisodeMetadata({
       workingTitle: "  Working title ",
       publicTitle: " Public title ",
+      publicSummary: ' Public summary ',
+      primaryTopic: ' ai-coding ',
       recordedOn: "2026-08-10",
       audioUrl: "https://example.com/audio",
       videoUrl: "",
@@ -30,6 +32,8 @@ describe("validateEpisodeMetadata", () => {
         episodeNumber: null,
         workingTitle: "Working title",
         publicTitle: "Public title",
+        publicSummary: 'Public summary',
+        primaryTopic: 'ai-coding',
         recordedOn: "2026-08-10",
         audioUrl: "https://example.com/audio",
         videoUrl: null,

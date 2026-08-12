@@ -43,6 +43,7 @@ const state = {
   episodeStageId: "",
   episodeAuditEvents: [],
   publicationPreparation: null,
+  publicationPackage: null,
   contributorFormOpen: false,
   contributorPortraitJobs: {},
   thumbnailPollTimers: {},
@@ -450,12 +451,13 @@ async function loadEpisode(id) {
   showStudioPage("episodePage", "Snack Studio / Episodes / Workspace");
   setStudioStatus("Loading workspace…");
   try {
-    const [payload, candidatePayload, curationPayload, pipelinePayload, publicationPayload] = await Promise.all([
+    const [payload, candidatePayload, curationPayload, pipelinePayload, publicationPayload, packagePayload] = await Promise.all([
       api(`/api/episodes/${encodeURIComponent(id)}`),
       api(`/api/episodes/${encodeURIComponent(id)}/candidates`),
       api(`/api/episodes/${encodeURIComponent(id)}/curation`),
       api(`/api/episodes/${encodeURIComponent(id)}/pipeline-requests`),
       api(`/api/episodes/${encodeURIComponent(id)}/publication-preparation`).catch(() => ({ preparation: null })),
+      api(`/api/episodes/${encodeURIComponent(id)}/publication-package`).catch(() => ({ package: null })),
     ]);
     state.activeEpisode = payload.episode;
     state.activeTranscript = payload.transcript || null;
@@ -473,6 +475,7 @@ async function loadEpisode(id) {
     state.pipelineTimeoutMs = Number(pipelinePayload.timeoutMs || 0);
     state.episodeAuditEvents = payload.auditEvents || [];
     state.publicationPreparation = publicationPayload.preparation || null;
+    state.publicationPackage = packagePayload.package || null;
     if (!state.episodeStage || state.episodeStageId !== id) {
       state.episodeStage = episodeWorkspaceStage();
       state.episodeStageId = id;
@@ -570,10 +573,17 @@ function renderEpisodeWorkspace(episode, transcript, transcriptRevisions, auditE
     makeWorkspaceField("Episode number", workspaceInput("workspaceEpisodeNumber", "number", episode.episodeNumber)),
     makeWorkspaceField("Working title", workspaceInput("workspaceWorkingTitle", "text", episode.workingTitle)),
     makeWorkspaceField("Public title", workspaceInput("workspacePublicTitle", "text", episode.publicTitle, "Optional canonical title")),
+    makeWorkspaceField('Primary topic', (() => { const select = document.createElement('select'); select.id = 'workspacePrimaryTopic'; for (const [value, label] of [['','Select topic'],['ai-coding','AI Coding'],['agents','Agents'],['software-systems','Software Systems']]) { const option = document.createElement('option'); option.value = value; option.textContent = label; option.selected = episode.primaryTopic === value; select.appendChild(option); } select.disabled = !state.me?.access?.edit; return select; })()),
     makeWorkspaceField("Recorded on", workspaceInput("workspaceRecordedOn", "date", episode.recordedOn)),
     makeWorkspaceField("Audio URL", workspaceInput("workspaceAudioUrl", "url", episode.audioUrl, "https://…")),
     makeWorkspaceField("Video URL", workspaceInput("workspaceVideoUrl", "url", episode.videoUrl, "https://…")),
   );
+  const publicSummary = document.createElement('textarea');
+  publicSummary.id = 'workspacePublicSummary';
+  publicSummary.rows = 3;
+  publicSummary.value = episode.publicSummary || '';
+  publicSummary.placeholder = 'Short public description used on the episode page and in metadata';
+  publicSummary.disabled = !state.me?.access?.edit;
   const notes = document.createElement("textarea");
   notes.id = "workspaceEditorialNotes";
   notes.rows = 4;
@@ -583,7 +593,7 @@ function renderEpisodeWorkspace(episode, transcript, transcriptRevisions, auditE
   const metadataError = document.createElement("p");
   metadataError.className = "formError";
   metadataError.id = "metadataFormError";
-  metadataForm.append(metadataHeader, fields, makeWorkspaceField("Editorial notes", notes), metadataError);
+  metadataForm.append(metadataHeader, fields, makeWorkspaceField('Public summary', publicSummary), makeWorkspaceField("Editorial notes", notes), metadataError);
   metadataForm.addEventListener("submit", saveEpisodeMetadata);
 
   const transcriptForm = document.createElement("form");
@@ -846,7 +856,37 @@ function renderPublicationPreparation(episode, candidates) {
     if (['extracting','grounding','generating'].includes(job.status)) startThumbnailStatusPolling(job.id);
   }
   section.appendChild(queue);
+  if (state.publicationPackage) section.appendChild(renderPublicationPackageManifest(state.publicationPackage));
   return section;
+}
+
+function renderPublicationPackageManifest(packageValue) {
+  const panel = document.createElement('section');
+  panel.className = 'publicationPackageManifest';
+  const header = document.createElement('header');
+  const copy = document.createElement('div');
+  const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Website package';
+  const title = document.createElement('h3'); title.textContent = packageValue.ready ? 'Ready to stage' : 'Package needs attention';
+  const detail = document.createElement('p'); detail.textContent = `${packageValue.snacks?.length || 0} Snacks · ${packageValue.people?.length || 0} contributors · ${packageValue.files?.length || 0} destination files`;
+  copy.append(eyebrow, title, detail);
+  const meta = document.createElement('div'); meta.className = 'publicationPackageMeta';
+  const fingerprint = document.createElement('code'); fingerprint.textContent = packageValue.fingerprint?.slice(0, 12) || '';
+  fingerprint.title = packageValue.fingerprint || '';
+  const refresh = document.createElement('button'); refresh.type = 'button'; refresh.className = 'btn btnSecondary'; refresh.textContent = 'Refresh package';
+  refresh.addEventListener('click', async () => { const clear = setButtonBusy(refresh, 'Refreshing…'); try { state.publicationPackage = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-package`)).package; renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates); } catch (error) { setStudioStatus(error.message); } finally { clear(); } });
+  meta.append(fingerprint, refresh); header.append(copy, meta); panel.appendChild(header);
+  const blockers = packageValue.blockers || [];
+  if (blockers.length) {
+    const list = document.createElement('ul'); list.className = 'publicationPackageBlockers';
+    for (const blocker of blockers) { const item = document.createElement('li'); item.textContent = blocker.message; list.appendChild(item); }
+    panel.appendChild(list);
+  }
+  const paths = document.createElement('details');
+  const summary = document.createElement('summary'); summary.textContent = `Destination manifest (${packageValue.files?.length || 0})`;
+  const fileList = document.createElement('ul'); fileList.className = 'publicationPackageFiles';
+  for (const file of packageValue.files || []) { const item = document.createElement('li'); const kind = document.createElement('span'); kind.textContent = file.kind; const path = document.createElement('code'); path.textContent = file.destination; item.append(kind, path); fileList.appendChild(item); }
+  paths.append(summary, fileList); panel.appendChild(paths);
+  return panel;
 }
 
 function renderEpisodeThumbnailWorkflow(episode, job, resolved, portraitsNeeded) {
@@ -2177,6 +2217,8 @@ async function saveEpisodeMetadata(event) {
         episodeNumber: $("workspaceEpisodeNumber").value,
         workingTitle: $("workspaceWorkingTitle").value,
         publicTitle: $("workspacePublicTitle").value,
+        publicSummary: $('workspacePublicSummary').value,
+        primaryTopic: $('workspacePrimaryTopic').value,
         recordedOn: $("workspaceRecordedOn").value,
         audioUrl: $("workspaceAudioUrl").value,
         videoUrl: $("workspaceVideoUrl").value,

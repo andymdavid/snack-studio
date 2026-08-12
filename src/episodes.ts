@@ -22,6 +22,8 @@ export type Episode = {
   episodeNumber: number | null;
   workingTitle: string;
   publicTitle: string | null;
+  publicSummary: string | null;
+  primaryTopic: string | null;
   recordedOn: string | null;
   audioUrl: string | null;
   videoUrl: string | null;
@@ -64,6 +66,8 @@ function mapEpisode(row: Record<string, unknown>): Episode {
     episodeNumber: row.episode_number == null ? null : Number(row.episode_number),
     workingTitle: String(row.working_title),
     publicTitle: row.public_title == null ? null : String(row.public_title),
+    publicSummary: row.public_summary == null ? null : String(row.public_summary),
+    primaryTopic: row.primary_topic == null ? null : String(row.primary_topic),
     recordedOn: row.recorded_on == null ? null : String(row.recorded_on),
     audioUrl: row.audio_url == null ? null : String(row.audio_url),
     videoUrl: row.video_url == null ? null : String(row.video_url),
@@ -214,6 +218,8 @@ export function updateEpisodeMetadata(id: string, input: {
   episodeNumber: number | null;
   workingTitle: string;
   publicTitle: string | null;
+  publicSummary: string | null;
+  primaryTopic: string | null;
   recordedOn: string | null;
   audioUrl: string | null;
   videoUrl: string | null;
@@ -225,10 +231,10 @@ export function updateEpisodeMetadata(id: string, input: {
   db.transaction(() => {
     db.query(`
       UPDATE episodes
-      SET episode_number = ?1, working_title = ?2, public_title = ?3, recorded_on = ?4, audio_url = ?5,
-          video_url = ?6, editorial_notes = ?7, updated_at = ?8
-      WHERE id = ?9
-    `).run(input.episodeNumber, input.workingTitle, input.publicTitle, input.recordedOn, input.audioUrl, input.videoUrl, input.editorialNotes, now, id);
+      SET episode_number = ?1, working_title = ?2, public_title = ?3, public_summary = ?4, primary_topic = ?5, recorded_on = ?6, audio_url = ?7,
+          video_url = ?8, editorial_notes = ?9, updated_at = ?10
+      WHERE id = ?11
+    `).run(input.episodeNumber, input.workingTitle, input.publicTitle, input.publicSummary, input.primaryTopic, input.recordedOn, input.audioUrl, input.videoUrl, input.editorialNotes, now, id);
     recordAuditEvent({
       actorPubkey: input.actorPubkey,
       action: "episode.metadata.updated",

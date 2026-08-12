@@ -975,6 +975,20 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: '023_episode_publication_summary',
+    description: 'Add the public episode summary required by the website schema',
+    up(db) {
+      if (!hasColumn(db, 'episodes', 'public_summary')) db.exec('ALTER TABLE episodes ADD COLUMN public_summary TEXT');
+    },
+  },
+  {
+    id: '024_episode_primary_topic',
+    description: 'Add the canonical episode topic required by the website schema',
+    up(db) {
+      if (!hasColumn(db, 'episodes', 'primary_topic')) db.exec('ALTER TABLE episodes ADD COLUMN primary_topic TEXT');
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {
