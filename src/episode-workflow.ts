@@ -49,7 +49,11 @@ export function getEpisodeWorkflow(episodeId: string) {
   let assetReviewCount = 0;
   if (episode.status === 'approved') {
     packageValue = buildPublicationPackage(episodeId);
-    try { assetReviewCount = getPublicationPreparation(episodeId).jobs.filter((job) => job.status === 'in-review').length; } catch {}
+    try {
+      const preparation = getPublicationPreparation(episodeId);
+      assetReviewCount = preparation.jobs.filter((job) => job.status === 'in-review').length
+        + preparation.participants.unresolved.length + preparation.contributorsNeedingPortraits.length;
+    } catch {}
   }
   const validation = getLatestWebsiteValidation(episodeId);
   const publication = getLatestGitPublication(episodeId);

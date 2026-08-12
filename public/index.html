@@ -43,8 +43,8 @@
           </div>
           <nav class="studioNav" aria-label="Primary navigation">
             <button class="active" type="button" data-studio-route="/">Episodes</button>
-            <button type="button" disabled>Review queue <span>Soon</span></button>
-            <button type="button" disabled>Publications <span>Soon</span></button>
+            <button type="button" data-studio-route="/review">Review queue</button>
+            <button type="button" data-studio-route="/publications">Publications</button>
             <button type="button" data-studio-route="/settings">Settings</button>
           </nav>
           <div class="studioUser">
@@ -93,6 +93,28 @@
           <div class="studioContent hidden" id="episodePage">
             <button class="backLink" id="episodesBackButton" type="button">← All episodes</button>
             <section class="episodeWorkspace card" id="episodeWorkspace"></section>
+          </div>
+
+          <div class="studioContent hidden" id="reviewQueuePage">
+            <header class="studioPageHeader">
+              <div>
+                <p class="eyebrow">Editorial decisions</p>
+                <h1>Review Queue</h1>
+                <p>Snacks, final sets, contributors and artwork waiting for judgment.</p>
+              </div>
+            </header>
+            <section class="workflowQueue" id="reviewQueue" aria-live="polite"></section>
+          </div>
+
+          <div class="studioContent hidden" id="publicationsPage">
+            <header class="studioPageHeader">
+              <div>
+                <p class="eyebrow">Website releases</p>
+                <h1>Publications</h1>
+                <p>Prepare, validate, publish and deploy approved episodes.</p>
+              </div>
+            </header>
+            <section class="workflowQueue" id="publicationsQueue" aria-live="polite"></section>
           </div>
 
           <div class="studioContent hidden" id="studioSettingsPage">

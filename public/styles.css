@@ -705,6 +705,31 @@ textarea {
   padding: 8px 10px;
   outline: none;
 }
+.workflowQueue { display:grid; gap:10px; }
+.workflowQueueItem { width:100%; display:flex; align-items:center; justify-content:space-between; gap:24px; padding:18px 20px; border:1px solid var(--border); border-radius:var(--radius-card); background:var(--surface-1); color:var(--text); text-align:left; }
+.workflowQueueItem:hover { border-color:var(--border-strong); background:var(--surface-2); }
+.workflowQueueItem > div { display:grid; gap:5px; }
+.workflowQueueItem > div:last-child { justify-items:end; }
+.workflowQueueItem strong { font-size:var(--text-lg); }
+.workflowQueueAction { color:var(--text-muted); font-size:var(--text-sm); }
+.workflowQueueEmpty { display:grid; gap:6px; padding:36px; border:1px dashed var(--border); border-radius:var(--radius-card); color:var(--text-muted); }
+.workflowQueueEmpty strong { color:var(--text); }
+.episodeOverview { display:grid; gap:18px; }
+.episodeOverviewStatus { display:flex; align-items:center; justify-content:space-between; gap:24px; padding:22px; border:1px solid var(--border); border-radius:var(--radius-card); background:var(--surface-2); }
+.episodeOverviewStatus h2, .episodeOverviewStatus p { margin:0; }
+.episodeOverviewStatus h2 { margin-block:5px 7px; }
+.episodeOverviewStatus .btn { flex:0 0 auto; }
+.episodeOverviewFacts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); border:1px solid var(--border); border-radius:var(--radius-card); overflow:hidden; }
+.episodeOverviewFacts > div { display:grid; gap:5px; padding:16px; border-right:1px solid var(--border); }
+.episodeOverviewFacts > div:last-child { border-right:0; }
+.episodeOverviewFacts span { color:var(--text-muted); font-size:var(--text-sm); }
+@media (max-width: 900px) {
+  .workflowQueueItem, .episodeOverviewStatus { align-items:flex-start; flex-direction:column; }
+  .workflowQueueItem > div:last-child { justify-items:start; }
+  .episodeOverviewFacts { grid-template-columns:1fr 1fr; }
+  .episodeOverviewFacts > div:nth-child(2) { border-right:0; }
+  .episodeOverviewFacts > div:nth-child(-n+2) { border-bottom:1px solid var(--border); }
+}
 
 .composer button {
   min-width: 82px;
