@@ -196,7 +196,7 @@ export function applyThumbnailResult(jobId: string, token: string, body: Record<
         path = preview; dimensions = thumbnailDimensions(path, 'episode');
       }
       db.query(`INSERT INTO thumbnail_candidates(id,job_id,generation_round,candidate_number,source_uri,prompt_text,model_name,width,height,mime_type,size_bytes,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)`)
-        .run(crypto.randomUUID(), jobId, round, index + 1, path, String(response.prompt || ''), String(response.model || ''), dimensions.width, dimensions.height, String(item.mimeType || (extname(path)==='.webp'?'image/webp':'image/png')), statSync(path).size, now);
+        .run(crypto.randomUUID(), jobId, round, index + 1, path, String(response.prompt || ''), String(response.model || ''), dimensions.width, dimensions.height, assetKind === 'episode' ? 'image/webp' : String(item.mimeType || (extname(path)==='.webp'?'image/webp':'image/png')), statSync(path).size, now);
     }
     db.query("UPDATE thumbnail_jobs SET status='in-review', updated_at=?1 WHERE id=?2").run(now, jobId);
   })();
@@ -281,7 +281,7 @@ export function finishEpisodeThumbnail(row: Record<string, unknown>, destination
     args.push('-fill', '#242424', '-draw', `roundrectangle ${brandX},${brandY} ${brandX + brandWidth + brandPadX * 2},${brandY + Math.max(brandLayer.height, episodeLayer.height) + brandPadY * 2} 12,12`,
       '(', brandLayer.path, ')', '-gravity', 'northwest', '-geometry', `+${brandX + brandPadX}+${brandY + brandPadY}`, '-composite',
       '(', episodeLayer.path, ')', '-gravity', 'northwest', '-geometry', `+${brandX + brandPadX + brandLayer.width + brandGap}+${brandY + brandPadY}`, '-composite',
-      '-strip', '-quality', '88', destination);
+      '-strip', '-define', 'webp:method=6', '-quality', '96', destination);
     return Bun.spawnSync(args);
   } finally {
     rmSync(temporary, { recursive: true, force: true });
