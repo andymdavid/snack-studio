@@ -1,6 +1,6 @@
 import { derivePubkeyFromNsec, signEventWithNsec, signLoginChallengeWithNsec } from "/nostr-login.js";
 
-const PROFILE_CACHE_KEY = "snack_studio_profiles_v1";
+const PROFILE_CACHE_KEY = "snack_studio_profiles_v2";
 const PIPELINES_CACHE_KEY = "snack_studio_pipelines_v1";
 const PROFILE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const CURRENT_SNACK_PROMPT_SUITE = "v3-intelligence-snacks-natural-prose";
@@ -150,6 +150,7 @@ function saveProfileCache() {
 function cachedProfile(pubkey) {
   const entry = state.profiles[pubkey];
   if (!entry || Date.now() - Number(entry.cachedAt || 0) > PROFILE_CACHE_TTL_MS) return null;
+  if (!profileFullName(entry) && !entry.picture) return null;
   return entry;
 }
 
@@ -315,6 +316,10 @@ function renderStudioUser(profile) {
     const img = document.createElement("img");
     img.src = profile.picture;
     img.alt = "";
+    img.addEventListener("error", () => {
+      avatar.innerHTML = "";
+      avatar.textContent = name.slice(0, 1).toUpperCase();
+    }, { once: true });
     avatar.appendChild(img);
   } else {
     avatar.textContent = name.slice(0, 1).toUpperCase();
@@ -322,8 +327,12 @@ function renderStudioUser(profile) {
 }
 
 async function resolveCurrentUserProfile() {
-  const profile = await resolveProfile({ pubkey: state.me.pubkey, npub: state.me.npub });
-  renderStudioUser(profile);
+  try {
+    const profile = await resolveProfile({ pubkey: state.me.pubkey, npub: state.me.npub });
+    renderStudioUser(profile);
+  } catch {
+    renderStudioUser(null);
+  }
 }
 
 function setStudioStatus(message) {
@@ -2514,6 +2523,7 @@ async function resolveProfile(rule) {
   const existing = cachedProfile(rule.pubkey);
   if (existing) return existing;
   const profile = await fetchNostrProfile(rule.pubkey).catch(() => null);
+  if (!profile) throw new Error("Nostr profile not found");
   const normalized = {
     pubkey: rule.pubkey,
     name: typeof profile?.name === "string" ? profile.name : "",
@@ -2523,6 +2533,7 @@ async function resolveProfile(rule) {
     picture: typeof profile?.picture === "string" ? profile.picture : "",
     cachedAt: Date.now(),
   };
+  if (!profileFullName(normalized) && !normalized.picture) throw new Error("Nostr profile is empty");
   state.profiles[rule.pubkey] = normalized;
   saveProfileCache();
   return normalized;
@@ -2542,7 +2553,7 @@ function fetchProfileFromRelay(relayUrl, pubkey) {
     const socket = new WebSocket(relayUrl);
     const timer = setTimeout(() => {
       finish(bestEvent ? parseProfileEvent(bestEvent) : null);
-    }, 2500);
+    }, 5000);
 
     function finish(value, error) {
       if (settled) return;
@@ -2575,6 +2586,9 @@ function fetchProfileFromRelay(relayUrl, pubkey) {
       if (message[0] === "EOSE" && message[1] === subId) finish(bestEvent ? parseProfileEvent(bestEvent) : null);
     });
     socket.addEventListener("error", () => finish(null, new Error(`relay failed: ${relayUrl}`)));
+    socket.addEventListener("close", () => {
+      if (!settled) finish(bestEvent ? parseProfileEvent(bestEvent) : null);
+    });
   });
 }
 
