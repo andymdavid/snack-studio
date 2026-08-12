@@ -128,6 +128,8 @@ export function markThumbnailGenerationStarted(jobId: string, runId: string) {
 }
 
 export function verifyThumbnailGenerationTrigger(jobId: string, trigger: Record<string, unknown>) {
+  const job = getThumbnailJob(jobId);
+  if (!job) return false;
   const row = db.query('SELECT callback_token_hash FROM thumbnail_jobs WHERE id=?1').get(jobId) as { callback_token_hash: string | null } | null;
   const body = trigger.body && typeof trigger.body === 'object' ? trigger.body as Record<string, unknown> : {};
   const input = body.input && typeof body.input === 'object' ? body.input as Record<string, unknown> : {};
