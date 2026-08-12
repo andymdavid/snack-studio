@@ -2,7 +2,7 @@ import { db } from "./db.ts";
 import { getCandidate, type SnackCandidate } from "./candidates.ts";
 import { recordAuditEvent } from "./episodes.ts";
 import { getPipelineRequest, getPipelineRun } from "./pipeline-requests.ts";
-import { transcriptContainsExactEvidence, type SuccessfulRegenerationResult } from "./regeneration-result-input.ts";
+import type { SuccessfulRegenerationResult } from "./regeneration-result-input.ts";
 
 export type RegenerationProposal = {
   id: string;
@@ -23,6 +23,22 @@ export type RegenerationProposal = {
   createdAt: number;
   resolvedAt: number | null;
 };
+
+export function validateRegenerationEvidencePackage(
+  returnedEvidence: Array<{ evidenceId: string; excerpt: string }>,
+  sourceEvidence: Array<{ evidenceId?: unknown; excerpt?: unknown }>,
+  attachedIds: Set<string>,
+) {
+  const attachedEvidence = new Map(sourceEvidence
+    .filter((evidence) => attachedIds.has(String(evidence.evidenceId || "")))
+    .map((evidence) => [String(evidence.evidenceId), String(evidence.excerpt || "")]));
+  if (!attachedEvidence.size) throw new Error("regeneration source evidence is unavailable");
+  for (const evidence of returnedEvidence) {
+    const sourceExcerpt = attachedEvidence.get(evidence.evidenceId);
+    if (sourceExcerpt == null) throw new Error(`regeneration evidence ${evidence.evidenceId} was not attached to the base Snack`);
+    if (sourceExcerpt !== evidence.excerpt) throw new Error(`regeneration evidence ${evidence.evidenceId} changed from the verified source record`);
+  }
+}
 
 function jsonArray<T>(value: unknown): T[] {
   try {
@@ -105,11 +121,23 @@ export function applySuccessfulRegenerationResult(input: { localRunId: string; r
   if (request.inputTranscriptRevisionId !== input.result.inputRevisionId) throw new Error("regeneration callback transcript mismatch");
   if (request.promptSuiteVersion !== input.result.promptSuiteVersion || request.resultSchemaVersion !== input.result.resultSchemaVersion) throw new Error("regeneration callback version mismatch");
   if (run.autopilotRunId && input.result.runId && run.autopilotRunId !== input.result.runId) throw new Error("regeneration callback Autopilot run mismatch");
-  const transcript = db.query("SELECT transcript_text FROM transcript_revisions WHERE id = ?1").get(request.inputTranscriptRevisionId) as { transcript_text: string } | null;
-  if (!transcript) throw new Error("regeneration source transcript not found");
-  for (const evidence of input.result.evidence) {
-    if (!transcriptContainsExactEvidence(transcript.transcript_text, evidence.excerpt)) throw new Error(`regeneration evidence ${evidence.evidenceId} is not an exact transcript excerpt`);
-  }
+  const baseRevision = db.query("SELECT pipeline_request_id, claim_evidence_json FROM snack_revisions WHERE id = ?1")
+    .get(request.baseCandidateRevisionId) as { pipeline_request_id: string | null; claim_evidence_json: string } | null;
+  if (!baseRevision) throw new Error("regeneration base revision not found");
+  const sourceArtifact = baseRevision.pipeline_request_id == null ? null : db.query(`
+    SELECT content_json FROM pipeline_artifacts
+    WHERE request_id = ?1 AND artifact_type = 'evidence'
+    ORDER BY created_at DESC LIMIT 1
+  `).get(baseRevision.pipeline_request_id) as { content_json: string } | null;
+  let sourceEvidence: Array<{ evidenceId?: unknown; excerpt?: unknown }> = [];
+  let sourceMappings: Array<{ evidenceIds?: unknown }> = [];
+  try {
+    const artifact = sourceArtifact ? JSON.parse(sourceArtifact.content_json) as Record<string, unknown> : {};
+    sourceEvidence = Array.isArray(artifact.evidence) ? artifact.evidence as Array<{ evidenceId?: unknown; excerpt?: unknown }> : [];
+    sourceMappings = JSON.parse(baseRevision.claim_evidence_json || "[]") as Array<{ evidenceIds?: unknown }>;
+  } catch {}
+  const attachedIds = new Set(sourceMappings.flatMap((mapping) => Array.isArray(mapping.evidenceIds) ? mapping.evidenceIds.map(String) : []));
+  validateRegenerationEvidencePackage(input.result.evidence, sourceEvidence, attachedIds);
   const usedIds = new Set(input.result.candidate.claimEvidenceMap.flatMap((mapping) => mapping.evidenceIds));
   const transcriptExcerpt = input.result.evidence.filter((evidence) => usedIds.has(evidence.evidenceId)).map((evidence) => evidence.excerpt).join("\n\n");
   const now = Date.now();
