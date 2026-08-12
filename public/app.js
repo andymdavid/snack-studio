@@ -913,7 +913,13 @@ function renderPublicationPreparation(episode, candidates) {
   const help = document.createElement("p");
   help.textContent = "Snack Studio is assembling canonical topics, contributor portraits and transcript-grounded thumbnail work for the approved set.";
   copy.append(eyebrow, title, help);
-  header.append(copy);
+  const headerActions = document.createElement('div');
+  headerActions.className = 'publicationPreparationActions';
+  const reviewSnacks = document.createElement('button');
+  reviewSnacks.type = 'button'; reviewSnacks.className = 'btn btnSecondary'; reviewSnacks.textContent = 'Review Snacks';
+  reviewSnacks.addEventListener('click', () => navigate(`/review/${encodeURIComponent(episode.id)}`));
+  headerActions.appendChild(reviewSnacks);
+  header.append(copy, headerActions);
   section.appendChild(header);
 
   const preparation = state.publicationPreparation;
@@ -944,6 +950,13 @@ function renderPublicationPreparation(episode, candidates) {
     item.append(name, valueNode); facts.appendChild(item);
   }
   section.appendChild(facts);
+  if (topicRequest && ['failed', 'needs-input'].includes(topicRequest.status) && topicsMissing.length) {
+    const retryPanel = document.createElement('div'); retryPanel.className = 'publicationPreparationBlocker';
+    const retryCopy = document.createElement('p'); retryCopy.textContent = topicRequest.failureSummary || 'Automatic theme derivation needs another attempt.';
+    const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'btn btnSecondary'; retry.textContent = 'Retry theme assessment'; retry.disabled = !state.me?.access?.edit;
+    retry.addEventListener('click', () => retryPipelineRequest(topicRequest.id));
+    retryPanel.append(retryCopy, retry); section.appendChild(retryPanel);
+  }
   section.appendChild(renderPublicTranscriptWorkflow());
   section.appendChild(renderNewsletterWorkflow(candidates));
   if (preparation.themes?.length) {
@@ -1024,7 +1037,12 @@ function renderPublicationPackageManifest(packageValue) {
   const blockers = packageValue.blockers || [];
   if (blockers.length) {
     const list = document.createElement('ul'); list.className = 'publicationPackageBlockers';
-    for (const blocker of blockers) { const item = document.createElement('li'); item.textContent = blocker.message; list.appendChild(item); }
+    const snackThemes = blockers.filter((item) => /needs one theme from the episode/i.test(item.message)).length;
+    const snackThumbnails = blockers.filter((item) => /needs an approved finished thumbnail/i.test(item.message) && !/^The episode/i.test(item.message)).length;
+    const grouped = blockers.filter((item) => !/needs one theme from the episode/i.test(item.message) && !(/needs an approved finished thumbnail/i.test(item.message) && !/^The episode/i.test(item.message)));
+    if (snackThemes) grouped.push({ message: `Automatic theme assignment is pending for ${snackThemes} Snacks.` });
+    if (snackThumbnails) grouped.push({ message: `${snackThumbnails} Snack thumbnails need generation or approval.` });
+    for (const blocker of grouped) { const item = document.createElement('li'); item.textContent = blocker.message; list.appendChild(item); }
     panel.appendChild(list);
   }
   const paths = document.createElement('details');
@@ -1191,7 +1209,8 @@ async function openThumbnailReview(jobId, snackTitle, triggerButton = null, isEp
     for (const candidate of candidates) {
       const card = document.createElement('article');
       const image = document.createElement('img'); image.alt = `Thumbnail candidate ${candidate.candidateNumber}`;
-      fetch(candidate.previewUrl, { headers: state.token ? { authorization: `Bearer ${state.token}` } : {} }).then((res) => res.blob()).then((blob) => { image.src = URL.createObjectURL(blob); });
+      let sourceBlob = null;
+      fetch(candidate.previewUrl, { headers: state.token ? { authorization: `Bearer ${state.token}` } : {} }).then((res) => res.blob()).then((blob) => { sourceBlob = blob; image.src = URL.createObjectURL(blob); });
       const action = document.createElement('button'); action.type = 'button'; action.className = candidate.status === 'approved' ? 'btn btnPrimary' : 'btn btnSecondary';
       action.textContent = candidate.status === 'approved' ? 'Approved' : 'Approve this thumbnail'; action.disabled = candidate.status === 'approved' || !state.me?.access?.edit;
       action.addEventListener('click', () => approveSnackThumbnail(candidate.id, dialog, action));
@@ -1205,7 +1224,15 @@ async function openThumbnailReview(jobId, snackTitle, triggerButton = null, isEp
           const caption = document.createElement('figcaption'); caption.textContent = label;
           preview.append(previewImage, caption); previews.appendChild(preview);
         }
-        card.append(stage, previews, action);
+        const actions = document.createElement('div'); actions.className = 'thumbnailReviewActions';
+        const download = document.createElement('button'); download.type = 'button'; download.className = 'btn btnSecondary'; download.textContent = 'Download high-resolution';
+        download.addEventListener('click', () => {
+          if (!sourceBlob) return setStudioStatus('The high-resolution image is still loading…');
+          const url = URL.createObjectURL(sourceBlob); const anchor = document.createElement('a');
+          anchor.href = url; anchor.download = `episode-${state.activeEpisode?.episodeNumber || 'thumbnail'}-thumbnail.${sourceBlob.type.includes('png') ? 'png' : 'webp'}`;
+          anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        });
+        actions.append(action, download); card.append(stage, previews, actions);
       } else card.append(image, action);
       gallery.appendChild(card);
     }

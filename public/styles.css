@@ -2016,6 +2016,8 @@ textarea {
   border-bottom: 1px solid var(--border);
   padding-bottom: 24px;
 }
+.publicationPreparationActions, .thumbnailReviewActions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.thumbnailReviewActions > .btn { flex:1 1 180px; }
 
 .publicationPreparationHeader h2,
 .publicationPreparationHeader p { margin: 0; }

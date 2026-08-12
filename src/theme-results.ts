@@ -4,7 +4,16 @@ import { getPipelineRequest, getPipelineRequestTranscript, getPipelineRun } from
 import { createTheme, getTheme } from './themes.ts';
 import type { SuccessfulThemeResult } from './theme-result-input.ts';
 
-function normalize(value: string) { return value.replace(/\s+/g, ' ').trim().toLowerCase(); }
+export function normalizeThemeEvidence(value: string) {
+  return value
+    .toLowerCase()
+    // ASR preserves abandoned word starts such as “they would s- these”.
+    .replace(/\b[a-z]+-\s+/g, ' ')
+    // It also emits repeated initial sounds such as “e-educating”.
+    .replace(/\b([a-z])-\1/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 export function applySuccessfulThemeResult(input: { localRunId: string; result: SuccessfulThemeResult }, database: Database = appDb) {
   const request = getPipelineRequest(input.result.requestId, database); const run = getPipelineRun(input.localRunId, database);
@@ -12,8 +21,8 @@ export function applySuccessfulThemeResult(input: { localRunId: string; result: 
   if (request.status === 'completed' && request.resultAppliedAt) return { replay: true, assignmentCount: input.result.snackAssignments.length };
   if (request.operation !== 'publication-metadata' || request.episodeId !== input.result.episodeId || request.inputTranscriptRevisionId !== input.result.inputRevisionId || request.resultSchemaVersion !== input.result.resultSchemaVersion) throw new Error('pipeline callback provenance mismatch');
   const transcript = getPipelineRequestTranscript(request.id, database); if (!transcript) throw new Error('pipeline transcript unavailable');
-  const source = normalize(transcript.transcriptText);
-  for (const theme of input.result.episodeThemes) if (!source.includes(normalize(theme.evidenceExcerpt))) throw new Error(`Theme ${theme.key} evidence is not an exact transcript excerpt`);
+  const source = normalizeThemeEvidence(transcript.transcriptText);
+  for (const theme of input.result.episodeThemes) if (!source.includes(normalizeThemeEvidence(theme.evidenceExcerpt))) throw new Error(`Theme ${theme.key} evidence is not an exact transcript excerpt`);
   const approved = database.query(`SELECT c.id candidate_id,c.current_revision_id FROM snack_candidates c WHERE c.episode_id=?1 AND c.review_decision='accepted' ORDER BY c.approved_position`).all(request.episodeId) as Array<{ candidate_id: string; current_revision_id: string }>;
   const expected = new Map(approved.map((row) => [row.candidate_id, row.current_revision_id]));
   if (approved.length !== input.result.snackAssignments.length) throw new Error('theme assignments must cover the complete approved Snack set');
