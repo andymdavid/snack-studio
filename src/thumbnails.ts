@@ -13,7 +13,7 @@ import { getCurrentAutopilotTarget } from './db.ts';
 
 export type ThumbnailJobStatus = "draft" | "extracting" | "grounding" | "generating" | "in-review" | "approved" | "failed";
 
-const EPISODE_THUMBNAIL_PIPELINE_VERSION = '2';
+const EPISODE_THUMBNAIL_PIPELINE_VERSION = '3';
 const SNACK_THUMBNAIL_PIPELINE_VERSION = '3';
 
 export function thumbnailPipelineRoute(assetKind: ThumbnailAssetKind) {
@@ -267,20 +267,20 @@ export function finishEpisodeThumbnail(row: Record<string, unknown>, destination
     const accentLayer = renderLabel('accent', accent, displayFont, 190, '#ffffff', 990);
     const guestLayer = guestLine ? renderLabel('guest', guestLine, displayFont, 78, '#111111', 740) : null;
     const brandLayer = renderLabel('brand', 'INTELLIGENCE SNACKS', pixelFont, 58, '#ffffff', 460);
-    const episodeLayer = renderLabel('episode', `- EP ${episode.episodeNumber || ''}`, pixelFont, 58, '#ff5a14', 170);
-    const accentX = 62; const accentY = 448; const accentPadX = 24; const accentPadY = 16;
+    const episodeLayer = renderLabel('episode', `- EP ${episode.episodeNumber || ''}`, pixelFont, 58, '#fb7a28', 170);
+    const accentX = 62; const accentY = 420; const accentPadX = 24; const accentPadY = 16;
     const brandX = 62; const brandY = 830; const brandPadX = 18; const brandPadY = 10;
     const args = ['magick', String(row.source_uri), '-resize', '1672x941^', '-gravity', 'center', '-extent', '1672x941',
       '-gravity', 'northwest',
-      '-fill', 'rgba(0,0,0,.16)', '-draw', `roundrectangle ${accentX + 7},${accentY + 9} ${accentX + accentLayer.width + accentPadX * 2 + 7},${accentY + accentLayer.height + accentPadY * 2 + 9} 3,3`,
-      '-fill', '#ff5a14', '-draw', `roundrectangle ${accentX},${accentY} ${accentX + accentLayer.width + accentPadX * 2},${accentY + accentLayer.height + accentPadY * 2} 3,3`,
-      '(', leadLayer.path, ')', '-geometry', '+62+232', '-composite',
-      '(', accentLayer.path, ')', '-geometry', `+${accentX + accentPadX}+${accentY + accentPadY}`, '-composite'];
-    if (guestLayer) args.push('(', guestLayer.path, ')', '-geometry', '+64+716', '-composite');
+      '(', '-size', '1672x941', 'xc:none', '-fill', 'rgba(0,0,0,.22)', '-draw', `roundrectangle ${accentX + 3},${accentY + 7} ${accentX + accentLayer.width + accentPadX * 2 + 3},${accentY + accentLayer.height + accentPadY * 2 + 7} 3,3`, '-blur', '0x15', ')', '-composite',
+      '-fill', '#fb7a28', '-draw', `roundrectangle ${accentX},${accentY} ${accentX + accentLayer.width + accentPadX * 2},${accentY + accentLayer.height + accentPadY * 2} 3,3`,
+      '(', leadLayer.path, ')', '-gravity', 'northwest', '-geometry', '+62+232', '-composite',
+      '(', accentLayer.path, ')', '-gravity', 'northwest', '-geometry', `+${accentX + accentPadX}+${accentY + accentPadY}`, '-composite'];
+    if (guestLayer) args.push('(', guestLayer.path, ')', '-gravity', 'northwest', '-geometry', '+64+716', '-composite');
     const brandGap = 10; const brandWidth = brandLayer.width + episodeLayer.width + brandGap;
     args.push('-fill', '#111111', '-draw', `roundrectangle ${brandX},${brandY} ${brandX + brandWidth + brandPadX * 2},${brandY + Math.max(brandLayer.height, episodeLayer.height) + brandPadY * 2} 12,12`,
-      '(', brandLayer.path, ')', '-geometry', `+${brandX + brandPadX}+${brandY + brandPadY}`, '-composite',
-      '(', episodeLayer.path, ')', '-geometry', `+${brandX + brandPadX + brandLayer.width + brandGap}+${brandY + brandPadY}`, '-composite',
+      '(', brandLayer.path, ')', '-gravity', 'northwest', '-geometry', `+${brandX + brandPadX}+${brandY + brandPadY}`, '-composite',
+      '(', episodeLayer.path, ')', '-gravity', 'northwest', '-geometry', `+${brandX + brandPadX + brandLayer.width + brandGap}+${brandY + brandPadY}`, '-composite',
       '-strip', '-quality', '88', destination);
     return Bun.spawnSync(args);
   } finally {
