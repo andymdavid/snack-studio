@@ -95,6 +95,7 @@ import { buildPublicationPackage } from "./publication-package.ts";
 import { getLatestWebsiteValidation, stageAndValidateWebsitePackage } from './website-validation.ts';
 import { getLatestGitPublication, publishValidatedPackageToMain } from './git-publication.ts';
 import { deployPublishedCommit, getLatestGitDeployment } from './git-deployment.ts';
+import { getEpisodeWorkflow, listEpisodeWorkflows } from './episode-workflow.ts';
 import { createContributor, getContributor, listContributors, photoMediaType, publicContributor } from "./contributors.ts";
 import { validateContributorPhoto, validateContributorProfile } from "./contributor-input.ts";
 import { approvePortraitCandidate, applyPortraitResult, createPortraitJob, getPortraitCandidate, listPortraitJobs, markPortraitJobStarted, verifyPortraitTrigger } from "./contributor-portraits.ts";
@@ -264,6 +265,19 @@ function prepareEpisodePipelineRun(req: Request, pipelineRequest: NonNullable<Re
 
 async function handleApi(req: Request, url: URL): Promise<Response | null> {
   const { pathname } = url;
+
+  if (pathname === '/api/workflow' && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    return json({ episodes: listEpisodeWorkflows() });
+  }
+  const episodeWorkflowMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/workflow$/);
+  if (episodeWorkflowMatch && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    try { return json({ workflow: getEpisodeWorkflow(decodeURIComponent(episodeWorkflowMatch[1]!)) }); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 404); }
+  }
 
   if (pathname === "/api/health" && req.method === "GET") {
     return json({ ok: true, app: "snack-studio", now: new Date().toISOString() });
