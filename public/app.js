@@ -777,8 +777,10 @@ function renderPublicationPreparation(episode, candidates) {
   const topicsMissing = preparation.needsTopicClassification || [];
   const topicRequest = state.pipelineRequests.find((request) => request.operation === "publication-metadata");
   const topicsRunning = topicRequest && ["created", "awaiting-authorization", "queued", "running", "applying-result"].includes(topicRequest.status);
+  const snackJobs = (preparation.jobs || []).filter((job) => job.assetKind === 'snack');
+  const episodeJob = (preparation.jobs || []).find((job) => job.assetKind === 'episode');
   for (const [label, value, stateClass] of [
-    ["Approved Snacks", String(preparation.jobs?.length || 0), ""],
+    ["Approved Snacks", String(snackJobs.length), ""],
     ["Contributor portraits", `${resolved.length} resolved`, unresolved.length ? "statusWarning" : "statusSuccess"],
     ["Topic colours", topicsRunning ? "Classifying…" : topicsMissing.length ? `${topicsMissing.length} to classify` : "Resolved", topicsRunning || topicsMissing.length ? "statusWarning" : "statusSuccess"],
   ]) {
@@ -811,9 +813,10 @@ function renderPublicationPreparation(episode, candidates) {
   if (portraitsNeeded.length) {
     for (const item of portraitsNeeded) section.appendChild(renderContributorPortraitWorkflow(item));
   }
+  if (episodeJob) section.appendChild(renderEpisodeThumbnailWorkflow(episode, episodeJob, resolved, portraitsNeeded));
   const queue = document.createElement("div");
   queue.className = "publicationThumbnailQueue";
-  for (const job of preparation.jobs || []) {
+  for (const job of snackJobs) {
     const candidate = candidates.find((item) => item.id === job.snackCandidateId);
     const row = document.createElement("div");
     const identity = document.createElement("div");
@@ -835,6 +838,28 @@ function renderPublicationPreparation(episode, candidates) {
   }
   section.appendChild(queue);
   return section;
+}
+
+function renderEpisodeThumbnailWorkflow(episode, job, resolved, portraitsNeeded) {
+  const panel = document.createElement('section'); panel.className = 'episodeThumbnailWorkflow';
+  const copy = document.createElement('div');
+  const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Episode thumbnail';
+  const title = document.createElement('h3'); title.textContent = episode.publicTitle || episode.workingTitle;
+  const detail = document.createElement('p'); detail.textContent = `16:9 · ${resolved.some((item) => !['pete-winn','andy-david'].includes(item.contributorId)) ? 'Guest layout' : 'Host-only layout'} · deterministic title and branding`;
+  copy.append(eyebrow, title, detail);
+  const actions = document.createElement('div'); actions.className = 'episodeThumbnailActions';
+  const active = ['extracting','grounding','generating'].includes(job.status);
+  const generate = document.createElement('button'); generate.type = 'button'; generate.className = 'btn btnPrimary';
+  generate.textContent = active ? 'Generating…' : ['in-review','approved'].includes(job.status) ? 'Review thumbnail' : job.status === 'failed' ? 'Retry generation' : 'Generate thumbnail';
+  generate.disabled = active || portraitsNeeded.length > 0 || !state.me?.access?.edit;
+  generate.addEventListener('click', () => ['in-review','approved'].includes(job.status) ? openThumbnailReview(job.id, title.textContent, generate, true) : generateSnackThumbnail(job.id, '', generate));
+  const uploadInput = document.createElement('input'); uploadInput.type = 'file'; uploadInput.accept = 'image/png,image/jpeg,image/webp'; uploadInput.hidden = true;
+  const upload = document.createElement('button'); upload.type = 'button'; upload.className = 'btn btnSecondary'; upload.textContent = 'Upload artwork'; upload.disabled = active || !state.me?.access?.edit;
+  upload.addEventListener('click', () => uploadInput.click());
+  uploadInput.addEventListener('change', async () => { const file = uploadInput.files?.[0]; if (!file) return; const clear = setButtonBusy(upload, 'Uploading…'); try { const form = new FormData(); form.append('file', file); await apiForm(`/api/thumbnail-jobs/${encodeURIComponent(job.id)}/upload`, form); state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation; renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates); setStudioStatus('Episode artwork ready to review'); } catch (error) { setStudioStatus(error.message); } finally { clear(); } });
+  actions.append(generate, upload, uploadInput); panel.append(copy, actions);
+  if (active) startThumbnailStatusPolling(job.id);
+  return panel;
 }
 
 function startThumbnailStatusPolling(jobId) {
@@ -884,7 +909,7 @@ async function generateSnackThumbnail(jobId, reviewNote = '', triggerButton = nu
   } catch (error) { clearBusy(); setStudioStatus(error.message); }
 }
 
-async function openThumbnailReview(jobId, snackTitle, triggerButton = null) {
+async function openThumbnailReview(jobId, snackTitle, triggerButton = null, isEpisode = false) {
   const clearBusy = setButtonBusy(triggerButton, 'Opening…');
   setStudioStatus('Loading thumbnail review…');
   try {
@@ -894,7 +919,7 @@ async function openThumbnailReview(jobId, snackTitle, triggerButton = null) {
     const shell = document.createElement('div'); shell.className = 'thumbnailReviewShell';
     const header = document.createElement('header');
     const copy = document.createElement('div');
-    const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Thumbnail review';
+    const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = isEpisode ? 'Episode thumbnail review' : 'Thumbnail review';
     const title = document.createElement('h2'); title.textContent = snackTitle;
     copy.append(eyebrow, title);
     const close = document.createElement('button'); close.type = 'button'; close.className = 'btn btnSecondary'; close.textContent = 'Back to queue'; close.addEventListener('click', () => dialog.close());
@@ -916,10 +941,10 @@ async function openThumbnailReview(jobId, snackTitle, triggerButton = null) {
     const evidenceTitle = document.createElement('h3'); evidenceTitle.textContent = 'Transcript-grounded objects'; evidence.appendChild(evidenceTitle);
     if (!payload.job.evidence.length) { const empty = document.createElement('p'); empty.textContent = 'No literal object passed grounding. This set uses a contributor-only composition.'; evidence.appendChild(empty); }
     for (const item of payload.job.evidence) { const row = document.createElement('article'); const strong = document.createElement('strong'); strong.textContent = item.object_name; const quote = document.createElement('p'); quote.textContent = `${item.timestamp_label || ''} ${item.transcript_excerpt}`.trim(); const reason = document.createElement('small'); reason.textContent = item.grounding_rationale; row.append(strong, quote, reason); evidence.appendChild(row); }
-    shell.appendChild(evidence);
+    if (!isEpisode) shell.appendChild(evidence);
     const regenerate = document.createElement('form'); regenerate.className = 'thumbnailRegenerate';
-    const note = document.createElement('textarea'); note.rows = 2; note.maxLength = 600; note.placeholder = 'Optional direction, for example: make the hand plane larger and improve the contributors’ eye lines.';
-    const button = document.createElement('button'); button.type = 'submit'; button.className = 'btn btnSecondary'; button.textContent = 'Regenerate set';
+    const note = document.createElement('textarea'); note.rows = 2; note.maxLength = 600; note.placeholder = isEpisode ? 'Optional direction for another artwork pass.' : 'Optional direction, for example: make the hand plane larger and improve the contributors’ eye lines.';
+    const button = document.createElement('button'); button.type = 'submit'; button.className = 'btn btnSecondary'; button.textContent = 'Generate alternative';
     regenerate.append(note, button); regenerate.addEventListener('submit', async (event) => { event.preventDefault(); const clear = setButtonBusy(button, 'Regenerating…'); dialog.close(); try { await generateSnackThumbnail(jobId, note.value.trim()); } finally { clear(); } });
     shell.appendChild(regenerate); dialog.appendChild(shell); document.body.appendChild(dialog); dialog.showModal(); setStudioStatus('Ready');
   } catch (error) { setStudioStatus(error.message); }
