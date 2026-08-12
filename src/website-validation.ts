@@ -22,11 +22,15 @@ function yamlOptional(label: string, value: string | null | undefined) { return 
 function yamlList(label: string, input: Array<string | undefined>) { const values = input.filter((value): value is string => Boolean(value)); return `${label}:${values.length ? `\n${values.map((value) => `  - ${value}`).join('\n')}` : ' []'}\n`; }
 
 function renderEpisode(value: ReturnType<typeof buildPublicationPackage>['episode']) {
-  return `---\nnumber: ${value.number}\ntitle: ${yamlString(value.title)}\nsummary: ${yamlString(value.summary || '')}\nthumbnail: ${yamlString(value.thumbnail || '')}\nstatus: ${value.status}\n${yamlList('participants', value.participants)}primaryTopic: ${value.primaryTopic}\n${yamlList('relatedTopics', value.relatedTopics)}${yamlOptional('originalPublishedAt', value.recordedOn)}${yamlOptional('youtubeUrl', value.youtubeUrl)}${yamlOptional('audioUrl', value.audioUrl)}transcript: ${value.transcript}\nfeatured: false\nfixture: false\n---\n\n${value.summary || ''}\n`;
+  return `---\nnumber: ${value.number}\ntitle: ${yamlString(value.title)}\nsummary: ${yamlString(value.summary || '')}\nthumbnail: ${yamlString(value.thumbnail || '')}\nstatus: ${value.status}\n${yamlList('participants', value.participants)}${yamlList('themes', value.themes)}${yamlOptional('originalPublishedAt', value.recordedOn)}${yamlOptional('youtubeUrl', value.youtubeUrl)}${yamlOptional('audioUrl', value.audioUrl)}transcript: ${value.transcript}\nfeatured: false\nfixture: false\n---\n\n${value.summary || ''}\n`;
 }
 
 function renderSnack(value: ReturnType<typeof buildPublicationPackage>['snacks'][number], episodeSlug: string) {
-  return `---\ntitle: ${yamlString(value.title)}\n${yamlOptional('editorialTitle', value.editorialTitle)}thumbnail: ${yamlString(value.thumbnail || '')}\nstandfirst: ${yamlString(value.standfirst)}\nstatus: published\nsourceEpisode: ${episodeSlug}\nprimaryTopic: ${value.primaryTopic}\n${yamlList('relatedTopics', value.relatedTopics)}attribution: ${yamlString(value.attribution || '')}\n${yamlOptional('transcriptStart', value.transcriptStart)}relationships: []\nfeatured: false\nfixture: false\n${value.seo.title || value.seo.description ? `seo:\n${value.seo.title ? `  title: ${yamlString(value.seo.title)}\n` : ''}${value.seo.description ? `  description: ${yamlString(value.seo.description)}\n` : ''}` : ''}---\n\n${value.bodyMarkdown.trim()}\n`;
+  return `---\ntitle: ${yamlString(value.title)}\n${yamlOptional('editorialTitle', value.editorialTitle)}thumbnail: ${yamlString(value.thumbnail || '')}\nstandfirst: ${yamlString(value.standfirst)}\nstatus: published\nsourceEpisode: ${episodeSlug}\n${yamlList('themes', value.themes)}visualTheme: ${value.visualTheme}\nattribution: ${yamlString(value.attribution || '')}\n${yamlOptional('transcriptStart', value.transcriptStart)}relationships: []\nfeatured: false\nfixture: false\n${value.seo.title || value.seo.description ? `seo:\n${value.seo.title ? `  title: ${yamlString(value.seo.title)}\n` : ''}${value.seo.description ? `  description: ${yamlString(value.seo.description)}\n` : ''}` : ''}---\n\n${value.bodyMarkdown.trim()}\n`;
+}
+
+function renderTheme(value: ReturnType<typeof buildPublicationPackage>['themes'][number]) {
+  return `---\nname: ${yamlString(value.name)}\ndescription: ${yamlString(value.description)}\ncolour: ${yamlString(value.colour)}\nfeatured: false\n---\n\n${value.description}\n`;
 }
 
 function renderPerson(value: ReturnType<typeof buildPublicationPackage>['people'][number]) {
@@ -74,11 +78,13 @@ export function stageAndValidateWebsitePackage(episodeId: string, actorPubkey: s
     const transcript = getActiveTranscriptRevision(episodeId)!;
     const snacks = new Map(packageValue.snacks.map((snack) => [snack.revisionId, snack]));
     const people = new Map(packageValue.people.map((person) => [person.id, person]));
+    const themes = new Map(packageValue.themes.map((theme) => [theme.id, theme]));
     for (const file of packageValue.files) {
       const destination = safeDestination(worktree, file.destination); mkdirSync(dirname(destination), { recursive: true });
       if (file.kind === 'episode') writeFileSync(destination, renderEpisode(packageValue.episode));
       else if (file.kind === 'snack') writeFileSync(destination, renderSnack(snacks.get(file.sourceRevisionId!)!, packageValue.episode.slug));
       else if (file.kind === 'person') writeFileSync(destination, renderPerson(people.get(file.sourceId)!));
+      else if (file.kind === 'theme') writeFileSync(destination, renderTheme(themes.get(file.sourceId)!));
       else if (file.kind === 'transcript') writeFileSync(destination, `${transcript.transcriptText.trim()}\n`);
       else copyAsset(file, worktree);
     }
@@ -88,7 +94,7 @@ export function stageAndValidateWebsitePackage(episodeId: string, actorPubkey: s
     const changedFiles = run(['git', 'status', '--short'], worktree).split('\n').filter(Boolean);
     run(['git', 'add', '-N', '--', ...packageValue.files.map((file) => file.destination)], worktree);
     const diffStat = run(['git', 'diff', '--stat', '--', ...packageValue.files.map((file) => file.destination)], worktree);
-    const textPaths = packageValue.files.filter((file) => ['episode','snack','person','transcript'].includes(file.kind)).map((file) => file.destination);
+    const textPaths = packageValue.files.filter((file) => ['episode','snack','person','theme','transcript'].includes(file.kind)).map((file) => file.destination);
     const textDiff = textPaths.length ? run(['git', 'diff', '--', ...textPaths], worktree) : '';
     db.query(`UPDATE website_validation_attempts SET status='passed',changed_files_json=?1,diff_stat=?2,text_diff=?3,build_output=?4,updated_at=?5 WHERE id=?6`)
       .run(JSON.stringify(changedFiles), diffStat, textDiff.slice(0, 100_000), `${installOutput}\n${buildOutput}`.trim().slice(0, 40_000), Date.now(), attemptId);

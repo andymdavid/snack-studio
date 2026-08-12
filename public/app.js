@@ -5,7 +5,7 @@ const PIPELINES_CACHE_KEY = "snack_studio_pipelines_v1";
 const PROFILE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const CURRENT_SNACK_PROMPT_SUITE = "v3-intelligence-snacks-natural-prose";
 const CURRENT_SNACK_PIPELINE_VERSION = "3";
-const TOPIC_CATALOG = {
+const THEME_CATALOG = {
   'ai-coding': { name: 'AI Coding', colour: '#fe7141' },
   'software-systems': { name: 'Software Systems', colour: '#cdabfe' },
   agents: { name: 'Agents', colour: '#d1ddd3' },
@@ -911,7 +911,7 @@ function renderPublicationPreparation(episode, candidates) {
   for (const [label, value, stateClass] of [
     ["Approved Snacks", String(snackJobs.length), ""],
     ["Contributor portraits", `${resolved.length} resolved`, unresolved.length ? "statusWarning" : "statusSuccess"],
-    ["Topic colours", topicsRunning ? "Classifying…" : topicsMissing.length ? `${topicsMissing.length} to classify` : "Resolved", topicsRunning || topicsMissing.length ? "statusWarning" : "statusSuccess"],
+    ["Episode themes", topicsRunning ? "Resolving…" : topicsMissing.length ? "Derivation needed" : "Resolved", topicsRunning || topicsMissing.length ? "statusWarning" : "statusSuccess"],
   ]) {
     const item = document.createElement("div");
     const name = document.createElement("span"); name.textContent = label;
@@ -920,6 +920,11 @@ function renderPublicationPreparation(episode, candidates) {
     item.append(name, valueNode); facts.appendChild(item);
   }
   section.appendChild(facts);
+  if (preparation.themes?.length) {
+    const themeList = document.createElement('div'); themeList.className = 'episodeThemeList';
+    for (const theme of preparation.themes) { const item = document.createElement('span'); const swatch = document.createElement('i'); swatch.className = 'topicSwatch'; swatch.style.backgroundColor = theme.colour; item.append(swatch, theme.name); item.title = theme.description; themeList.appendChild(item); }
+    section.appendChild(themeList);
+  }
   if (unresolved.length) {
     const blocker = document.createElement("div");
     blocker.className = "publicationPreparationBlocker";
@@ -951,7 +956,7 @@ function renderPublicationPreparation(episode, candidates) {
     const identity = document.createElement("div");
     const name = document.createElement("strong"); name.textContent = candidate?.revision?.publicTitle || "Approved Snack";
     const detail = document.createElement("span");
-    const topic = Object.values(TOPIC_CATALOG).find((item) => item.colour.toLowerCase() === job.topicColour?.toLowerCase());
+    const topic = [...Object.values(THEME_CATALOG), ...(preparation.themes || [])].find((item) => item.colour.toLowerCase() === job.topicColour?.toLowerCase());
     detail.textContent = topic ? topic.name : topicsRunning ? "Classifying theme" : job.topicColour ? 'Theme assigned' : "Theme classification pending";
     if (topic) { const swatch = document.createElement('i'); swatch.className = 'topicSwatch'; swatch.style.backgroundColor = topic.colour; detail.prepend(swatch); }
     identity.append(name, detail);
@@ -2100,8 +2105,6 @@ function renderCandidateEditor(candidate) {
     candidateField("Public title", "publicTitle", candidate.revision.publicTitle),
     candidateField("Editorial title", "editorialTitle", candidate.revision.editorialTitle),
     candidateField("Attribution", "attribution", candidate.revision.attribution),
-    candidateField("Primary topic", "primaryTopic", candidate.revision.primaryTopic),
-    candidateField("Related topics", "relatedTopics", (candidate.revision.relatedTopics || []).join(", ")),
     candidateField("Transcript timestamp", "transcriptTimestamp", candidate.revision.transcriptTimestamp),
     candidateField("SEO title", "seoTitle", candidate.revision.seoTitle),
   );
@@ -2232,21 +2235,21 @@ async function preparePublication() {
 }
 
 async function startPublicationMetadataClassification() {
-  setStudioStatus("Preparing topic classification…");
+  setStudioStatus("Preparing transcript theme assessment…");
   const prepared = await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/pipeline-requests`, {
     method: "POST",
     body: JSON.stringify({
       operation: "publication-metadata",
       pipelineName: "snack-studio-publication-metadata",
-      pipelineVersion: "1",
-      promptSuiteVersion: "v1-publication-topic-classifier",
-      resultSchemaVersion: "1",
+      pipelineVersion: "2",
+      promptSuiteVersion: "v2-transcript-theme-resolver",
+      resultSchemaVersion: "2",
       idempotencyKey: crypto.randomUUID(),
       autopilotTargetId: state.activeAutopilotTargetId || undefined,
     }),
   });
   state.pipelineRequests = [prepared.pipelineRequest, ...state.pipelineRequests.filter((request) => request.id !== prepared.pipelineRequest.id)];
-  if (!prepared.requiresAutopilotAuth || !prepared.triggerRequest) throw new Error("Topic classification trigger was not prepared");
+  if (!prepared.requiresAutopilotAuth || !prepared.triggerRequest) throw new Error("Theme assessment trigger was not prepared");
   const triggerRequest = structuredClone(prepared.triggerRequest);
   for (const reference of triggerRequest.body?.input?.localContext?.references || []) {
     reference.authorization = await signNip98Request({ url: reference.url, method: "GET" });
@@ -2256,7 +2259,7 @@ async function startPublicationMetadataClassification() {
     method: "POST", body: JSON.stringify({ autopilotAuthorization, triggerRequest }),
   });
   await loadEpisode(state.activeEpisode.id);
-  setStudioStatus("Classifying publication topics…");
+  setStudioStatus("Deriving episode themes from the transcript…");
 }
 
 async function refreshCuration() {

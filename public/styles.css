@@ -725,6 +725,8 @@ textarea {
 .episodeOverviewFacts span { color:var(--text-muted); font-size:var(--text-sm); }
 .publicationThumbnailQueue span:has(.topicSwatch) { display:inline-flex; align-items:center; gap:7px; }
 .topicSwatch { width:10px; height:10px; display:inline-block; border:1px solid rgba(36,36,36,.2); border-radius:50%; }
+.episodeThemeList { display:flex; flex-wrap:wrap; gap:8px; }
+.episodeThemeList > span { display:inline-flex; align-items:center; gap:7px; min-height:32px; padding:5px 10px; border:1px solid var(--border); border-radius:999px; background:var(--surface-1); font-size:var(--text-sm); }
 @media (max-width: 900px) {
   .workflowQueueItem, .episodeOverviewStatus { align-items:flex-start; flex-direction:column; }
   .workflowQueueItem > div:last-child { justify-items:start; }

@@ -4,10 +4,11 @@ import { db } from './db.ts';
 import { getCandidate, validateApprovedCandidateBatch } from './candidates.ts';
 import { getContributor } from './contributors.ts';
 import { getActiveTranscriptRevision, getEpisode } from './episodes.ts';
-import { resolveCanonicalTopic, resolveTranscriptParticipants } from './publication-metadata.ts';
+import { resolveTranscriptParticipants } from './publication-metadata.ts';
+import { getTheme } from './themes.ts';
 
 export type PublicationPackageFile = {
-  kind: 'episode' | 'snack' | 'person' | 'transcript' | 'episode-thumbnail' | 'snack-thumbnail' | 'person-portrait';
+  kind: 'episode' | 'snack' | 'person' | 'theme' | 'transcript' | 'episode-thumbnail' | 'snack-thumbnail' | 'person-portrait';
   destination: string;
   sourceId: string;
   sourceRevisionId?: string;
@@ -25,12 +26,6 @@ export function publicationSlug(value: string) {
 
 export function episodePublicationSlug(number: number) {
   return `episode-${String(number).padStart(3, '0')}`;
-}
-
-export function deriveEpisodeTopics(topicIds: string[]) {
-  const counts = topicIds.reduce((result, topic) => result.set(topic, (result.get(topic) || 0) + 1), new Map<string, number>());
-  const primaryTopic = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] || 'software-systems';
-  return { primaryTopic, relatedTopics: [...counts.keys()].filter((topic) => topic !== primaryTopic) };
 }
 
 function selectedFinishedAsset(jobId: string) {
@@ -71,14 +66,18 @@ export function buildPublicationPackage(episodeId: string) {
     files.push({ kind: 'person', destination: `src/content/people/${person.id}.md`, sourceId: person.id });
     if (person.portraitPath) files.push({ kind: 'person-portrait', destination: `public/images/${person.id}-voxel.webp`, sourceId: person.id, sourcePath: person.portraitPath });
   }
+  const episodeThemeRows = db.query('SELECT theme_id,rationale,evidence_excerpt FROM episode_theme_assignments WHERE episode_id=?1 ORDER BY created_at,theme_id').all(episodeId) as Array<{ theme_id: string; rationale: string; evidence_excerpt: string }>;
+  const themes = episodeThemeRows.map((row) => ({ ...getTheme(row.theme_id)!, rationale: row.rationale, evidenceExcerpt: row.evidence_excerpt })).filter((item) => item.id);
+  if (!themes.length) blockers.push({ code: 'episode-themes-missing', message: 'Episode themes need to be derived from the transcript.' });
+  for (const theme of themes.filter((item) => item.source === 'studio')) files.push({ kind: 'theme', destination: `src/content/topics/${theme.id}.md`, sourceId: theme.id });
 
   const snacks = approved.candidateIds.map(getCandidate).filter(Boolean).map((candidate) => {
     const revision = candidate!.revision;
-    const storedTopic = db.query('SELECT primary_topic FROM publication_snack_metadata WHERE snack_revision_id=?1').get(revision.id) as { primary_topic: string } | null;
-    const primaryTopic = resolveCanonicalTopic(storedTopic?.primary_topic || revision.primaryTopic)?.id || '';
+    const assignments = db.query('SELECT theme_id,visual_theme FROM snack_theme_assignments WHERE snack_revision_id=?1 ORDER BY visual_theme DESC,theme_id').all(revision.id) as Array<{ theme_id: string; visual_theme: number }>;
+    const themeIds = assignments.map((item) => item.theme_id); const visualTheme = assignments.find((item) => Boolean(item.visual_theme))?.theme_id || '';
     const slug = publicationSlug(revision.publicTitle);
     if (!slug) blockers.push({ code: 'snack-slug-missing', message: `Could not derive a slug for ${revision.publicTitle}.`, sourceId: candidate!.id });
-    if (!primaryTopic) blockers.push({ code: 'snack-topic-missing', message: `${revision.publicTitle} needs a canonical primary topic.`, sourceId: candidate!.id });
+    if (!themeIds.length || !visualTheme) blockers.push({ code: 'snack-themes-missing', message: `${revision.publicTitle} needs themes derived from the episode.`, sourceId: candidate!.id });
     const job = db.query("SELECT * FROM thumbnail_jobs WHERE episode_id=?1 AND asset_kind='snack' AND snack_revision_id=?2 ORDER BY created_at DESC LIMIT 1")
       .get(episodeId, revision.id) as Record<string, unknown> | null;
     const asset = job && String(job.status) === 'approved' ? selectedFinishedAsset(String(job.id)) : null;
@@ -89,8 +88,7 @@ export function buildPublicationPackage(episodeId: string) {
       candidateId: candidate!.id, revisionId: revision.id, position: candidate!.approvedPosition,
       slug, title: revision.publicTitle, editorialTitle: revision.editorialTitle, standfirst: revision.standfirst,
       bodyMarkdown: revision.bodyMarkdown, attribution: revision.attribution || `Developed from a conversation between ${people.map((person) => person.name).join(', ').replace(/, ([^,]*)$/, ' and $1')}`,
-      primaryTopic,
-      relatedTopics: revision.relatedTopics.map((topic) => resolveCanonicalTopic(topic)?.id).filter(Boolean),
+      themes: themeIds, visualTheme,
       transcriptStart: revision.transcriptTimestamp, seo: { title: revision.seoTitle, description: revision.seoDescription },
       thumbnail: asset ? `/images/snacks/${slug}.webp` : null,
     };
@@ -101,8 +99,6 @@ export function buildPublicationPackage(episodeId: string) {
   if (!episodeAsset) blockers.push({ code: 'episode-thumbnail-missing', message: 'The episode needs an approved finished thumbnail.' });
   if (episodeAsset && episodeNumber) files.push({ kind: 'episode-thumbnail', destination: `public/images/episodes/${episodeSlug}-thumbnail.webp`, sourceId: episode.id, sourcePath: String(episodeAsset.storage_path), sizeBytes: Number(episodeAsset.size_bytes) });
 
-  const episodeTopicSet = deriveEpisodeTopics(snacks.map((snack) => snack.primaryTopic));
-  const primaryTopic = episodeTopicSet.primaryTopic;
   const summary = episode.publicSummary?.trim() || snacks.slice(0, 2).map((snack) => snack.standfirst.trim()).filter(Boolean).join(' ').slice(0, 500);
   const duplicateDestinations = files.map((file) => file.destination).filter((path, index, all) => all.indexOf(path) !== index);
   for (const destination of new Set(duplicateDestinations)) blockers.push({ code: 'destination-collision', message: `More than one package item targets ${destination}.` });
@@ -110,13 +106,12 @@ export function buildPublicationPackage(episodeId: string) {
     schemaVersion: 1,
     episode: {
       id: episode.id, slug: episodeSlug, number: episode.episodeNumber, title: episode.workingTitle,
-      summary, status: 'published', participants: contributorIds, primaryTopic,
-      relatedTopics: [...new Set([...episodeTopicSet.relatedTopics, ...snacks.flatMap((snack) => snack.relatedTopics)])].filter((topic) => topic !== primaryTopic),
+      summary, status: 'published', participants: contributorIds, themes: themes.map((theme) => theme.id),
       recordedOn: episode.recordedOn, audioUrl: episode.audioUrl, youtubeUrl: episode.videoUrl,
       transcript: transcript && episodeNumber ? episodeSlug : null,
       thumbnail: episodeAsset && episodeNumber ? `/images/episodes/${episodeSlug}-thumbnail.webp` : null,
     },
-    snacks, people, transcript: transcript ? { revisionId: transcript.id, sha256: transcript.sha256, sizeBytes: transcript.sizeBytes } : null,
+    snacks, people, themes, transcript: transcript ? { revisionId: transcript.id, sha256: transcript.sha256, sizeBytes: transcript.sizeBytes } : null,
     files: files.sort((a, b) => a.destination.localeCompare(b.destination)),
   };
   const fingerprint = bytesToHex(sha256(new TextEncoder().encode(JSON.stringify(packageValue))));
