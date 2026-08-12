@@ -91,6 +91,8 @@ import { approveThumbnailCandidate, applyThumbnailResult, createThumbnailGenerat
 import { THUMBNAIL_CANDIDATES_PER_ROUND, THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
 import { validateSuccessfulPublicationMetadataResult } from "./publication-metadata-result-input.ts";
 import { applySuccessfulPublicationMetadataResult } from "./publication-metadata-results.ts";
+import { validateSuccessfulThemeResult } from './theme-result-input.ts';
+import { applySuccessfulThemeResult } from './theme-results.ts';
 import { buildPublicationPackage } from "./publication-package.ts";
 import { getLatestWebsiteValidation, stageAndValidateWebsitePackage } from './website-validation.ts';
 import { getLatestGitPublication, publishValidatedPackageToMain } from './git-publication.ts';
@@ -1492,7 +1494,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       const validation = pipelineRequest.operation === "snack-regeneration"
         ? validateSuccessfulRegenerationResult(body)
         : pipelineRequest.operation === "publication-metadata"
-          ? validateSuccessfulPublicationMetadataResult(body)
+          ? pipelineRequest.resultSchemaVersion === '2' ? validateSuccessfulThemeResult(body) : validateSuccessfulPublicationMetadataResult(body)
           : validateSuccessfulPipelineResult(body);
       if (!validation.ok) {
         markPipelineResultRejected({ runId: run.id, summary: validation.error });
@@ -1512,7 +1514,9 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
           return json({ ok: true, requestId, status: "completed", proposalId: proposal.id });
         }
         if (pipelineRequest.operation === "publication-metadata") {
-          const applied = applySuccessfulPublicationMetadataResult({ localRunId: run.id, result: validation.value as import("./publication-metadata-result-input.ts").SuccessfulPublicationMetadataResult });
+          const applied = pipelineRequest.resultSchemaVersion === '2'
+            ? applySuccessfulThemeResult({ localRunId: run.id, result: validation.value as import('./theme-result-input.ts').SuccessfulThemeResult })
+            : applySuccessfulPublicationMetadataResult({ localRunId: run.id, result: validation.value as import("./publication-metadata-result-input.ts").SuccessfulPublicationMetadataResult });
           recordAuditEvent({ action: "publication.topics.assigned", entityType: "episode", entityId: pipelineRequest.episodeId, detail: { requestId, runId: run.id, assignmentCount: applied.assignmentCount } });
           return json({ ok: true, requestId, status: "completed", replay: applied.replay, assignmentCount: applied.assignmentCount });
         }

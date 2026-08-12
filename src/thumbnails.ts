@@ -2,7 +2,8 @@ import { db } from "./db.ts";
 import { getCandidate, validateApprovedCandidateBatch } from "./candidates.ts";
 import { getActiveTranscriptRevision, getEpisode, recordAuditEvent } from "./episodes.ts";
 import type { ThumbnailAssetKind, ThumbnailBriefInput } from "./thumbnail-input.ts";
-import { resolveCanonicalTopic, resolveTranscriptParticipants } from "./publication-metadata.ts";
+import { resolveTranscriptParticipants } from "./publication-metadata.ts";
+import { getTheme } from './themes.ts';
 import { getContributor } from "./contributors.ts";
 import { bytesToHex } from '@noble/hashes/utils';
 import { sha256 } from '@noble/hashes/sha256';
@@ -381,13 +382,17 @@ export function getPublicationPreparation(episodeId: string) {
   const contributorsNeedingPortraits = contributors
     .filter(({ profile }) => profile?.portraitStatus !== 'approved' || !profile.portraitPath)
     .map(({ contributorId, name, profile }) => ({ contributorId, name, portraitStatus: profile?.portraitStatus || 'needed' }));
+  const episodeThemeCount = Number((db.query('SELECT COUNT(*) AS count FROM episode_theme_assignments WHERE episode_id=?1').get(episodeId) as { count: number }).count);
+  const themes = (db.query('SELECT t.id,t.name,t.description,t.colour FROM episode_theme_assignments a JOIN themes t ON t.id=a.theme_id WHERE a.episode_id=?1 ORDER BY a.created_at,t.name').all(episodeId) as Array<{ id: string; name: string; description: string; colour: string }>);
+  const needsThemeClassification = jobs.filter((job) => job.assetKind === 'snack' && !db.query('SELECT 1 FROM snack_theme_assignments WHERE snack_revision_id=?1 LIMIT 1').get(job.snackRevisionId)).map((job) => job.snackCandidateId);
   return {
     jobs,
     participants: { ...participants, resolved: contributors },
     contributorsNeedingPortraits,
-    needsTopicClassification: jobs.filter((job) => job.assetKind === "snack" && !job.topicColour).map((job) => job.snackCandidateId),
+    themes,
+    needsTopicClassification: episodeThemeCount ? needsThemeClassification : jobs.filter((job) => job.assetKind === 'snack').map((job) => job.snackCandidateId),
     ready: jobs.length > 0 && participants.unresolved.length === 0 && contributorsNeedingPortraits.length === 0
-      && jobs.every((job) => job.assetKind !== "snack" || Boolean(job.topicColour)),
+      && episodeThemeCount > 0 && needsThemeClassification.length === 0 && jobs.every((job) => job.assetKind !== "snack" || Boolean(job.topicColour)),
   };
 }
 
@@ -397,15 +402,14 @@ export function preparePublicationThumbnails(episodeId: string, actorPubkey: str
   db.transaction(() => {
     for (const candidateId of approved.candidateIds) {
       const candidate = getCandidate(candidateId)!;
-      const storedMetadata = db.query("SELECT primary_topic FROM publication_snack_metadata WHERE snack_revision_id = ?1")
-        .get(candidate.currentRevisionId) as { primary_topic: string } | null;
-      const topic = resolveCanonicalTopic(storedMetadata?.primary_topic || candidate.revision.primaryTopic);
+      const assignment = db.query('SELECT theme_id FROM snack_theme_assignments WHERE snack_revision_id=?1 AND visual_theme=1').get(candidate.currentRevisionId) as { theme_id: string } | null;
+      const theme = assignment ? getTheme(assignment.theme_id) : null;
       db.query(`INSERT OR IGNORE INTO thumbnail_jobs(
         id, episode_id, asset_kind, snack_candidate_id, snack_revision_id, transcript_revision_id,
         status, topic_colour, contributor_ids_json, created_by_pubkey, created_at, updated_at
       ) VALUES (?1, ?2, 'snack', ?3, ?4, ?5, 'draft', ?6, ?7, ?8, ?9, ?9)`)
         .run(crypto.randomUUID(), episodeId, candidate.id, candidate.currentRevisionId,
-          transcript.id, topic?.colour || null, JSON.stringify(contributorIds), actorPubkey, now);
+          transcript.id, theme?.colour || null, JSON.stringify(contributorIds), actorPubkey, now);
     }
     db.query(`INSERT OR IGNORE INTO thumbnail_jobs(id,episode_id,asset_kind,transcript_revision_id,status,contributor_ids_json,created_by_pubkey,created_at,updated_at) VALUES(?1,?2,'episode',?3,'draft',?4,?5,?6,?6)`)
       .run(crypto.randomUUID(), episodeId, transcript.id, JSON.stringify(contributorIds), actorPubkey, now);

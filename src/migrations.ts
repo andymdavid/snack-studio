@@ -1075,6 +1075,56 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: '028_theme_graph_foundation',
+    description: 'Add reusable transcript-grounded themes and episode and Snack assignments',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS themes (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          description TEXT NOT NULL,
+          colour TEXT NOT NULL CHECK(colour GLOB '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'),
+          source TEXT NOT NULL CHECK(source IN ('website','studio')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS episode_theme_assignments (
+          episode_id TEXT NOT NULL,
+          theme_id TEXT NOT NULL,
+          rationale TEXT NOT NULL,
+          evidence_excerpt TEXT NOT NULL,
+          pipeline_request_id TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (episode_id, theme_id),
+          FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (theme_id) REFERENCES themes(id),
+          FOREIGN KEY (pipeline_request_id) REFERENCES pipeline_requests(id)
+        );
+        CREATE TABLE IF NOT EXISTS snack_theme_assignments (
+          snack_revision_id TEXT NOT NULL,
+          candidate_id TEXT NOT NULL,
+          episode_id TEXT NOT NULL,
+          theme_id TEXT NOT NULL,
+          visual_theme INTEGER NOT NULL DEFAULT 0 CHECK(visual_theme IN (0,1)),
+          rationale TEXT NOT NULL,
+          pipeline_request_id TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (snack_revision_id, theme_id),
+          FOREIGN KEY (snack_revision_id) REFERENCES snack_revisions(id) ON DELETE CASCADE,
+          FOREIGN KEY (candidate_id) REFERENCES snack_candidates(id) ON DELETE CASCADE,
+          FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (theme_id) REFERENCES themes(id),
+          FOREIGN KEY (pipeline_request_id) REFERENCES pipeline_requests(id)
+        );
+      `);
+      const now = Date.now();
+      const seed = db.query('INSERT OR IGNORE INTO themes(id,name,description,colour,source,created_at,updated_at) VALUES(?1,?2,?3,?4,\'website\',?5,?5)');
+      seed.run('ai-coding', 'AI Coding', 'How coding agents alter the tools, practices and responsibilities involved in making software.', '#fe7141', now);
+      seed.run('software-systems', 'Software Systems', 'Architecture, operational knowledge and the repeated work of discovering what software needs to become.', '#cdabfe', now);
+      seed.run('agents', 'Agents', 'The systems, harnesses and feedback loops that allow models to act through tools.', '#d1ddd3', now);
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

@@ -3,6 +3,7 @@ import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex } from "@noble/hashes/utils";
 import { db as appDb } from "./db.ts";
 import { THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
+import { listThemes } from './themes.ts';
 
 export const PIPELINE_OPERATIONS = ["transcript-to-snacks", "transcript-normalization", "snack-regeneration", "publication-metadata"] as const;
 export type PipelineOperation = typeof PIPELINE_OPERATIONS[number];
@@ -497,6 +498,7 @@ export function getPipelineRequestContext(requestId: string, database: Database 
     contributors: [],
     approvedCandidates,
     canonicalTopics: String(row.operation) === "publication-metadata" ? THUMBNAIL_TOPICS : [],
+    canonicalThemes: String(row.operation) === 'publication-metadata' ? listThemes(database) : [],
     targetCandidate: targetRow ? {
       id: String(targetRow.id),
       baseRevisionId: String(row.base_candidate_revision_id),
