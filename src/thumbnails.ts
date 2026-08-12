@@ -13,6 +13,15 @@ import { getCurrentAutopilotTarget } from './db.ts';
 
 export type ThumbnailJobStatus = "draft" | "extracting" | "grounding" | "generating" | "in-review" | "approved" | "failed";
 
+const EPISODE_THUMBNAIL_PIPELINE_VERSION = '2';
+const SNACK_THUMBNAIL_PIPELINE_VERSION = '3';
+
+export function thumbnailPipelineRoute(assetKind: ThumbnailAssetKind) {
+  const pipeline = assetKind === 'episode' ? 'snack-studio-episode-thumbnail' : 'snack-studio-snack-thumbnail';
+  const version = assetKind === 'episode' ? EPISODE_THUMBNAIL_PIPELINE_VERSION : SNACK_THUMBNAIL_PIPELINE_VERSION;
+  return { pipeline, version, path: `/snack-studio-${assetKind}-thumbnail.v${version}` };
+}
+
 export type ThumbnailJob = {
   id: string;
   episodeId: string;
@@ -107,8 +116,7 @@ export function createThumbnailGeneration(jobId: string, actorPubkey: string, pu
     reviewNote: targetedNote || null,
   }, null, 2));
   const token = `${crypto.randomUUID().replaceAll('-', '')}${crypto.randomUUID().replaceAll('-', '')}`;
-  const pipeline = job.assetKind === 'episode' ? 'snack-studio-episode-thumbnail' : 'snack-studio-snack-thumbnail';
-  const version = job.assetKind === 'episode' ? '1' : '3';
+  const { pipeline, version } = thumbnailPipelineRoute(job.assetKind);
   db.query("UPDATE thumbnail_jobs SET status=?1, callback_token_hash=?2, generation_round=?3, pipeline_name=?4, pipeline_version=?5, failure_summary=NULL, updated_at=?6 WHERE id=?7")
     .run(job.assetKind === 'episode' ? 'generating' : 'extracting', hashToken(token), round, pipeline, version, Date.now(), job.id);
   if (targetedNote) db.query('UPDATE thumbnail_jobs SET review_notes=?1 WHERE id=?2').run(targetedNote, job.id);
@@ -136,7 +144,7 @@ export function verifyThumbnailGenerationTrigger(jobId: string, trigger: Record<
   const webhook = input.webhook && typeof input.webhook === 'object' ? input.webhook as Record<string, unknown> : {};
   let url: URL; try { url = new URL(String(trigger.url || '')); } catch { return false; }
   const target = getCurrentAutopilotTarget();
-  const expected = job.assetKind === 'episode' ? '/snack-studio-episode-thumbnail.v2' : '/snack-studio-snack-thumbnail.v3';
+  const expected = thumbnailPipelineRoute(job.assetKind).path;
   return Boolean(row?.callback_token_hash && String(trigger.method) === 'POST' && input.jobId === jobId
     && url.origin === new URL(target.url).origin && url.pathname.endsWith(expected)
     && String(webhook.token || '') && hashToken(String(webhook.token)) === row.callback_token_hash);
