@@ -87,7 +87,7 @@ import { applySuccessfulPipelineResult } from "./pipeline-results.ts";
 import { applySuccessfulRegenerationResult, listRegenerationProposals, resolveRegenerationProposal } from "./regeneration-proposals.ts";
 import { validateSuccessfulRegenerationResult } from "./regeneration-result-input.ts";
 import { validateThumbnailBrief } from "./thumbnail-input.ts";
-import { approveThumbnailCandidate, applyThumbnailResult, createThumbnailGeneration, createThumbnailJob, getPublicationPreparation, getThumbnailCandidateRow, getThumbnailJobDetail, listThumbnailJobs, markThumbnailGenerationFailed, markThumbnailGenerationStarted, preparePublicationThumbnails, verifyThumbnailGenerationTrigger } from "./thumbnails.ts";
+import { approveThumbnailCandidate, applyThumbnailResult, createThumbnailGeneration, createThumbnailJob, getPublicationPreparation, getThumbnailCandidateRow, getThumbnailJobDetail, listThumbnailJobs, markThumbnailGenerationFailed, markThumbnailGenerationStarted, preparePublicationThumbnails, uploadEpisodeThumbnail, verifyThumbnailGenerationTrigger } from "./thumbnails.ts";
 import { THUMBNAIL_CANDIDATES_PER_ROUND, THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
 import { validateSuccessfulPublicationMetadataResult } from "./publication-metadata-result-input.ts";
 import { applySuccessfulPublicationMetadataResult } from "./publication-metadata-results.ts";
@@ -648,6 +648,14 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const body = await readJson(req); const runId = String(body.autopilotRunId || '');
     if (!runId) return json({ error: 'autopilotRunId is required' }, 400);
     markThumbnailGenerationStarted(decodeURIComponent(thumbnailStartedMatch[1]!), runId); return json({ ok: true });
+  }
+  const thumbnailUploadMatch = pathname.match(/^\/api\/thumbnail-jobs\/([^/]+)\/upload$/);
+  if (thumbnailUploadMatch && req.method === 'POST') {
+    const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
+    const form = await req.formData(); const file = form.get('file');
+    if (!(file instanceof File)) return json({ error: 'image file is required' }, 400);
+    try { return json({ job: await uploadEpisodeThumbnail(decodeURIComponent(thumbnailUploadMatch[1]!), file, session.pubkey) }, 201); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 400); }
   }
   const thumbnailStartMatch = pathname.match(/^\/api\/thumbnail-jobs\/([^/]+)\/start$/);
   if (thumbnailStartMatch && req.method === 'POST') {

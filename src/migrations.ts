@@ -931,6 +931,17 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    id: "021_episode_thumbnail_identity",
+    description: "Keep one episode-thumbnail job per episode",
+    up(db) {
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS thumbnail_jobs_episode_asset_unique
+          ON thumbnail_jobs(episode_id)
+          WHERE asset_kind = 'episode';
+      `);
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

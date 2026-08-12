@@ -6,7 +6,7 @@ import { resolveCanonicalTopic, resolveTranscriptParticipants } from "./publicat
 import { getContributor } from "./contributors.ts";
 import { bytesToHex } from '@noble/hashes/utils';
 import { sha256 } from '@noble/hashes/sha256';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { resolve, join, normalize, extname } from 'node:path';
 import { CONTRIBUTOR_UPLOAD_DIR } from './config.ts';
 import { getCurrentAutopilotTarget } from './db.ts';
@@ -87,11 +87,12 @@ export function getThumbnailCandidateRow(id: string) {
 
 export function createThumbnailGeneration(jobId: string, actorPubkey: string, publicOrigin: string, reviewNote?: string) {
   const job = getThumbnailJob(jobId);
-  if (!job || job.assetKind !== 'snack' || !job.snackCandidateId) throw new Error('Snack thumbnail job not found');
-  if (!job.topicColour) throw new Error('Topic colour is required');
-  const candidate = getCandidate(job.snackCandidateId);
+  if (!job) throw new Error('Thumbnail job not found');
+  if (job.assetKind === 'snack' && (!job.snackCandidateId || !job.topicColour)) throw new Error('Snack thumbnail context is incomplete');
+  const candidate = job.snackCandidateId ? getCandidate(job.snackCandidateId) : null;
   const transcript = getActiveTranscriptRevision(job.episodeId);
-  if (!candidate || !transcript) throw new Error('Thumbnail source context is incomplete');
+  const episode = getEpisode(job.episodeId);
+  if ((job.assetKind === 'snack' && !candidate) || !transcript || !episode) throw new Error('Thumbnail source context is incomplete');
   const contributors = job.contributorIds.map(getContributor);
   if (contributors.some((item) => !item?.portraitPath || item.portraitStatus !== 'approved')) throw new Error('Every contributor needs an approved portrait');
   const round = Number(job.generationRound || 0) + 1;
@@ -100,21 +101,24 @@ export function createThumbnailGeneration(jobId: string, actorPubkey: string, pu
   mkdirSync(outputDirectory, { recursive: true });
   const contextPath = join(outputDirectory, 'context.json');
   writeFileSync(contextPath, JSON.stringify({
-    jobId: job.id, snack: candidate.revision, transcript: transcript.transcriptText, topicColour: job.topicColour,
+    jobId: job.id, assetKind: job.assetKind, snack: candidate?.revision || null, transcript: transcript.transcriptText, topicColour: job.topicColour,
+    episode: { number: episode.episodeNumber, title: episode.publicTitle || episode.workingTitle },
     contributors: contributors.map((item) => ({ id: item!.id, name: item!.name, portraitPath: resolve(`public${item!.portraitPath}`) })),
     reviewNote: targetedNote || null,
   }, null, 2));
   const token = `${crypto.randomUUID().replaceAll('-', '')}${crypto.randomUUID().replaceAll('-', '')}`;
-  db.query("UPDATE thumbnail_jobs SET status='extracting', callback_token_hash=?1, generation_round=?2, pipeline_name='snack-studio-snack-thumbnail', pipeline_version='3', failure_summary=NULL, updated_at=?3 WHERE id=?4")
-    .run(hashToken(token), round, Date.now(), job.id);
+  const pipeline = job.assetKind === 'episode' ? 'snack-studio-episode-thumbnail' : 'snack-studio-snack-thumbnail';
+  const version = job.assetKind === 'episode' ? '1' : '3';
+  db.query("UPDATE thumbnail_jobs SET status=?1, callback_token_hash=?2, generation_round=?3, pipeline_name=?4, pipeline_version=?5, failure_summary=NULL, updated_at=?6 WHERE id=?7")
+    .run(job.assetKind === 'episode' ? 'generating' : 'extracting', hashToken(token), round, pipeline, version, Date.now(), job.id);
   if (targetedNote) db.query('UPDATE thumbnail_jobs SET review_notes=?1 WHERE id=?2').run(targetedNote, job.id);
   recordAuditEvent({ actorPubkey, action: 'thumbnail.generation.started', entityType: 'thumbnail-job', entityId: job.id, detail: { round } });
   const target = getCurrentAutopilotTarget();
   return {
     job: getThumbnailJob(job.id),
     triggerRequest: {
-      url: new URL('/api/pipelines/triggers/http/snack-studio-snack-thumbnail.v3', target.url).toString(), method: 'POST',
-      body: { input: { source: 'snack-studio', operation: 'snack-thumbnail', jobId: job.id, generationRound: round, contextPath, outputDirectory, agent: 'codex', webhook: { url: `${publicOrigin.replace(/\/$/, '')}/api/thumbnail-webhooks/${job.id}`, token, authHeader: 'x-snack-studio-token' } } },
+      url: new URL(`/api/pipelines/triggers/http/${pipeline}.v${version}`, target.url).toString(), method: 'POST',
+      body: { input: { source: 'snack-studio', operation: job.assetKind === 'episode' ? 'episode-thumbnail' : 'snack-thumbnail', jobId: job.id, generationRound: round, contextPath, outputDirectory, agent: 'codex', webhook: { url: `${publicOrigin.replace(/\/$/, '')}/api/thumbnail-webhooks/${job.id}`, token, authHeader: 'x-snack-studio-token' } } },
     },
   };
 }
@@ -130,8 +134,9 @@ export function verifyThumbnailGenerationTrigger(jobId: string, trigger: Record<
   const webhook = input.webhook && typeof input.webhook === 'object' ? input.webhook as Record<string, unknown> : {};
   let url: URL; try { url = new URL(String(trigger.url || '')); } catch { return false; }
   const target = getCurrentAutopilotTarget();
+  const expected = job.assetKind === 'episode' ? '/snack-studio-episode-thumbnail.v1' : '/snack-studio-snack-thumbnail.v3';
   return Boolean(row?.callback_token_hash && String(trigger.method) === 'POST' && input.jobId === jobId
-    && url.origin === new URL(target.url).origin && url.pathname.endsWith('/snack-studio-snack-thumbnail.v3')
+    && url.origin === new URL(target.url).origin && url.pathname.endsWith(expected)
     && String(webhook.token || '') && hashToken(String(webhook.token)) === row.callback_token_hash);
 }
 
@@ -147,11 +152,12 @@ function safeThumbnailPath(jobId: string, round: number, value: string) {
   return path;
 }
 
-function thumbnailDimensions(path: string) {
+function thumbnailDimensions(path: string, assetKind: ThumbnailAssetKind = 'snack') {
   const result = Bun.spawnSync(['identify', '-format', '%w %h', path]);
   if (result.exitCode !== 0) throw new Error('Generated thumbnail candidate is not a readable image');
   const [width, height] = result.stdout.toString().trim().split(/\s+/).map(Number);
-  if (!width || !height || Math.abs(width / height - 1.5) > 0.03 || width < 1200) throw new Error('Thumbnail candidates must be 3:2 and at least 1200 pixels wide');
+  const targetRatio = assetKind === 'episode' ? 16 / 9 : 1.5;
+  if (!width || !height || Math.abs(width / height - targetRatio) > 0.04 || width < 1200) throw new Error(`Thumbnail candidates must be ${assetKind === 'episode' ? '16:9' : '3:2'} and at least 1200 pixels wide`);
   return { width, height };
 }
 
@@ -161,6 +167,7 @@ export function applyThumbnailResult(jobId: string, token: string, body: Record<
   const response = body.response && typeof body.response === 'object' ? body.response as Record<string, unknown> : body;
   const evidence = Array.isArray(response.evidence) ? response.evidence : [];
   const candidates = Array.isArray(response.candidates) ? response.candidates : [];
+  const assetKind = String(row.asset_kind) as ThumbnailAssetKind;
   if (candidates.length !== 1) throw new Error('Thumbnail result requires one candidate');
   const round = Number(row.generation_round); const now = Date.now();
   db.transaction(() => {
@@ -171,7 +178,13 @@ export function applyThumbnailResult(jobId: string, token: string, body: Record<
         .run(crypto.randomUUID(), jobId, String(item.object || ''), String(item.evidence || ''), String(item.timestamp || ''), String(item.roleInSnack || ''), String(item.rationale || ''), now);
     }
     for (const [index, raw] of candidates.entries()) {
-      const item = raw as Record<string, unknown>; const path = safeThumbnailPath(jobId, round, String(item.path || '')); const dimensions = thumbnailDimensions(path);
+      const item = raw as Record<string, unknown>; let path = safeThumbnailPath(jobId, round, String(item.path || '')); let dimensions = thumbnailDimensions(path, assetKind);
+      if (assetKind === 'episode') {
+        const preview = join(resolve(path, '..'), 'candidate-1-finished.webp');
+        const finished = finishEpisodeThumbnail({ ...row, source_uri: path }, preview);
+        if (finished.exitCode !== 0) throw new Error('Episode thumbnail preview could not be composed');
+        path = preview; dimensions = thumbnailDimensions(path, 'episode');
+      }
       db.query(`INSERT INTO thumbnail_candidates(id,job_id,generation_round,candidate_number,source_uri,prompt_text,model_name,width,height,mime_type,size_bytes,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)`)
         .run(crypto.randomUUID(), jobId, round, index + 1, path, String(response.prompt || ''), String(response.model || ''), dimensions.width, dimensions.height, String(item.mimeType || (extname(path)==='.webp'?'image/webp':'image/png')), statSync(path).size, now);
     }
@@ -180,24 +193,62 @@ export function applyThumbnailResult(jobId: string, token: string, body: Record<
 }
 
 export function approveThumbnailCandidate(candidateId: string, actorPubkey: string) {
-  const row = db.query(`SELECT c.*, j.episode_id, j.snack_candidate_id FROM thumbnail_candidates c JOIN thumbnail_jobs j ON j.id=c.job_id WHERE c.id=?1`).get(candidateId) as Record<string, unknown> | null;
+  const row = db.query(`SELECT c.*, j.episode_id, j.snack_candidate_id, j.asset_kind, j.contributor_ids_json FROM thumbnail_candidates c JOIN thumbnail_jobs j ON j.id=c.job_id WHERE c.id=?1`).get(candidateId) as Record<string, unknown> | null;
   if (!row) throw new Error('Thumbnail candidate not found');
   const jobId = String(row.job_id);
   const version = Number((db.query("SELECT COALESCE(MAX(version_number),0)+1 version FROM thumbnail_assets WHERE job_id=?1 AND asset_stage='finished'").get(jobId) as { version: number }).version);
   const directory = resolve(join(CONTRIBUTOR_UPLOAD_DIR, '..', 'thumbnails', jobId, 'finished'));
   mkdirSync(directory, { recursive: true });
+  const isEpisode = String(row.asset_kind) === 'episode';
   const destination = join(directory, `thumbnail-v${version}.webp`);
-  const conversion = Bun.spawnSync(['magick', String(row.source_uri), '-resize', '1536x1024^', '-gravity', 'center', '-extent', '1536x1024', '-strip', '-quality', '84', destination]);
+  const conversion = isEpisode ? (copyFileSync(String(row.source_uri), destination), { exitCode: 0 }) : Bun.spawnSync(['magick', String(row.source_uri), '-resize', '1536x1024^', '-gravity', 'center', '-extent', '1536x1024', '-strip', '-quality', '84', destination]);
   if (conversion.exitCode !== 0) throw new Error('Thumbnail candidate could not be finished');
   const digest = bytesToHex(sha256(readFileSync(destination))); const now = Date.now();
   db.transaction(() => {
     db.query("UPDATE thumbnail_candidates SET status=CASE WHEN id=?1 THEN 'approved' ELSE 'rejected' END WHERE job_id=?2 AND generation_round=?3").run(candidateId, jobId, Number(row.generation_round));
-    db.query(`INSERT INTO thumbnail_assets(id,job_id,candidate_id,asset_stage,storage_path,width,height,mime_type,size_bytes,sha256,version_number,created_at) VALUES(?1,?2,?3,'finished',?4,1536,1024,'image/webp',?5,?6,?7,?8)`)
-      .run(crypto.randomUUID(), jobId, candidateId, destination, statSync(destination).size, digest, version, now);
+    db.query(`INSERT INTO thumbnail_assets(id,job_id,candidate_id,asset_stage,storage_path,width,height,mime_type,size_bytes,sha256,version_number,created_at) VALUES(?1,?2,?3,'finished',?4,?5,?6,'image/webp',?7,?8,?9,?10)`)
+      .run(crypto.randomUUID(), jobId, candidateId, destination, isEpisode ? 1672 : 1536, isEpisode ? 941 : 1024, statSync(destination).size, digest, version, now);
     db.query("UPDATE thumbnail_jobs SET status='approved', selected_candidate_id=?1, updated_at=?2 WHERE id=?3").run(candidateId, now, jobId);
     recordAuditEvent({ actorPubkey, action: 'thumbnail.candidate.approved', entityType: 'thumbnail-job', entityId: jobId, detail: { candidateId, version, sha256: digest } });
   })();
   return getThumbnailJobDetail(jobId)!;
+}
+
+function escapeSvg(value: string) { return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;'); }
+
+function finishEpisodeThumbnail(row: Record<string, unknown>, destination: string) {
+  const episode = getEpisode(String(row.episode_id));
+  if (!episode) throw new Error('Episode not found');
+  const words = String(episode.publicTitle || episode.workingTitle).toUpperCase().split(/\s+/).filter(Boolean);
+  const split = Math.max(1, Math.ceil(words.length * .48));
+  const lead = escapeSvg(words.slice(0, split).join(' '));
+  const accent = escapeSvg(words.slice(split).join(' ') || words.slice(0, split).join(' '));
+  const contributorIds = parseStringArray(row.contributor_ids_json);
+  const guests = contributorIds.map(getContributor).filter((item) => item && !['pete-winn','andy-david'].includes(item.id));
+  const guestLine = guests.length ? `FEAT. ${escapeSvg(guests.map((item) => item!.name).join(' & ').toUpperCase())}` : '';
+  const cassette = resolve('public/images/intelligence-snacks-cassette-transparent-hd.webp');
+  const overlayPath = join(resolve(destination, '..'), 'overlay.svg');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1672" height="941"><style>text{font-family:'DejaVu Sans';font-weight:700;letter-spacing:-4px}</style><rect x="52" y="48" width="250" height="70" rx="5" fill="#fe5a16"/><text x="74" y="99" font-size="45" fill="#111">IS - ${episode.episodeNumber || ''}</text><text x="64" y="360" font-size="116" fill="#111">${lead}</text><rect x="56" y="390" width="930" height="170" fill="#fe5a16"/><text x="78" y="518" font-size="112" fill="#fff">${accent}</text>${guestLine ? `<text x="68" y="690" font-size="58" fill="#111">${guestLine}</text>` : ''}</svg>`;
+  writeFileSync(overlayPath, svg);
+  const args = ['magick', String(row.source_uri), '-resize', '1672x941^', '-gravity', 'center', '-extent', '1672x941', overlayPath, '-composite'];
+  if (existsSync(cassette)) args.push('(', cassette, '-resize', '94x61', ')', '-gravity', 'southwest', '-geometry', '+65+50', '-composite');
+  args.push('-strip', '-quality', '84', destination);
+  return Bun.spawnSync(args);
+}
+
+export async function uploadEpisodeThumbnail(jobId: string, file: File, actorPubkey: string) {
+  const job = getThumbnailJob(jobId);
+  if (!job || job.assetKind !== 'episode') throw new Error('Episode thumbnail job not found');
+  if (!['image/png','image/jpeg','image/webp'].includes(file.type) || file.size > 15 * 1024 * 1024) throw new Error('Upload a PNG, JPEG or WebP up to 15 MB');
+  const round = Number(job.generationRound || 0) + 1;
+  const directory = resolve(join(CONTRIBUTOR_UPLOAD_DIR, '..', 'thumbnails', job.id, `round-${round}`)); mkdirSync(directory, { recursive: true });
+  const source = join(directory, 'candidate-1-upload'); writeFileSync(source, new Uint8Array(await file.arrayBuffer()));
+  thumbnailDimensions(source, 'episode'); const preview = join(directory, 'candidate-1-finished.webp');
+  const row = db.query('SELECT * FROM thumbnail_jobs WHERE id=?1').get(job.id) as Record<string, unknown>;
+  const finished = finishEpisodeThumbnail({ ...row, source_uri: source }, preview); if (finished.exitCode !== 0) throw new Error('Episode thumbnail preview could not be composed');
+  const dimensions = thumbnailDimensions(preview, 'episode'); const now = Date.now(); const id = crypto.randomUUID();
+  db.transaction(() => { db.query(`INSERT INTO thumbnail_candidates(id,job_id,generation_round,candidate_number,source_uri,prompt_text,model_name,width,height,mime_type,size_bytes,created_at) VALUES(?1,?2,?3,1,?4,'Editorial upload','upload',?5,?6,'image/webp',?7,?8)`).run(id, job.id, round, preview, dimensions.width, dimensions.height, statSync(preview).size, now); db.query("UPDATE thumbnail_jobs SET status='in-review',generation_round=?1,updated_at=?2 WHERE id=?3").run(round, now, job.id); recordAuditEvent({ actorPubkey, action:'thumbnail.episode.uploaded', entityType:'thumbnail-job', entityId:job.id }); });
+  return getThumbnailJobDetail(job.id)!;
 }
 
 export function listThumbnailJobs(episodeId: string): ThumbnailJob[] {
@@ -304,6 +355,8 @@ export function preparePublicationThumbnails(episodeId: string, actorPubkey: str
         .run(crypto.randomUUID(), episodeId, candidate.id, candidate.currentRevisionId,
           transcript.id, topic?.colour || null, JSON.stringify(contributorIds), actorPubkey, now);
     }
+    db.query(`INSERT OR IGNORE INTO thumbnail_jobs(id,episode_id,asset_kind,transcript_revision_id,status,contributor_ids_json,created_by_pubkey,created_at,updated_at) VALUES(?1,?2,'episode',?3,'draft',?4,?5,?6,?6)`)
+      .run(crypto.randomUUID(), episodeId, transcript.id, JSON.stringify(contributorIds), actorPubkey, now);
     db.query("UPDATE thumbnail_jobs SET contributor_ids_json = ?1, updated_at = ?2 WHERE episode_id = ?3")
       .run(JSON.stringify(contributorIds), now, episodeId);
     recordAuditEvent({
