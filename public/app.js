@@ -38,7 +38,9 @@ const state = {
   episodes: [],
   workflows: [],
   workspaceOrigin: "/",
+  activeEpisodeTab: 'overview',
   activeWorkflow: null,
+  activeWork: null,
   activeEpisode: null,
   activeTranscript: null,
   publicTranscript: null,
@@ -193,7 +195,7 @@ function profileInitial(rule, profile) {
 
 function appRoute() {
   if (["/act", "/chat", "/settings"].includes(window.location.pathname)) return window.location.pathname;
-  if (/^\/episodes\/[^/]+$/.test(window.location.pathname)) return window.location.pathname;
+  if (/^\/episodes\/[^/]+(?:\/(?:snacks|assets|publication))?$/.test(window.location.pathname)) return window.location.pathname;
   if (/^\/review(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
   if (/^\/assets(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
   if (window.location.pathname === '/library') return window.location.pathname;
@@ -223,7 +225,7 @@ function showStudioPage(id, breadcrumb) {
   }
   $("studioBreadcrumb").textContent = breadcrumb;
   for (const button of document.querySelectorAll("[data-studio-route]")) {
-    const activeRoute = ['studioSettingsPage','diagnosticsPage'].includes(id) ? '/settings' : id === 'graphPage' ? '/graph' : ['assetLibraryPage','contributorsPage','contributorPage'].includes(id) ? '/library' : ['assetReviewPage','reviewQueuePage'].includes(id) ? '/review' : id === "publicationsPage" ? "/publications" : id === "episodePage" ? state.workspaceOrigin === '/assets' ? '/review' : state.workspaceOrigin || "/" : "/";
+    const activeRoute = ['studioSettingsPage','diagnosticsPage'].includes(id) ? '/settings' : id === 'graphPage' ? '/graph' : ['assetLibraryPage','contributorsPage','contributorPage'].includes(id) ? '/library' : ['assetReviewPage','reviewQueuePage'].includes(id) ? '/review' : id === "publicationsPage" ? "/publications" : id === "episodePage" ? state.activeEpisodeTab === 'snacks' || state.activeEpisodeTab === 'assets' ? '/review' : state.activeEpisodeTab === 'publication' ? '/publications' : '/' : "/";
     button.classList.toggle("active", button.dataset.studioRoute === activeRoute);
   }
 }
@@ -410,9 +412,10 @@ function formatActivity(timestamp) {
 }
 
 async function loadEpisodeRoute() {
-  const match = state.route.match(/^\/episodes\/([^/]+)$/);
+  const match = state.route.match(/^\/episodes\/([^/]+)(?:\/(snacks|assets|publication))?$/);
   if (match) {
-    await loadEpisode(decodeURIComponent(match[1]));
+    const tab = match[2] || 'overview';
+    await loadEpisode(decodeURIComponent(match[1]), { tab, stage: tab === 'snacks' ? 'output' : tab === 'assets' || tab === 'publication' ? 'publication' : undefined });
     return;
   }
   await loadEpisodes();
@@ -422,9 +425,8 @@ async function loadWorkflowRoute(kind) {
   const routePattern = kind === 'review' ? /^\/review\/([^/]+)$/ : kind === 'assets' ? /^\/assets\/([^/]+)$/ : /^\/publications\/([^/]+)$/;
   const match = state.route.match(routePattern);
   if (match) {
-    state.workspaceOrigin = kind === 'review' ? '/review' : kind === 'assets' ? '/assets' : '/publications';
-    await loadEpisode(decodeURIComponent(match[1]), { stage: kind === 'review' ? 'output' : 'publication', origin: state.workspaceOrigin });
-    if (['assets','publications'].includes(kind) && state.activeEpisode?.status === 'approved' && !state.publicationPreparation?.jobs?.length) await preparePublication();
+    const id = decodeURIComponent(match[1]); const tab = kind === 'review' ? 'snacks' : kind === 'assets' ? 'assets' : 'publication';
+    navigate(`/episodes/${encodeURIComponent(id)}/${tab}`);
     return;
   }
   state.workspaceOrigin = kind === 'review' ? '/review' : kind === 'assets' ? '/assets' : '/publications';
@@ -433,17 +435,15 @@ async function loadWorkflowRoute(kind) {
   showStudioPage(page, `Snack Studio / ${label}`);
   setStudioStatus('Loading workflow…');
   try {
-    state.workflows = (await api('/api/workflow')).episodes || [];
+    const projection = kind === 'review' ? 'snacks' : kind === 'assets' ? 'assets' : 'publications';
+    state.workflows = (await api(`/api/work/${projection}`)).episodes || [];
     renderWorkflowQueue(kind); setStudioStatus('Ready');
   } catch (error) { setStudioStatus(error.message); renderWorkflowQueue(kind, error.message); }
 }
 
 function renderWorkflowQueue(kind, errorMessage = '') {
   const container = $(kind === 'review' ? 'reviewQueue' : kind === 'assets' ? 'assetReviewQueue' : 'publicationsQueue'); container.innerHTML = '';
-  const reviewPhases = new Set(['snack-review', 'final-set-ready']);
-  const assetPhases = new Set(['asset-review']);
-  const publicationPhases = new Set(['publication-preparing', 'publication-blocked', 'ready-to-validate', 'validated', 'published-main', 'deployed']);
-  const items = state.workflows.filter((item) => (kind === 'review' ? reviewPhases : kind === 'assets' ? assetPhases : publicationPhases).has(item.phase));
+  const items = state.workflows;
   if (errorMessage || !items.length) {
     const empty = document.createElement('div'); empty.className = 'workflowQueueEmpty';
     const title = document.createElement('strong'); title.textContent = errorMessage ? 'The queue could not be loaded' : kind === 'review' ? 'Nothing needs review' : kind === 'assets' ? 'No assets need review' : 'No approved episodes are awaiting publication';
@@ -454,9 +454,11 @@ function renderWorkflowQueue(kind, errorMessage = '') {
     const card = document.createElement('button'); card.type = 'button'; card.className = 'workflowQueueItem';
     const identity = document.createElement('div'); const eyebrow = document.createElement('span'); eyebrow.className = 'metadata'; eyebrow.textContent = item.episodeNumber ? `Episode ${item.episodeNumber}` : 'Episode number not set';
     const title = document.createElement('strong'); title.textContent = item.title; identity.append(eyebrow, title);
-    const status = document.createElement('div'); const pill = document.createElement('span'); pill.className = `statusPill ${item.phase === 'deployed' ? 'statusSuccess' : 'statusPending'}`; pill.textContent = item.status;
-    const action = document.createElement('span'); action.className = 'workflowQueueAction'; action.textContent = item.recommendedAction?.label || 'View episode'; status.append(pill, action);
-    card.append(identity, status); card.addEventListener('click', () => navigate(`/${kind === 'review' ? 'review' : kind === 'assets' ? 'assets' : 'publications'}/${encodeURIComponent(item.episodeId)}`)); container.appendChild(card);
+    const dimension = kind === 'review' ? item.snacks : kind === 'assets' ? item.assets : item.publication;
+    const status = document.createElement('div'); const pill = document.createElement('span'); pill.className = `statusPill ${dimension.ready ? 'statusSuccess' : 'statusPending'}`; pill.textContent = formatEpisodeStatus(dimension.state);
+    const action = document.createElement('span'); action.className = 'workflowQueueAction'; action.textContent = dimension.reasons?.[0] || (dimension.outstandingCount ? `${dimension.outstandingCount} outstanding` : 'Open episode'); status.append(pill, action);
+    const tab = kind === 'review' ? 'snacks' : kind === 'assets' ? 'assets' : 'publication';
+    card.append(identity, status); card.addEventListener('click', () => navigate(`/episodes/${encodeURIComponent(item.episodeId)}/${tab}`)); container.appendChild(card);
   }
 }
 
@@ -465,7 +467,7 @@ async function loadContributorRoute() {
   if (match) {
     const requestedReturn = new URLSearchParams(window.location.search).get('returnTo');
     state.contributorReturnTo = requestedReturn?.startsWith('/') ? requestedReturn : '/contributors';
-    $('contributorsBackButton').textContent = state.contributorReturnTo.startsWith('/assets/') ? '← Asset Review' : '← All contributors';
+    $('contributorsBackButton').textContent = /\/episodes\/[^/]+\/assets$/.test(state.contributorReturnTo) ? '← Asset Review' : '← All contributors';
     showStudioPage('contributorPage', 'Snack Studio / Contributors / Profile'); setStudioStatus('Loading contributor…');
     try {
       state.activeContributor = (await api(`/api/contributors/${encodeURIComponent(decodeURIComponent(match[1]))}`)).contributor;
@@ -510,7 +512,7 @@ function renderDiagnostics() {
     const copy = document.createElement('div'); const kind = document.createElement('span'); kind.className = 'metadata'; kind.textContent = item.kind === 'pipeline' ? 'Text pipeline' : item.kind === 'thumbnail' ? 'Artwork pipeline' : 'Portrait pipeline'; const title = document.createElement('strong'); title.textContent = formatEpisodeStatus(item.label); const context = document.createElement('span'); context.textContent = item.episodeTitle ? `${item.episodeNumber ? `Episode ${item.episodeNumber} · ` : ''}${item.episodeTitle}` : item.contributorName || 'Contributor'; copy.append(kind, title, context);
     if (item.failureSummary) { const failure = document.createElement('p'); failure.className = 'pipelineRequestFailure'; failure.textContent = item.failureSummary; copy.appendChild(failure); }
     const facts = document.createElement('div'); facts.className = 'diagnosticFacts'; const status = document.createElement('span'); status.className = `statusPill ${statusClass(item.status)}`; status.textContent = formatEpisodeStatus(item.status); const time = document.createElement('span'); time.className = 'metadata'; time.textContent = formatActivity(item.updatedAt); facts.append(status, time);
-    const open = document.createElement('button'); open.type = 'button'; open.className = 'btn btnSecondary'; open.textContent = diagnosticNeedsAttention(item) ? 'Open recovery' : 'Open context'; open.addEventListener('click', () => navigate(item.kind === 'portrait' ? `/contributors/${encodeURIComponent(item.contributorId)}` : item.kind === 'thumbnail' ? `/assets/${encodeURIComponent(item.episodeId)}` : `/episodes/${encodeURIComponent(item.episodeId)}`)); facts.appendChild(open);
+    const open = document.createElement('button'); open.type = 'button'; open.className = 'btn btnSecondary'; open.textContent = diagnosticNeedsAttention(item) ? 'Open recovery' : 'Open context'; open.addEventListener('click', () => navigate(item.kind === 'portrait' ? `/contributors/${encodeURIComponent(item.contributorId)}` : item.kind === 'thumbnail' ? `/episodes/${encodeURIComponent(item.episodeId)}/assets` : `/episodes/${encodeURIComponent(item.episodeId)}`)); facts.appendChild(open);
     row.append(copy, facts); list.appendChild(row);
   }
 }
@@ -530,7 +532,7 @@ function renderAssetLibrary() {
     const preview = document.createElement('button'); preview.type = 'button'; preview.className = 'assetLibraryPreview'; preview.setAttribute('aria-label', `Open ${asset.title}`);
     if (asset.assetKind === 'portrait') { const image = document.createElement('img'); image.src = asset.imageUrl; image.alt = ''; preview.appendChild(image); }
     else loadPrivateImage(asset.imageUrl, preview, asset.title);
-    preview.addEventListener('click', () => navigate(asset.assetKind === 'portrait' ? `/contributors/${encodeURIComponent(asset.contributorId)}` : `/assets/${encodeURIComponent(asset.episodeId)}`));
+    preview.addEventListener('click', () => navigate(asset.assetKind === 'portrait' ? `/contributors/${encodeURIComponent(asset.contributorId)}` : `/episodes/${encodeURIComponent(asset.episodeId)}/assets`));
     const copy = document.createElement('div'); copy.className = 'assetLibraryCopy'; const kind = document.createElement('span'); kind.className = 'metadata'; kind.textContent = asset.assetKind === 'portrait' ? 'Contributor portrait' : asset.assetKind === 'episode' ? `Episode ${asset.episodeNumber || ''} thumbnail` : `Episode ${asset.episodeNumber || ''} · Snack thumbnail`;
     const title = document.createElement('strong'); title.textContent = asset.title; const subtitle = document.createElement('span'); subtitle.textContent = asset.subtitle || (asset.assetKind === 'snack' ? asset.episodeTitle : `${asset.width} × ${asset.height} · Version ${asset.versionNumber}`);
     copy.append(kind, title, subtitle); card.append(preview, copy); grid.appendChild(card);
@@ -689,12 +691,13 @@ function renderEpisodes() {
 }
 
 async function loadEpisode(id, options = {}) {
-  state.workspaceOrigin = options.origin || '/';
-  $('episodesBackButton').textContent = state.workspaceOrigin === '/review' ? '← Review' : state.workspaceOrigin === '/assets' ? '← Asset Review' : state.workspaceOrigin === '/publications' ? '← Publications' : '← All episodes';
-  showStudioPage("episodePage", `Snack Studio / ${state.workspaceOrigin === '/review' ? 'Review' : state.workspaceOrigin === '/assets' ? 'Asset Review' : state.workspaceOrigin === '/publications' ? 'Publications' : 'Episodes'} / Workspace`);
+  state.activeEpisodeTab = options.tab || (state.activeEpisode?.id === id ? state.activeEpisodeTab : 'overview');
+  state.workspaceOrigin = state.activeEpisodeTab === 'snacks' ? '/review' : state.activeEpisodeTab === 'assets' ? '/assets' : state.activeEpisodeTab === 'publication' ? '/publications' : '/';
+  $('episodesBackButton').textContent = state.activeEpisodeTab === 'snacks' ? '← Snack Review' : state.activeEpisodeTab === 'assets' ? '← Asset Review' : state.activeEpisodeTab === 'publication' ? '← Publications' : '← All episodes';
+  showStudioPage("episodePage", `Snack Studio / Episodes / ${state.activeEpisodeTab === 'overview' ? 'Overview' : state.activeEpisodeTab[0].toUpperCase() + state.activeEpisodeTab.slice(1)}`);
   setStudioStatus("Loading workspace…");
   try {
-    const [payload, candidatePayload, curationPayload, pipelinePayload, publicationPayload, packagePayload, validationPayload, gitPublicationPayload, gitDeploymentPayload, workflowPayload, publicTranscriptPayload] = await Promise.all([
+    const [payload, candidatePayload, curationPayload, pipelinePayload, publicationPayload, packagePayload, validationPayload, gitPublicationPayload, gitDeploymentPayload, workPayload, publicTranscriptPayload] = await Promise.all([
       api(`/api/episodes/${encodeURIComponent(id)}`),
       api(`/api/episodes/${encodeURIComponent(id)}/candidates`),
       api(`/api/episodes/${encodeURIComponent(id)}/curation`),
@@ -704,7 +707,7 @@ async function loadEpisode(id, options = {}) {
       api(`/api/episodes/${encodeURIComponent(id)}/website-validation`).catch(() => ({ validation: null })),
       api(`/api/episodes/${encodeURIComponent(id)}/git-publication`).catch(() => ({ publication: null })),
       api(`/api/episodes/${encodeURIComponent(id)}/git-deployment`).catch(() => ({ deployment: null })),
-      api(`/api/episodes/${encodeURIComponent(id)}/workflow`).catch(() => ({ workflow: null })),
+      api(`/api/episodes/${encodeURIComponent(id)}/work`).catch(() => ({ work: null })),
       api(`/api/episodes/${encodeURIComponent(id)}/public-transcript`).catch(() => ({ publicTranscript: null })),
     ]);
     state.activeEpisode = payload.episode;
@@ -728,7 +731,8 @@ async function loadEpisode(id, options = {}) {
     state.websiteValidation = validationPayload.validation || null;
     state.gitPublication = gitPublicationPayload.publication || null;
     state.gitDeployment = gitDeploymentPayload.deployment || null;
-    state.activeWorkflow = workflowPayload.workflow || null;
+    state.activeWork = workPayload.work || null;
+    state.activeWorkflow = null;
     if (!state.episodeStage || state.episodeStageId !== id) {
       state.episodeStage = episodeWorkspaceStage();
       state.episodeStageId = id;
@@ -736,6 +740,7 @@ async function loadEpisode(id, options = {}) {
     if (options.stage) state.episodeStage = options.stage;
     if (state.candidates.length && state.episodeStage === "processing") state.episodeStage = "output";
     renderEpisodeWorkspace(payload.episode, payload.transcript, payload.transcriptRevisions || [], payload.auditEvents || [], state.candidates);
+    if (['assets','publication'].includes(state.activeEpisodeTab) && ['approved','published'].includes(state.activeEpisode.status) && !state.publicationPreparation?.jobs?.length) await preparePublication();
     startEpisodePipelinePolling();
     setStudioStatus("Ready");
   } catch (error) {
@@ -795,13 +800,13 @@ function renderEpisodeWorkspace(episode, transcript, transcriptRevisions, auditE
   const destinations = document.createElement('nav'); destinations.className = 'sectionTabs episodeWorkspaceDestinations'; destinations.setAttribute('aria-label', 'Episode sections');
   for (const [route, label, available, unavailableReason] of [
     [`/episodes/${episode.id}`, 'Overview', true, ''],
-    [`/review/${episode.id}`, 'Snacks', Boolean(candidates.length), 'Snacks will appear after generation finishes.'],
-    [`/assets/${episode.id}`, 'Assets', ['approved','published'].includes(episode.status), 'Approve the final Snack set before preparing assets.'],
-    [`/publications/${episode.id}`, 'Publication', ['approved','published'].includes(episode.status), 'Approve the final Snack set before preparing publication.'],
+    [`/episodes/${episode.id}/snacks`, 'Snacks', Boolean(candidates.length), 'Snacks will appear after generation finishes.'],
+    [`/episodes/${episode.id}/assets`, 'Assets', ['approved','published'].includes(episode.status), 'Approve the final Snack set before preparing assets.'],
+    [`/episodes/${episode.id}/publication`, 'Publication', ['approved','published'].includes(episode.status), 'Approve the final Snack set before preparing publication.'],
   ]) {
     const button = document.createElement('button'); button.type = 'button'; button.textContent = label;
-    const destination = route.startsWith('/review') ? '/review' : route.startsWith('/assets') ? '/assets' : route.startsWith('/publications') ? '/publications' : '/';
-    if (state.workspaceOrigin === destination) button.classList.add('active');
+    const tab = route.endsWith('/snacks') ? 'snacks' : route.endsWith('/assets') ? 'assets' : route.endsWith('/publication') ? 'publication' : 'overview';
+    if (state.activeEpisodeTab === tab) button.classList.add('active');
     button.disabled = !available; if (!available) button.title = unavailableReason;
     button.addEventListener('click', () => navigate(route)); destinations.appendChild(button);
   }
@@ -1025,13 +1030,13 @@ function renderEpisodeWorkspace(episode, transcript, transcriptRevisions, auditE
   const transcriptNote = document.createElement('p'); transcriptNote.className = 'metadata'; transcriptNote.textContent = 'The source transcript is preserved unchanged. A separate cleanup step for the public website transcript is planned for the publishing flow and has not yet been implemented.';
   transcriptDetails.append(transcriptDetailsHeader, transcriptNote);
   detailsStage.append(metadataForm, transcriptDetails, history);
-  if (state.workspaceOrigin === '/') {
+  if (state.activeEpisodeTab === 'overview') {
     workspace.append(header, destinations, state.episodeStage === 'details' ? detailsStage : transcript ? renderEpisodeOverview(episode, transcript, candidates, processingStage) : setupStage);
-  } else if (state.workspaceOrigin === '/publications') {
+  } else if (state.activeEpisodeTab === 'publication') {
     workspace.append(header, destinations, publicationStage);
-  } else if (state.workspaceOrigin === '/assets') {
+  } else if (state.activeEpisodeTab === 'assets') {
     workspace.append(header, destinations, renderPublicationPreparation(episode, candidates, { assetsOnly: true }));
-  } else if (state.workspaceOrigin === '/review') {
+  } else if (state.activeEpisodeTab === 'snacks') {
     workspace.append(header, destinations, state.episodeStage === 'publication' ? publicationStage : outputStage);
   } else {
     workspace.append(header, flow, state.episodeStage === "details" ? detailsStage : state.episodeStage === "publication" ? publicationStage : state.episodeStage === "processing" ? processingStage : state.episodeStage === "output" ? outputStage : setupStage);
@@ -1040,20 +1045,20 @@ function renderEpisodeWorkspace(episode, transcript, transcriptRevisions, auditE
 
 function renderEpisodeOverview(episode, transcript, candidates, processingStage) {
   const overview = document.createElement('section'); overview.className = 'episodeOverview';
-  const workflow = state.activeWorkflow;
-  if (workflow?.phase === 'generating') { overview.appendChild(processingStage); return overview; }
+  const work = state.activeWork;
+  if (work?.source?.state === 'generating' && !candidates.length) { overview.appendChild(processingStage); return overview; }
   const statusCard = document.createElement('div'); statusCard.className = 'episodeOverviewStatus';
   const copy = document.createElement('div'); const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Current stage';
-  const title = document.createElement('h2'); title.textContent = workflow?.status || formatEpisodeStatus(episode.status);
-  const detail = document.createElement('p'); detail.textContent = workflow?.phase === 'deployed' ? 'This episode has completed the Studio workflow.' : 'Snack Studio will keep mechanical pipeline work under the hood and surface the next editorial decision here.';
+  const title = document.createElement('h2'); title.textContent = work?.publication?.deployed ? 'Episode deployed' : work?.recommendedAction?.label || formatEpisodeStatus(episode.status);
+  const detail = document.createElement('p'); detail.textContent = work?.publication?.deployed ? 'This episode has completed the Studio workflow.' : 'Each area remains independently accessible while other work continues.';
   copy.append(eyebrow, title, detail);
-  if (workflow?.recommendedAction) {
-    const action = document.createElement('button'); action.type = 'button'; action.className = 'btn btnPrimary'; action.textContent = workflow.recommendedAction.label;
+  if (work?.recommendedAction) {
+    const action = document.createElement('button'); action.type = 'button'; action.className = 'btn btnPrimary'; action.textContent = work.recommendedAction.label;
     action.addEventListener('click', () => {
-      if (workflow.recommendedAction.route === 'review') navigate(`/review/${encodeURIComponent(episode.id)}`);
-      else if (workflow.recommendedAction.route === 'assets') navigate(`/assets/${encodeURIComponent(episode.id)}`);
-      else if (workflow.recommendedAction.route === 'publications') navigate(`/publications/${encodeURIComponent(episode.id)}`);
-      else if (workflow.phase === 'generation-failed') void startEpisodeExtraction();
+      if (work.recommendedAction.route === 'snacks') navigate(`/episodes/${encodeURIComponent(episode.id)}/snacks`);
+      else if (work.recommendedAction.route === 'assets') navigate(`/episodes/${encodeURIComponent(episode.id)}/assets`);
+      else if (work.recommendedAction.route === 'publication') navigate(`/episodes/${encodeURIComponent(episode.id)}/publication`);
+      else if (work.source.state === 'needs-attention') void startEpisodeExtraction();
     });
     statusCard.append(copy, action);
   } else statusCard.appendChild(copy);
@@ -1062,7 +1067,7 @@ function renderEpisodeOverview(episode, transcript, candidates, processingStage)
     ['Transcript', `${transcript.originalFilename || 'Pasted transcript'} · revision ${transcript.revisionNumber}`],
     ['Generated Snacks', String(candidates.length)],
     ['Approved Snacks', String(candidates.filter((candidate) => candidate.reviewDecision === 'accepted').length)],
-    ['Publication', workflow?.phase === 'deployed' ? 'Deployed' : workflow?.phase === 'published-main' ? 'On main' : workflow?.phase === 'validated' ? 'Validated' : 'Not deployed'],
+    ['Publication', formatEpisodeStatus(work?.publication?.state || 'not-started')],
   ]) {
     const fact = document.createElement('div'); const name = document.createElement('span'); name.textContent = label; const valueNode = document.createElement('strong'); valueNode.textContent = value; fact.append(name, valueNode); facts.appendChild(fact);
   }
@@ -1136,7 +1141,7 @@ function renderPublicationPreparation(episode, candidates, options = {}) {
     const assetCopy = document.createElement('p');
     const unfinished = [...snackJobs, ...(episodeJob ? [episodeJob] : [])].filter((job) => job.status !== 'approved').length + portraitsNeededCount(preparation) + unresolved.length;
     assetCopy.textContent = unfinished ? `${unfinished} contributor or artwork decision${unfinished === 1 ? '' : 's'} remain in Asset Review.` : 'Contributor identities and finished artwork are approved.';
-    const openAssets = document.createElement('button'); openAssets.type = 'button'; openAssets.className = 'btn btnSecondary'; openAssets.textContent = unfinished ? 'Open Asset Review' : 'View approved assets'; openAssets.addEventListener('click', () => navigate(`/assets/${encodeURIComponent(episode.id)}`));
+    const openAssets = document.createElement('button'); openAssets.type = 'button'; openAssets.className = 'btn btnSecondary'; openAssets.textContent = unfinished ? 'Open Asset Review' : 'View approved assets'; openAssets.addEventListener('click', () => navigate(`/episodes/${encodeURIComponent(episode.id)}/assets`));
     assetSummary.append(assetCopy, openAssets); section.appendChild(assetSummary);
     if (state.publicationPackage) section.appendChild(renderPublicationPackageManifest(state.publicationPackage));
     return section;
@@ -1484,7 +1489,7 @@ function renderContributorPortraitWorkflow(item) {
   generate.disabled = !state.me?.access?.edit || item.portraitStatus === 'generating';
   generate.addEventListener('click', () => generateContributorPortraits(item.contributorId, generate));
   const actions = document.createElement('div'); actions.className = 'contributorPortraitActions';
-  const profile = document.createElement('button'); profile.type = 'button'; profile.className = 'btn btnSecondary'; profile.textContent = 'Open profile'; profile.addEventListener('click', () => navigate(`/contributors/${encodeURIComponent(item.contributorId)}?returnTo=${encodeURIComponent(`/assets/${state.activeEpisode.id}`)}`));
+  const profile = document.createElement('button'); profile.type = 'button'; profile.className = 'btn btnSecondary'; profile.textContent = 'Open profile'; profile.addEventListener('click', () => navigate(`/contributors/${encodeURIComponent(item.contributorId)}?returnTo=${encodeURIComponent(`/episodes/${state.activeEpisode.id}/assets`)}`));
   actions.append(profile, generate); heading.append(copy, actions); panel.appendChild(heading);
   const gallery = document.createElement('div'); gallery.className = 'contributorPortraitGallery';
   panel.appendChild(gallery);
@@ -1876,13 +1881,14 @@ function startEpisodePipelinePolling() {
   state.pollTimer = setInterval(async () => {
     if (state.activeEpisode?.id !== episodeId || !/^\/(episodes|review|assets|publications)\//.test(window.location.pathname)) return stopPolling();
     try {
-      const [pipelinePayload, candidatePayload, curationPayload, publicationPayload, publicTranscriptPayload, packagePayload] = await Promise.all([
+      const [pipelinePayload, candidatePayload, curationPayload, publicationPayload, publicTranscriptPayload, packagePayload, workPayload] = await Promise.all([
         api(`/api/episodes/${encodeURIComponent(episodeId)}/pipeline-requests`),
         api(`/api/episodes/${encodeURIComponent(episodeId)}/candidates`),
         api(`/api/episodes/${encodeURIComponent(episodeId)}/curation`),
         api(`/api/episodes/${encodeURIComponent(episodeId)}/publication-preparation`).catch(() => ({ preparation: state.publicationPreparation })),
         api(`/api/episodes/${encodeURIComponent(episodeId)}/public-transcript`).catch(() => ({ publicTranscript: state.publicTranscript })),
         api(`/api/episodes/${encodeURIComponent(episodeId)}/publication-package`).catch(() => ({ package: state.publicationPackage })),
+        api(`/api/episodes/${encodeURIComponent(episodeId)}/work`).catch(() => ({ work: state.activeWork })),
       ]);
       state.pipelineRequests = pipelinePayload.pipelineRequests || [];
       state.pipelineTimeoutMs = Number(pipelinePayload.timeoutMs || 0);
@@ -1898,6 +1904,7 @@ function startEpisodePipelinePolling() {
       state.publicationPreparation = publicationPayload.preparation || state.publicationPreparation;
       state.publicTranscript = publicTranscriptPayload.publicTranscript || state.publicTranscript;
       state.publicationPackage = packagePayload.package || state.publicationPackage;
+      state.activeWork = workPayload.work || state.activeWork;
       if (state.candidates.length && state.episodeStage === "processing") state.episodeStage = "output";
       renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
       if (!state.pipelineRequests.some((request) => ["queued", "running", "applying-result"].includes(request.status))) stopPolling();
@@ -2144,7 +2151,7 @@ function renderCandidateSection(episode, candidates) {
       prepare.className = "btn btnSecondary";
       prepare.textContent = "Continue to Assets";
       prepare.disabled = !state.me?.access?.edit;
-      prepare.addEventListener("click", () => navigate(`/assets/${encodeURIComponent(episode.id)}`));
+      prepare.addEventListener("click", () => navigate(`/episodes/${encodeURIComponent(episode.id)}/assets`));
       batchBar.appendChild(prepare);
     }
     list.appendChild(batchBar);

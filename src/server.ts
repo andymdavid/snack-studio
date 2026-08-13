@@ -102,7 +102,7 @@ import { buildPublicationPackage } from "./publication-package.ts";
 import { getLatestWebsiteValidation, stageAndValidateWebsitePackage } from './website-validation.ts';
 import { getLatestGitPublication, publishValidatedPackageToMain } from './git-publication.ts';
 import { deployPublishedCommit, getLatestGitDeployment } from './git-deployment.ts';
-import { getEpisodeWorkflow, listEpisodeWorkflows } from './episode-workflow.ts';
+import { getEpisodeWorkflow, getEpisodeWorkProjection, listEpisodeWorkflows, listEpisodeWorkProjections, listWorkQueue, type WorkQueueKind } from './episode-workflow.ts';
 import { createContributor, getContributor, listContributors, photoMediaType, publicContributor, updateContributor } from "./contributors.ts";
 import { listDiagnostics } from './diagnostics.ts';
 import { validateContributorPhoto, validateContributorProfile } from "./contributor-input.ts";
@@ -279,6 +279,17 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
     return json({ episodes: listEpisodeWorkflows() });
   }
+  if (pathname === '/api/work' && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    return json({ episodes: listEpisodeWorkProjections() });
+  }
+  const workQueueMatch = pathname.match(/^\/api\/work\/(snacks|assets|publications)$/);
+  if (workQueueMatch && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    return json({ episodes: listWorkQueue(workQueueMatch[1] as WorkQueueKind) });
+  }
   if (pathname === '/api/diagnostics' && req.method === 'GET') {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
     if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
@@ -294,6 +305,13 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
     if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
     try { return json({ workflow: getEpisodeWorkflow(decodeURIComponent(episodeWorkflowMatch[1]!)) }); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 404); }
+  }
+  const episodeWorkMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/work$/);
+  if (episodeWorkMatch && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    try { return json({ work: getEpisodeWorkProjection(decodeURIComponent(episodeWorkMatch[1]!)) }); }
     catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 404); }
   }
   const publicTranscriptMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/public-transcript$/);
