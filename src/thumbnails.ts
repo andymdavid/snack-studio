@@ -15,7 +15,7 @@ import { getCurrentAutopilotTarget } from './db.ts';
 export type ThumbnailJobStatus = "draft" | "extracting" | "grounding" | "generating" | "in-review" | "approved" | "failed";
 
 const EPISODE_THUMBNAIL_PIPELINE_VERSION = '6';
-const SNACK_THUMBNAIL_PIPELINE_VERSION = '3';
+const SNACK_THUMBNAIL_PIPELINE_VERSION = '4';
 const EPISODE_THUMBNAIL_VISUAL_REFERENCE = resolve('public/images/references/episode-thumbnail-guest-canonical.png');
 
 export function thumbnailPipelineRoute(assetKind: ThumbnailAssetKind) {
