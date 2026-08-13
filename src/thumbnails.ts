@@ -289,6 +289,17 @@ export function finishEpisodeThumbnail(row: Record<string, unknown>, destination
   }
 }
 
+export function preserveUploadedEpisodeThumbnail(source: string, destination: string) {
+  return Bun.spawnSync([
+    'magick', source,
+    '-auto-orient',
+    '-strip',
+    '-define', 'webp:method=6',
+    '-quality', '96',
+    destination,
+  ]);
+}
+
 export async function uploadEpisodeThumbnail(jobId: string, file: File, actorPubkey: string) {
   const job = getThumbnailJob(jobId);
   if (!job || job.assetKind !== 'episode') throw new Error('Episode thumbnail job not found');
@@ -297,8 +308,7 @@ export async function uploadEpisodeThumbnail(jobId: string, file: File, actorPub
   const directory = resolve(join(CONTRIBUTOR_UPLOAD_DIR, '..', 'thumbnails', job.id, `round-${round}`)); mkdirSync(directory, { recursive: true });
   const source = join(directory, 'candidate-1-upload'); writeFileSync(source, new Uint8Array(await file.arrayBuffer()));
   thumbnailDimensions(source, 'episode'); const preview = join(directory, 'candidate-1-finished.webp');
-  const row = db.query('SELECT * FROM thumbnail_jobs WHERE id=?1').get(job.id) as Record<string, unknown>;
-  const finished = finishEpisodeThumbnail({ ...row, source_uri: source }, preview); if (finished.exitCode !== 0) throw new Error('Episode thumbnail preview could not be composed');
+  const finished = preserveUploadedEpisodeThumbnail(source, preview); if (finished.exitCode !== 0) throw new Error('Episode thumbnail upload could not be prepared');
   const dimensions = thumbnailDimensions(preview, 'episode'); const now = Date.now(); const id = crypto.randomUUID();
   db.transaction(() => { db.query(`INSERT INTO thumbnail_candidates(id,job_id,generation_round,candidate_number,source_uri,prompt_text,model_name,width,height,mime_type,size_bytes,created_at) VALUES(?1,?2,?3,1,?4,'Editorial upload','upload',?5,?6,'image/webp',?7,?8)`).run(id, job.id, round, preview, dimensions.width, dimensions.height, statSync(preview).size, now); db.query("UPDATE thumbnail_jobs SET status='in-review',generation_round=?1,updated_at=?2 WHERE id=?3").run(round, now, job.id); recordAuditEvent({ actorPubkey, action:'thumbnail.episode.uploaded', entityType:'thumbnail-job', entityId:job.id }); })();
   return getThumbnailJobDetail(job.id)!;

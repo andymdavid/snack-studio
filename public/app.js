@@ -1133,7 +1133,7 @@ function renderEpisodeThumbnailWorkflow(episode, job, resolved, portraitsNeeded)
   generate.disabled = active || portraitsNeeded.length > 0 || !state.me?.access?.edit;
   generate.addEventListener('click', () => ['in-review','approved'].includes(job.status) ? openThumbnailReview(job.id, title.textContent, generate, true) : generateSnackThumbnail(job.id, '', generate));
   const uploadInput = document.createElement('input'); uploadInput.type = 'file'; uploadInput.accept = 'image/png,image/jpeg,image/webp'; uploadInput.hidden = true;
-  const upload = document.createElement('button'); upload.type = 'button'; upload.className = 'btn btnSecondary'; upload.textContent = 'Upload artwork'; upload.disabled = active || !state.me?.access?.edit;
+  const upload = document.createElement('button'); upload.type = 'button'; upload.className = 'btn btnSecondary'; upload.textContent = 'Upload finished thumbnail'; upload.disabled = active || !state.me?.access?.edit;
   const uploadStatus = document.createElement('span'); uploadStatus.className = 'episodeThumbnailUploadStatus'; uploadStatus.setAttribute('role', 'status');
   upload.addEventListener('click', () => uploadInput.click());
   uploadInput.addEventListener('change', async () => {
