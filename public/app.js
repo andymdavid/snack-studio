@@ -1134,9 +1134,32 @@ function renderEpisodeThumbnailWorkflow(episode, job, resolved, portraitsNeeded)
   generate.addEventListener('click', () => ['in-review','approved'].includes(job.status) ? openThumbnailReview(job.id, title.textContent, generate, true) : generateSnackThumbnail(job.id, '', generate));
   const uploadInput = document.createElement('input'); uploadInput.type = 'file'; uploadInput.accept = 'image/png,image/jpeg,image/webp'; uploadInput.hidden = true;
   const upload = document.createElement('button'); upload.type = 'button'; upload.className = 'btn btnSecondary'; upload.textContent = 'Upload artwork'; upload.disabled = active || !state.me?.access?.edit;
+  const uploadStatus = document.createElement('span'); uploadStatus.className = 'episodeThumbnailUploadStatus'; uploadStatus.setAttribute('role', 'status');
   upload.addEventListener('click', () => uploadInput.click());
-  uploadInput.addEventListener('change', async () => { const file = uploadInput.files?.[0]; if (!file) return; const clear = setButtonBusy(upload, 'Uploading…'); try { const form = new FormData(); form.append('file', file); await apiForm(`/api/thumbnail-jobs/${encodeURIComponent(job.id)}/upload`, form); state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation; renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates); setStudioStatus('Episode artwork ready to review'); } catch (error) { setStudioStatus(error.message); } finally { clear(); } });
-  actions.append(generate, upload, uploadInput); panel.append(copy, actions);
+  uploadInput.addEventListener('change', async () => {
+    const file = uploadInput.files?.[0]; if (!file) return;
+    uploadStatus.textContent = `${file.name} selected`;
+    const clear = setButtonBusy(upload, 'Uploading…');
+    try {
+      const form = new FormData(); form.append('file', file);
+      const uploaded = await apiForm(`/api/thumbnail-jobs/${encodeURIComponent(job.id)}/upload`, form);
+      if (!uploaded.job?.candidates?.length) throw new Error('The upload completed without a reviewable thumbnail');
+      uploadStatus.textContent = `${file.name} uploaded`;
+      const [preparationPayload, packagePayload] = await Promise.all([
+        api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`),
+        api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-package`).catch(() => ({ package: state.publicationPackage })),
+      ]);
+      state.publicationPreparation = preparationPayload.preparation;
+      state.publicationPackage = packagePayload.package || state.publicationPackage;
+      renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+      setStudioStatus('Episode artwork uploaded and ready to review');
+      await openThumbnailReview(job.id, title.textContent, null, true);
+    } catch (error) {
+      uploadStatus.textContent = `Upload failed: ${error.message}`;
+      setStudioStatus(error.message);
+    } finally { clear(); uploadInput.value = ''; }
+  });
+  actions.append(generate, upload, uploadInput, uploadStatus); panel.append(copy, actions);
   if (active) startThumbnailStatusPolling(job.id);
   return panel;
 }
@@ -1210,7 +1233,10 @@ async function openThumbnailReview(jobId, snackTitle, triggerButton = null, isEp
       const card = document.createElement('article');
       const image = document.createElement('img'); image.alt = `Thumbnail candidate ${candidate.candidateNumber}`;
       let sourceBlob = null;
-      fetch(candidate.previewUrl, { headers: state.token ? { authorization: `Bearer ${state.token}` } : {} }).then((res) => res.blob()).then((blob) => { sourceBlob = blob; image.src = URL.createObjectURL(blob); });
+      fetch(candidate.previewUrl, { headers: state.token ? { authorization: `Bearer ${state.token}` } : {} })
+        .then((res) => res.ok ? res.blob() : Promise.reject(new Error('Thumbnail image could not be loaded')))
+        .then((blob) => { sourceBlob = blob; image.src = URL.createObjectURL(blob); })
+        .catch((error) => { card.classList.add('thumbnailLoadFailed'); image.alt = error.message; setStudioStatus(error.message); });
       const action = document.createElement('button'); action.type = 'button'; action.className = candidate.status === 'approved' ? 'btn btnPrimary' : 'btn btnSecondary';
       action.textContent = candidate.status === 'approved' ? 'Approved' : 'Approve this thumbnail'; action.disabled = candidate.status === 'approved' || !state.me?.access?.edit;
       action.addEventListener('click', () => approveSnackThumbnail(candidate.id, dialog, action));

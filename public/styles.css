@@ -2131,6 +2131,9 @@ div.publicationPreparationBlocker { display: flex; align-items: center; justify-
 .episodeThumbnailWorkflow { display:flex; align-items:center; justify-content:space-between; gap:2rem; padding:1.4rem; border:1px solid var(--line); border-radius:var(--radius-large); background:var(--surface-raised); }
 .episodeThumbnailWorkflow h3, .episodeThumbnailWorkflow p { margin:0; }
 .episodeThumbnailWorkflow h3 { margin:.35rem 0; font-size:1.35rem; }
+.episodeThumbnailActions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.episodeThumbnailUploadStatus { flex-basis:100%; min-height:1.25rem; color:var(--text-secondary); font-size:var(--text-sm); text-align:right; }
+.thumbnailLoadFailed { min-height:180px; border:1px solid var(--danger); border-radius:var(--radius-card); background:var(--danger-soft); }
 .episodeThumbnailActions { display:flex; align-items:center; gap:.75rem; flex:none; }
 @media (max-width: 760px) { .episodeThumbnailWorkflow { align-items:stretch; flex-direction:column; } .episodeThumbnailActions { flex-wrap:wrap; } }
 
