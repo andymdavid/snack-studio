@@ -1130,7 +1130,7 @@ textarea {
 
 .episodeList {
   gap: 0;
-  overflow: hidden;
+  overflow: visible;
   padding: 0;
 }
 
@@ -1170,6 +1170,7 @@ textarea {
   background: var(--surface-2);
 }
 .episodeRow { cursor:pointer; }
+.episodeRow:has(.episodeRowMenu[open]) { position:relative; z-index:21; }
 .episodeRowMenu { position:relative; justify-self:end; }
 .episodeRowMenu summary { width:28px; height:32px; display:grid; place-items:center; border-radius:var(--radius-small); cursor:pointer; font-size:22px; line-height:1; list-style:none; }
 .episodeRowMenu summary::-webkit-details-marker { display:none; }
