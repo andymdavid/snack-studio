@@ -1,7 +1,9 @@
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
-import { isAbsolute, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { isAbsolute, join, resolve } from 'node:path';
 import { db } from './db.ts';
+import { INTELLIGENCE_SNACKS_REPO } from './config.ts';
 import { getCandidate, validateApprovedCandidateBatch } from './candidates.ts';
 import { getContributor } from './contributors.ts';
 import { getActiveTranscriptRevision, getEpisode } from './episodes.ts';
@@ -34,6 +36,10 @@ export function episodePublicationSlug(number: number) {
 export function resolvePublicationAssetSource(path: string) {
   if (path.startsWith('/images/')) return resolve('public', path.slice(1));
   return isAbsolute(path) ? path : resolve(path);
+}
+
+export function websiteThemeNeedsPublication(themeId: string, websiteRepo = INTELLIGENCE_SNACKS_REPO) {
+  return !existsSync(join(websiteRepo, 'src/content/topics', `${themeId}.md`));
 }
 
 function selectedFinishedAsset(jobId: string) {
@@ -79,7 +85,9 @@ export function buildPublicationPackage(episodeId: string) {
   const episodeThemeRows = db.query('SELECT theme_id,rationale,evidence_excerpt FROM episode_theme_assignments WHERE episode_id=?1 ORDER BY created_at,theme_id').all(episodeId) as Array<{ theme_id: string; rationale: string; evidence_excerpt: string }>;
   const themes = episodeThemeRows.map((row) => ({ ...getTheme(row.theme_id)!, rationale: row.rationale, evidenceExcerpt: row.evidence_excerpt })).filter((item) => item.id);
   if (!themes.length) blockers.push({ code: 'episode-themes-missing', message: 'Episode themes need to be derived from the transcript.' });
-  for (const theme of themes.filter((item) => item.source === 'studio')) files.push({ kind: 'theme', destination: `src/content/topics/${theme.id}.md`, sourceId: theme.id });
+  for (const theme of themes.filter((item) => websiteThemeNeedsPublication(item.id))) {
+    files.push({ kind: 'theme', destination: `src/content/topics/${theme.id}.md`, sourceId: theme.id });
+  }
 
   const snacks = approved.candidateIds.map(getCandidate).filter(Boolean).map((candidate) => {
     const revision = candidate!.revision;

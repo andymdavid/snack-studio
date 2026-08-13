@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { resolve } from 'node:path';
-import { episodePublicationSlug, publicationSlug, resolvePublicationAssetSource } from './publication-package.ts';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { episodePublicationSlug, publicationSlug, resolvePublicationAssetSource, websiteThemeNeedsPublication } from './publication-package.ts';
 
 describe('website publication package paths', () => {
   test('derives stable website collection slugs', () => {
@@ -16,5 +17,13 @@ describe('website publication package paths', () => {
   test('maps approved public portrait URLs back to their local source asset', () => {
     expect(resolvePublicationAssetSource('/images/contributors/generated/anthony-voxel.webp'))
       .toBe(resolve('public/images/contributors/generated/anthony-voxel.webp'));
+  });
+
+  test('publishes a referenced theme when the website file is absent regardless of seed source', () => {
+    const root = `/tmp/snack-studio-publication-package-${crypto.randomUUID()}`;
+    mkdirSync(join(root, 'src/content/topics'), { recursive: true });
+    expect(websiteThemeNeedsPublication('privacy-security', root)).toBe(true);
+    writeFileSync(join(root, 'src/content/topics/privacy-security.md'), '---\nname: Privacy & Security\n---\n');
+    expect(websiteThemeNeedsPublication('privacy-security', root)).toBe(false);
   });
 });
