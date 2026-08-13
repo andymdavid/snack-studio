@@ -87,7 +87,7 @@ import { applySuccessfulPipelineResult } from "./pipeline-results.ts";
 import { applySuccessfulRegenerationResult, listRegenerationProposals, resolveRegenerationProposal } from "./regeneration-proposals.ts";
 import { validateSuccessfulRegenerationResult } from "./regeneration-result-input.ts";
 import { validateThumbnailBrief } from "./thumbnail-input.ts";
-import { approveThumbnailCandidate, applyThumbnailResult, createThumbnailGeneration, createThumbnailJob, getPublicationPreparation, getThumbnailCandidateRow, getThumbnailJobDetail, listThumbnailJobs, markThumbnailGenerationFailed, markThumbnailGenerationStarted, preparePublicationThumbnails, uploadEpisodeThumbnail, verifyThumbnailGenerationTrigger } from "./thumbnails.ts";
+import { approveThumbnailCandidate, applyThumbnailResult, createThumbnailGeneration, createThumbnailJob, getPublicationPreparation, getThumbnailAssetRow, getThumbnailCandidateRow, getThumbnailJobDetail, listFinishedThumbnailAssets, listThumbnailJobs, markThumbnailGenerationFailed, markThumbnailGenerationStarted, preparePublicationThumbnails, uploadEpisodeThumbnail, verifyThumbnailGenerationTrigger } from "./thumbnails.ts";
 import { THUMBNAIL_CANDIDATES_PER_ROUND, THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
 import { validateSuccessfulPublicationMetadataResult } from "./publication-metadata-result-input.ts";
 import { applySuccessfulPublicationMetadataResult } from "./publication-metadata-results.ts";
@@ -391,6 +391,26 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       topics: THUMBNAIL_TOPICS,
       candidatesPerRound: THUMBNAIL_CANDIDATES_PER_ROUND,
     });
+  }
+
+  if (pathname === '/api/assets' && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    const portraits = listContributors().filter((item) => item.portraitPath && item.portraitStatus === 'approved').map((item) => ({
+      id: `portrait:${item.id}`, assetKind: 'portrait', contributorId: item.id, title: item.name,
+      subtitle: item.role, createdAt: item.updatedAt, imageUrl: publicContributor(item).portraitPath,
+    }));
+    return json({ assets: [...listFinishedThumbnailAssets(), ...portraits].sort((a, b) => b.createdAt - a.createdAt) });
+  }
+
+  const finishedThumbnailImageMatch = pathname.match(/^\/api\/assets\/thumbnails\/([^/]+)\/image$/);
+  if (finishedThumbnailImageMatch && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    const asset = getThumbnailAssetRow(decodeURIComponent(finishedThumbnailImageMatch[1]!));
+    if (!asset) return json({ error: 'asset not found' }, 404);
+    const file = Bun.file(String(asset.storage_path)); if (!await file.exists()) return json({ error: 'image not found' }, 404);
+    return new Response(file, { headers: { 'content-type': String(asset.mime_type || 'image/webp'), 'cache-control': 'private, max-age=300' } });
   }
 
   if (pathname === "/api/contributors" && req.method === "GET") {

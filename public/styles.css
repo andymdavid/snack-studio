@@ -2017,6 +2017,20 @@ textarea {
   padding-bottom: 24px;
 }
 .publicationPreparationActions, .thumbnailReviewActions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.assetLibraryFilters { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:20px; }
+.assetLibraryFilters .active { border-color:var(--text-primary); background:var(--text-primary); color:var(--surface-1); }
+.assetLibraryGrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+.assetLibraryGrid > .workflowQueueEmpty { grid-column:1 / -1; }
+.assetLibraryCard { min-width:0; overflow:hidden; border:1px solid var(--border); border-radius:var(--radius-card); background:var(--surface-1); }
+.assetLibraryPreview { display:block; width:100%; padding:0; border:0; background:var(--surface-2); cursor:pointer; overflow:hidden; }
+.assetLibraryPreview img { display:block; width:100%; height:100%; object-fit:cover; transition:transform 160ms ease; }
+.assetLibraryPreview:hover img { transform:scale(1.015); }
+.assetKind-snack .assetLibraryPreview { aspect-ratio:3 / 2; }
+.assetKind-episode .assetLibraryPreview { aspect-ratio:16 / 9; }
+.assetKind-portrait .assetLibraryPreview { aspect-ratio:1 / 1; }
+.assetLibraryCopy { display:grid; gap:4px; padding:14px 16px 16px; }
+.assetLibraryCopy strong, .assetLibraryCopy span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.assetLibraryCopy > span:last-child { color:var(--text-muted); font-size:var(--text-sm); }
 .thumbnailReviewActions > .btn { flex:1 1 180px; }
 
 .publicationPreparationHeader h2,
@@ -2184,6 +2198,7 @@ div.publicationPreparationBlocker { display: flex; align-items: center; justify-
 .regenerationComparisonGrid article h3 { margin: 8px 0; }
 .regenerationComparisonGrid .candidateReaderBody { font-size: var(--text-sm); }
 @media (max-width: 760px) {
+  .assetLibraryGrid { grid-template-columns:1fr; }
   .regenerationComparisonHeader { display: grid; }
   .regenerationComparisonGrid { grid-template-columns: 1fr; }
   .contributorProfileFields { grid-template-columns: 1fr; }

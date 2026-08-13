@@ -45,6 +45,7 @@
             <button class="active" type="button" data-studio-route="/">Episodes</button>
             <button type="button" data-studio-route="/review">Review queue</button>
             <button type="button" data-studio-route="/assets">Asset review</button>
+            <button type="button" data-studio-route="/library">Asset library</button>
             <button type="button" data-studio-route="/publications">Publications</button>
             <button type="button" data-studio-route="/contributors">Contributors</button>
             <button type="button" data-studio-route="/graph">Graph</button>
@@ -112,6 +113,12 @@
           <div class="studioContent hidden" id="assetReviewPage">
             <header class="studioPageHeader"><div><p class="eyebrow">Visual decisions</p><h1>Asset Review</h1><p>Contributor identities, portraits and episode artwork waiting for approval.</p></div></header>
             <section class="workflowQueue" id="assetReviewQueue" aria-live="polite"></section>
+          </div>
+
+          <div class="studioContent hidden" id="assetLibraryPage">
+            <header class="studioPageHeader"><div><p class="eyebrow">Finished work</p><h1>Asset Library</h1><p>Approved contributor portraits, Snack thumbnails and episode artwork.</p></div></header>
+            <nav class="assetLibraryFilters" id="assetLibraryFilters" aria-label="Filter assets"></nav>
+            <section class="assetLibraryGrid" id="assetLibraryGrid" aria-live="polite"></section>
           </div>
 
           <div class="studioContent hidden" id="publicationsPage">

@@ -95,6 +95,33 @@ export function getThumbnailCandidateRow(id: string) {
   return db.query('SELECT * FROM thumbnail_candidates WHERE id = ?1').get(id) as Record<string, unknown> | null;
 }
 
+export function getThumbnailAssetRow(id: string) {
+  return db.query('SELECT * FROM thumbnail_assets WHERE id = ?1').get(id) as Record<string, unknown> | null;
+}
+
+export function listFinishedThumbnailAssets() {
+  return (db.query(`
+    SELECT a.id, a.job_id, a.width, a.height, a.mime_type, a.size_bytes, a.version_number, a.created_at,
+      j.episode_id, j.asset_kind, j.snack_candidate_id, j.topic_colour,
+      e.episode_number, COALESCE(e.public_title, e.working_title) AS episode_title,
+      r.public_title AS snack_title
+    FROM thumbnail_assets a
+    JOIN thumbnail_jobs j ON j.id = a.job_id
+    JOIN episodes e ON e.id = j.episode_id
+    LEFT JOIN snack_revisions r ON r.id = j.snack_revision_id
+    WHERE a.asset_stage = 'finished'
+    ORDER BY a.created_at DESC
+  `).all() as Record<string, unknown>[]).map((row) => ({
+    id: String(row.id), jobId: String(row.job_id), episodeId: String(row.episode_id),
+    assetKind: String(row.asset_kind), snackCandidateId: row.snack_candidate_id == null ? null : String(row.snack_candidate_id),
+    title: row.asset_kind === 'episode' ? String(row.episode_title) : String(row.snack_title || 'Untitled Snack'),
+    episodeTitle: String(row.episode_title), episodeNumber: row.episode_number == null ? null : Number(row.episode_number),
+    topicColour: row.topic_colour == null ? null : String(row.topic_colour), width: Number(row.width), height: Number(row.height),
+    mimeType: String(row.mime_type), sizeBytes: Number(row.size_bytes), versionNumber: Number(row.version_number),
+    createdAt: Number(row.created_at), imageUrl: `/api/assets/thumbnails/${encodeURIComponent(String(row.id))}/image`,
+  }));
+}
+
 export function createThumbnailGeneration(jobId: string, actorPubkey: string, publicOrigin: string, reviewNote?: string) {
   const job = getThumbnailJob(jobId);
   if (!job) throw new Error('Thumbnail job not found');

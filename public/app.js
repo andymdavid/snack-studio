@@ -64,6 +64,8 @@ const state = {
   contributorPortraitJobs: {},
   contributors: [],
   activeContributor: null,
+  assets: [],
+  assetFilter: 'all',
   thumbnailPollTimers: {},
 };
 
@@ -191,6 +193,7 @@ function appRoute() {
   if (/^\/episodes\/[^/]+$/.test(window.location.pathname)) return window.location.pathname;
   if (/^\/review(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
   if (/^\/assets(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
+  if (window.location.pathname === '/library') return window.location.pathname;
   if (/^\/publications(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
   if (/^\/contributors(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
   if (window.location.pathname === '/graph') return window.location.pathname;
@@ -210,12 +213,12 @@ function showOnly(id) {
 }
 
 function showStudioPage(id, breadcrumb) {
-  for (const pageId of ["episodesPage", "episodePage", "reviewQueuePage", "assetReviewPage", "publicationsPage", "contributorsPage", "contributorPage", "graphPage", "studioSettingsPage"]) {
+  for (const pageId of ["episodesPage", "episodePage", "reviewQueuePage", "assetReviewPage", "assetLibraryPage", "publicationsPage", "contributorsPage", "contributorPage", "graphPage", "studioSettingsPage"]) {
     $(pageId).classList.toggle("hidden", pageId !== id);
   }
   $("studioBreadcrumb").textContent = breadcrumb;
   for (const button of document.querySelectorAll("[data-studio-route]")) {
-    const activeRoute = id === "studioSettingsPage" ? "/settings" : id === 'graphPage' ? '/graph' : ['contributorsPage','contributorPage'].includes(id) ? '/contributors' : id === "assetReviewPage" ? '/assets' : id === "reviewQueuePage" ? "/review" : id === "publicationsPage" ? "/publications" : id === "episodePage" ? state.workspaceOrigin || "/" : "/";
+    const activeRoute = id === "studioSettingsPage" ? "/settings" : id === 'graphPage' ? '/graph' : id === 'assetLibraryPage' ? '/library' : ['contributorsPage','contributorPage'].includes(id) ? '/contributors' : id === "assetReviewPage" ? '/assets' : id === "reviewQueuePage" ? "/review" : id === "publicationsPage" ? "/publications" : id === "episodePage" ? state.workspaceOrigin || "/" : "/";
     button.classList.toggle("active", button.dataset.studioRoute === activeRoute);
   }
 }
@@ -257,6 +260,7 @@ async function renderRoute() {
     showOnly('home'); await loadWorkflowRoute('review'); return;
   }
   if (state.route.startsWith('/assets')) { showOnly('home'); await loadWorkflowRoute('assets'); return; }
+  if (state.route === '/library') { showOnly('home'); await loadAssetLibrary(); return; }
   if (state.route.startsWith('/publications')) {
     showOnly('home'); await loadWorkflowRoute('publications'); return;
   }
@@ -463,6 +467,34 @@ async function loadContributorRoute() {
   showStudioPage('contributorsPage', 'Snack Studio / Contributors'); setStudioStatus('Loading contributors…');
   try { state.contributors = (await api('/api/contributors')).contributors || []; renderContributorLibrary(); setStudioStatus('Ready'); }
   catch (error) { $('contributorLibrary').textContent = error.message; setStudioStatus(error.message); }
+}
+
+async function loadAssetLibrary() {
+  showStudioPage('assetLibraryPage', 'Snack Studio / Asset Library'); setStudioStatus('Loading assets…');
+  try { state.assets = (await api('/api/assets')).assets || []; renderAssetLibrary(); setStudioStatus('Ready'); }
+  catch (error) { $('assetLibraryGrid').textContent = error.message; setStudioStatus(error.message); }
+}
+
+function renderAssetLibrary() {
+  const filters = $('assetLibraryFilters'); const grid = $('assetLibraryGrid'); filters.innerHTML = ''; grid.innerHTML = '';
+  const kinds = [['all', 'All'], ['snack', 'Snack thumbnails'], ['episode', 'Episode thumbnails'], ['portrait', 'Contributor portraits']];
+  for (const [value, label] of kinds) {
+    const count = value === 'all' ? state.assets.length : state.assets.filter((asset) => asset.assetKind === value).length;
+    const button = document.createElement('button'); button.type = 'button'; button.className = `btn btnSecondary${state.assetFilter === value ? ' active' : ''}`; button.textContent = `${label} · ${count}`;
+    button.addEventListener('click', () => { state.assetFilter = value; renderAssetLibrary(); }); filters.appendChild(button);
+  }
+  const assets = state.assetFilter === 'all' ? state.assets : state.assets.filter((asset) => asset.assetKind === state.assetFilter);
+  if (!assets.length) { const empty = document.createElement('div'); empty.className = 'workflowQueueEmpty'; empty.innerHTML = '<strong>No finished assets here yet</strong><span>Assets appear here permanently after approval.</span>'; grid.appendChild(empty); return; }
+  for (const asset of assets) {
+    const card = document.createElement('article'); card.className = `assetLibraryCard assetKind-${asset.assetKind}`;
+    const preview = document.createElement('button'); preview.type = 'button'; preview.className = 'assetLibraryPreview'; preview.setAttribute('aria-label', `Open ${asset.title}`);
+    if (asset.assetKind === 'portrait') { const image = document.createElement('img'); image.src = asset.imageUrl; image.alt = ''; preview.appendChild(image); }
+    else loadPrivateImage(asset.imageUrl, preview, asset.title);
+    preview.addEventListener('click', () => navigate(asset.assetKind === 'portrait' ? `/contributors/${encodeURIComponent(asset.contributorId)}` : `/assets/${encodeURIComponent(asset.episodeId)}`));
+    const copy = document.createElement('div'); copy.className = 'assetLibraryCopy'; const kind = document.createElement('span'); kind.className = 'metadata'; kind.textContent = asset.assetKind === 'portrait' ? 'Contributor portrait' : asset.assetKind === 'episode' ? `Episode ${asset.episodeNumber || ''} thumbnail` : `Episode ${asset.episodeNumber || ''} · Snack thumbnail`;
+    const title = document.createElement('strong'); title.textContent = asset.title; const subtitle = document.createElement('span'); subtitle.textContent = asset.subtitle || (asset.assetKind === 'snack' ? asset.episodeTitle : `${asset.width} × ${asset.height} · Version ${asset.versionNumber}`);
+    copy.append(kind, title, subtitle); card.append(preview, copy); grid.appendChild(card);
+  }
 }
 
 function renderContributorLibrary() {
