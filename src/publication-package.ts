@@ -33,6 +33,11 @@ export function episodePublicationSlug(number: number) {
   return `episode-${String(number).padStart(3, '0')}`;
 }
 
+export function episodePublicTitle(title: string, episodeNumber: number | null) {
+  if (!episodeNumber) return title.trim();
+  return title.trim().replace(new RegExp(`^episode\\s+${episodeNumber}\\s*[:\\-–—]\\s*`, 'i'), '').trim() || title.trim();
+}
+
 export function resolvePublicationAssetSource(path: string) {
   if (path.startsWith('/images/')) return resolve('public', path.slice(1));
   return isAbsolute(path) ? path : resolve(path);
@@ -134,7 +139,7 @@ export function buildPublicationPackage(episodeId: string) {
   const packageValue = {
     schemaVersion: 1,
     episode: {
-      id: episode.id, slug: episodeSlug, number: episode.episodeNumber, title: episode.workingTitle,
+      id: episode.id, slug: episodeSlug, number: episode.episodeNumber, title: episodePublicTitle(episode.workingTitle, episode.episodeNumber),
       summary, status: 'published', participants: contributorIds, themes: themes.map((theme) => theme.id),
       recordedOn: episode.recordedOn, audioUrl: episode.audioUrl, youtubeUrl: episode.videoUrl,
       transcript: publicTranscript && episodeNumber ? episodeSlug : null,

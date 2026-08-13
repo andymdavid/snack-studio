@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { episodePublicationSlug, publicationSlug, resolvePublicationAssetSource, websiteThemeNeedsPublication } from './publication-package.ts';
+import { episodePublicationSlug, episodePublicTitle, publicationSlug, resolvePublicationAssetSource, websiteThemeNeedsPublication } from './publication-package.ts';
 
 describe('website publication package paths', () => {
   test('derives stable website collection slugs', () => {
@@ -12,6 +12,11 @@ describe('website publication package paths', () => {
   test('pads episode numbers to the website convention', () => {
     expect(episodePublicationSlug(64)).toBe('episode-064');
     expect(episodePublicationSlug(649)).toBe('episode-649');
+  });
+
+  test('keeps the episode number separate from its public title', () => {
+    expect(episodePublicTitle('Episode 67: Local AI Models', 67)).toBe('Local AI Models');
+    expect(episodePublicTitle('Local AI Models', 67)).toBe('Local AI Models');
   });
 
   test('maps approved public portrait URLs back to their local source asset', () => {
