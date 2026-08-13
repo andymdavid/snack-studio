@@ -1158,20 +1158,26 @@ function portraitsNeededCount(preparation) { return preparation.contributorsNeed
 function renderPublicationPackageManifest(packageValue) {
   const panel = document.createElement('section');
   panel.className = 'publicationPackageManifest';
+  const validationCurrent = state.websiteValidation?.packageFingerprint === packageValue.fingerprint && state.websiteValidation?.status === 'passed';
+  const publicationCurrent = validationCurrent && state.gitPublication?.validationAttemptId === state.websiteValidation.id && state.gitPublication?.status === 'published' && state.gitPublication?.mainPushed;
+  const deploymentCurrent = publicationCurrent && state.gitDeployment?.publicationAttemptId === state.gitPublication.id && state.gitDeployment?.status === 'deployed' && state.gitDeployment?.deployedPushed;
   const header = document.createElement('header');
   const copy = document.createElement('div');
-  const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Website package';
-  const title = document.createElement('h3'); title.textContent = packageValue.ready ? 'Ready to validate' : 'Package needs attention';
-  const detail = document.createElement('p'); detail.textContent = `${packageValue.snacks?.length || 0} Snacks · ${packageValue.people?.length || 0} contributors · ${packageValue.files?.length || 0} destination files`;
+  const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Release';
+  const title = document.createElement('h3'); title.textContent = deploymentCurrent ? 'Episode deployed' : publicationCurrent ? 'Ready to deploy' : validationCurrent ? 'Ready to publish' : packageValue.ready ? 'Ready to validate' : 'Package needs attention';
+  const detail = document.createElement('p'); detail.textContent = `${packageValue.snacks?.length || 0} Snacks and ${packageValue.people?.length || 0} contributors will be published to Intelligence Snacks.`;
   copy.append(eyebrow, title, detail);
   const meta = document.createElement('div'); meta.className = 'publicationPackageMeta';
-  const fingerprint = document.createElement('code'); fingerprint.textContent = packageValue.fingerprint?.slice(0, 12) || '';
-  fingerprint.title = packageValue.fingerprint || '';
-  const refresh = document.createElement('button'); refresh.type = 'button'; refresh.className = 'btn btnSecondary'; refresh.textContent = 'Refresh package';
-  refresh.addEventListener('click', async () => { const clear = setButtonBusy(refresh, 'Refreshing…'); try { state.publicationPackage = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-package`)).package; renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates); } catch (error) { setStudioStatus(error.message); } finally { clear(); } });
   const stage = document.createElement('button'); stage.type = 'button'; stage.className = 'btn btnPrimary'; stage.textContent = 'Validate publication'; stage.disabled = !packageValue.ready || !state.me?.access?.edit;
   stage.addEventListener('click', async () => { const clear = setButtonBusy(stage, 'Validating website…'); setStudioStatus('Staging website package and running the production build…'); try { state.websiteValidation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/website-validation`, { method:'POST', body:'{}' })).validation; renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates); setStudioStatus(state.websiteValidation.status === 'passed' ? 'Website package validated' : 'Website validation failed'); } catch (error) { setStudioStatus(error.message); } finally { clear(); } });
-  meta.append(fingerprint, refresh, stage); header.append(copy, meta); panel.appendChild(header);
+  if (!validationCurrent) meta.appendChild(stage);
+  header.append(copy, meta); panel.appendChild(header);
+  const progress = document.createElement('ol'); progress.className = 'publicationReleaseProgress';
+  for (const [label, complete, active] of [['Validate', validationCurrent, !validationCurrent], ['Publish', publicationCurrent, validationCurrent && !publicationCurrent], ['Deploy', deploymentCurrent, publicationCurrent && !deploymentCurrent]]) {
+    const item = document.createElement('li'); if (complete) item.className = 'isComplete'; else if (active) item.className = 'isActive';
+    const marker = document.createElement('span'); marker.textContent = complete ? '✓' : String(progress.children.length + 1); const text = document.createElement('strong'); text.textContent = label; item.append(marker, text); progress.appendChild(item);
+  }
+  panel.appendChild(progress);
   const blockers = packageValue.blockers || [];
   if (blockers.length) {
     const list = document.createElement('ul'); list.className = 'publicationPackageBlockers';
@@ -1183,11 +1189,12 @@ function renderPublicationPackageManifest(packageValue) {
     for (const blocker of grouped) { const item = document.createElement('li'); item.textContent = blocker.message; list.appendChild(item); }
     panel.appendChild(list);
   }
-  const paths = document.createElement('details');
-  const summary = document.createElement('summary'); summary.textContent = `Destination manifest (${packageValue.files?.length || 0})`;
+  const paths = document.createElement('details'); paths.className = 'publicationTechnicalDetails';
+  const summary = document.createElement('summary'); summary.textContent = 'Technical details';
+  const fingerprint = document.createElement('p'); fingerprint.className = 'metadata'; fingerprint.textContent = `Package ${packageValue.fingerprint?.slice(0, 12) || 'not resolved'} · ${packageValue.files?.length || 0} destination files`;
   const fileList = document.createElement('ul'); fileList.className = 'publicationPackageFiles';
   for (const file of packageValue.files || []) { const item = document.createElement('li'); const kind = document.createElement('span'); kind.textContent = file.kind; const path = document.createElement('code'); path.textContent = file.destination; item.append(kind, path); fileList.appendChild(item); }
-  paths.append(summary, fileList); panel.appendChild(paths);
+  paths.append(summary, fingerprint, fileList); panel.appendChild(paths);
   if (state.websiteValidation) panel.appendChild(renderWebsiteValidation(state.websiteValidation, packageValue, state.gitPublication, state.gitDeployment));
   return panel;
 }

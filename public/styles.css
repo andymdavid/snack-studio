@@ -2063,9 +2063,18 @@ textarea {
 .publicationPackageManifest h3 { margin-block:4px 6px; }
 .publicationPackageMeta { display:flex; align-items:center; gap:8px; }
 .publicationPackageMeta code { padding:6px 8px; border-radius:var(--radius-control); background:var(--surface-2); color:var(--text-muted); font-size:var(--text-xs); }
+.publicationReleaseProgress { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:0; margin:0; padding:0; list-style:none; }
+.publicationReleaseProgress li { position:relative; display:flex; align-items:center; gap:9px; color:var(--text-muted); }
+.publicationReleaseProgress li:not(:last-child)::after { content:""; height:1px; flex:1; margin-right:10px; background:var(--border); }
+.publicationReleaseProgress li > span { display:grid; place-items:center; width:28px; height:28px; flex:0 0 28px; border:1px solid var(--border); border-radius:50%; font-size:var(--text-xs); }
+.publicationReleaseProgress .isActive { color:var(--text-primary); }
+.publicationReleaseProgress .isActive > span { border-color:var(--text-primary); }
+.publicationReleaseProgress .isComplete { color:var(--success); }
+.publicationReleaseProgress .isComplete > span { border-color:var(--success); background:var(--success); color:white; }
 .publicationPackageBlockers { display:grid; gap:7px; margin:0; padding:14px 16px 14px 34px; border-left:3px solid var(--warning); background:var(--warning-soft); }
 .publicationPackageManifest details { border:1px solid var(--border); border-radius:var(--radius-card); }
 .publicationPackageManifest summary { padding:12px 14px; cursor:pointer; font-weight:600; }
+.publicationTechnicalDetails > p { padding:0 14px 12px; }
 .publicationPackageFiles { display:grid; gap:0; margin:0; padding:0; border-top:1px solid var(--border); list-style:none; }
 .publicationPackageFiles li { min-width:0; display:grid; grid-template-columns:130px minmax(0,1fr); gap:12px; padding:9px 14px; border-bottom:1px solid var(--border); }
 .publicationPackageFiles li:last-child { border-bottom:0; }
