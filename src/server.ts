@@ -103,7 +103,7 @@ import { getLatestWebsiteValidation, stageAndValidateWebsitePackage } from './we
 import { getLatestGitPublication, publishValidatedPackageToMain } from './git-publication.ts';
 import { deployPublishedCommit, getLatestGitDeployment } from './git-deployment.ts';
 import { getEpisodeWorkflow, listEpisodeWorkflows } from './episode-workflow.ts';
-import { createContributor, getContributor, listContributors, photoMediaType, publicContributor } from "./contributors.ts";
+import { createContributor, getContributor, listContributors, photoMediaType, publicContributor, updateContributor } from "./contributors.ts";
 import { validateContributorPhoto, validateContributorProfile } from "./contributor-input.ts";
 import { approvePortraitCandidate, applyPortraitResult, createPortraitJob, getPortraitCandidate, listPortraitJobs, markPortraitJobStarted, verifyPortraitTrigger } from "./contributor-portraits.ts";
 
@@ -413,6 +413,23 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 400);
     }
+  }
+
+  const contributorMatch = pathname.match(/^\/api\/contributors\/([^/]+)$/);
+  if (contributorMatch && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    const contributor = getContributor(decodeURIComponent(contributorMatch[1]!));
+    return contributor ? json({ contributor: publicContributor(contributor) }) : json({ error: 'contributor not found' }, 404);
+  }
+  if (contributorMatch && req.method === 'PATCH') {
+    const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
+    try {
+      const id = decodeURIComponent(contributorMatch[1]!); const form = await req.formData(); form.set('id', id);
+      const input = validateContributorProfile(form); const photoValue = form.get('photo');
+      const photo = photoValue instanceof File && photoValue.size ? photoValue : null; if (photo) validateContributorPhoto(photo);
+      return json({ contributor: publicContributor(await updateContributor(id, { ...input, actorPubkey: session.pubkey, photo })) });
+    } catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 400); }
   }
 
   const contributorPhotoMatch = pathname.match(/^\/api\/contributors\/([^/]+)\/reference-photo$/);

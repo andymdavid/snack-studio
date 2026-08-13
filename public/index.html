@@ -45,6 +45,7 @@
             <button class="active" type="button" data-studio-route="/">Episodes</button>
             <button type="button" data-studio-route="/review">Review queue</button>
             <button type="button" data-studio-route="/publications">Publications</button>
+            <button type="button" data-studio-route="/contributors">Contributors</button>
             <button type="button" data-studio-route="/graph">Graph</button>
             <button type="button" data-studio-route="/settings">Settings</button>
           </nav>
@@ -116,6 +117,18 @@
               </div>
             </header>
             <section class="workflowQueue" id="publicationsQueue" aria-live="polite"></section>
+          </div>
+
+          <div class="studioContent hidden" id="contributorsPage">
+            <header class="studioPageHeader">
+              <div><p class="eyebrow">People library</p><h1>Contributors</h1><p>Manage reusable public profiles, identity sources and approved voxel portraits.</p></div>
+            </header>
+            <section class="contributorLibrary" id="contributorLibrary" aria-live="polite"></section>
+          </div>
+
+          <div class="studioContent hidden" id="contributorPage">
+            <button class="backLink" id="contributorsBackButton" type="button">← All contributors</button>
+            <section class="contributorWorkspace card" id="contributorWorkspace"></section>
           </div>
 
           <div class="studioContent hidden" id="graphPage">

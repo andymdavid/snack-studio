@@ -62,6 +62,8 @@ const state = {
   gitDeployment: null,
   contributorFormOpen: false,
   contributorPortraitJobs: {},
+  contributors: [],
+  activeContributor: null,
   thumbnailPollTimers: {},
 };
 
@@ -82,9 +84,9 @@ function api(path, options = {}) {
   });
 }
 
-function apiForm(path, formData) {
+function apiForm(path, formData, method = "POST") {
   return fetch(path, {
-    method: "POST",
+    method,
     headers: state.token ? { authorization: `Bearer ${state.token}` } : {},
     body: formData,
   }).then(async (res) => {
@@ -189,6 +191,8 @@ function appRoute() {
   if (/^\/episodes\/[^/]+$/.test(window.location.pathname)) return window.location.pathname;
   if (/^\/review(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
   if (/^\/publications(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
+  if (/^\/contributors(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
+  if (window.location.pathname === '/graph') return window.location.pathname;
   return "/";
 }
 
@@ -205,12 +209,12 @@ function showOnly(id) {
 }
 
 function showStudioPage(id, breadcrumb) {
-  for (const pageId of ["episodesPage", "episodePage", "reviewQueuePage", "publicationsPage", "graphPage", "studioSettingsPage"]) {
+  for (const pageId of ["episodesPage", "episodePage", "reviewQueuePage", "publicationsPage", "contributorsPage", "contributorPage", "graphPage", "studioSettingsPage"]) {
     $(pageId).classList.toggle("hidden", pageId !== id);
   }
   $("studioBreadcrumb").textContent = breadcrumb;
   for (const button of document.querySelectorAll("[data-studio-route]")) {
-    const activeRoute = id === "studioSettingsPage" ? "/settings" : id === 'graphPage' ? '/graph' : id === "reviewQueuePage" ? "/review" : id === "publicationsPage" ? "/publications" : id === "episodePage" ? state.workspaceOrigin || "/" : "/";
+    const activeRoute = id === "studioSettingsPage" ? "/settings" : id === 'graphPage' ? '/graph' : ['contributorsPage','contributorPage'].includes(id) ? '/contributors' : id === "reviewQueuePage" ? "/review" : id === "publicationsPage" ? "/publications" : id === "episodePage" ? state.workspaceOrigin || "/" : "/";
     button.classList.toggle("active", button.dataset.studioRoute === activeRoute);
   }
 }
@@ -254,6 +258,7 @@ async function renderRoute() {
   if (state.route.startsWith('/publications')) {
     showOnly('home'); await loadWorkflowRoute('publications'); return;
   }
+  if (state.route.startsWith('/contributors')) { showOnly('home'); await loadContributorRoute(); return; }
   if (state.route === '/graph') { showOnly('home'); await loadGraph(); return; }
 
   showOnly("home");
@@ -443,6 +448,74 @@ function renderWorkflowQueue(kind, errorMessage = '') {
   }
 }
 
+async function loadContributorRoute() {
+  const match = state.route.match(/^\/contributors\/([^/]+)$/);
+  if (match) {
+    showStudioPage('contributorPage', 'Snack Studio / Contributors / Profile'); setStudioStatus('Loading contributor…');
+    try {
+      state.activeContributor = (await api(`/api/contributors/${encodeURIComponent(decodeURIComponent(match[1]))}`)).contributor;
+      renderContributorWorkspace(state.activeContributor); setStudioStatus('Ready');
+    } catch (error) { $('contributorWorkspace').textContent = error.message; setStudioStatus(error.message); }
+    return;
+  }
+  showStudioPage('contributorsPage', 'Snack Studio / Contributors'); setStudioStatus('Loading contributors…');
+  try { state.contributors = (await api('/api/contributors')).contributors || []; renderContributorLibrary(); setStudioStatus('Ready'); }
+  catch (error) { $('contributorLibrary').textContent = error.message; setStudioStatus(error.message); }
+}
+
+function renderContributorLibrary() {
+  const library = $('contributorLibrary'); library.innerHTML = '';
+  if (!state.contributors.length) { const empty = document.createElement('div'); empty.className = 'workflowQueueEmpty'; empty.innerHTML = '<strong>No contributors yet</strong><span>Contributors resolved from episodes will appear here permanently.</span>'; library.appendChild(empty); return; }
+  for (const contributor of state.contributors) {
+    const card = document.createElement('button'); card.type = 'button'; card.className = 'contributorLibraryCard';
+    const image = document.createElement('div'); image.className = 'contributorLibraryPortrait';
+    if (contributor.portraitPath) { const img = document.createElement('img'); img.src = contributor.portraitPath; img.alt = ''; image.appendChild(img); }
+    else image.textContent = contributor.name.slice(0, 1).toUpperCase();
+    const copy = document.createElement('div'); const name = document.createElement('strong'); name.textContent = contributor.name;
+    const role = document.createElement('span'); role.textContent = contributor.role; const status = document.createElement('span'); status.className = `statusPill ${contributor.portraitStatus === 'approved' ? 'statusSuccess' : 'statusPending'}`; status.textContent = contributor.portraitStatus === 'approved' ? 'Portrait approved' : formatEpisodeStatus(contributor.portraitStatus);
+    copy.append(name, role, status); card.append(image, copy); card.addEventListener('click', () => navigate(`/contributors/${encodeURIComponent(contributor.id)}`)); library.appendChild(card);
+  }
+}
+
+function contributorFormField(form, name, labelText, value, kind = 'input') {
+  const label = document.createElement('label'); label.className = 'workspaceField'; const title = document.createElement('span'); title.textContent = labelText;
+  const input = document.createElement(kind === 'textarea' ? 'textarea' : 'input'); input.name = name; if (kind === 'textarea') input.rows = 5; else input.type = name.endsWith('Url') ? 'url' : 'text'; input.value = value || ''; input.disabled = !state.me?.access?.edit;
+  label.append(title, input); form.appendChild(label); return input;
+}
+
+function renderContributorWorkspace(contributor) {
+  const workspace = $('contributorWorkspace'); workspace.innerHTML = '';
+  const header = document.createElement('header'); header.className = 'contributorWorkspaceHeader';
+  const portrait = document.createElement('div'); portrait.className = 'contributorWorkspacePortrait';
+  if (contributor.portraitPath) { const img = document.createElement('img'); img.src = contributor.portraitPath; img.alt = `${contributor.name} approved portrait`; portrait.appendChild(img); } else portrait.textContent = contributor.name.slice(0, 1).toUpperCase();
+  const identity = document.createElement('div'); const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = contributor.source === 'website' ? 'Website contributor' : 'Studio contributor'; const title = document.createElement('h1'); title.textContent = contributor.name; const role = document.createElement('p'); role.textContent = contributor.role; identity.append(eyebrow, title, role);
+  const status = document.createElement('span'); status.className = `statusPill ${contributor.portraitStatus === 'approved' ? 'statusSuccess' : 'statusPending'}`; status.textContent = contributor.portraitStatus === 'approved' ? 'Portrait approved' : formatEpisodeStatus(contributor.portraitStatus);
+  header.append(portrait, identity, status); workspace.appendChild(header);
+
+  const form = document.createElement('form'); form.className = 'contributorEditForm';
+  const formHeader = document.createElement('div'); formHeader.className = 'workspaceSectionHeader'; formHeader.innerHTML = '<div><h2>Public profile</h2><p>These details and identity assets persist across every episode.</p></div>';
+  const save = document.createElement('button'); save.type = 'submit'; save.className = 'btn btnPrimary'; save.textContent = 'Save profile'; save.disabled = !state.me?.access?.edit; formHeader.appendChild(save); form.appendChild(formHeader);
+  const grid = document.createElement('div'); grid.className = 'contributorProfileFields'; form.appendChild(grid);
+  contributorFormField(grid, 'name', 'Name', contributor.name); contributorFormField(grid, 'role', 'Role', contributor.role); contributorFormField(grid, 'shortBio', 'Short bio', contributor.shortBio);
+  contributorFormField(grid, 'aliases', 'Transcript aliases', contributor.aliases.join(', ')); contributorFormField(grid, 'externalUrl', 'Website', contributor.externalUrl); contributorFormField(grid, 'xUrl', 'X profile', contributor.xUrl); contributorFormField(grid, 'linkedinUrl', 'LinkedIn profile', contributor.linkedinUrl); contributorFormField(grid, 'nostrUrl', 'Nostr profile', contributor.nostrUrl);
+  contributorFormField(form, 'biographyMarkdown', 'Biography', contributor.biographyMarkdown, 'textarea');
+  const photoField = document.createElement('label'); photoField.className = 'contributorIdentitySource'; const photoCopy = document.createElement('div'); photoCopy.innerHTML = '<strong>Identity source photo</strong><span>Replace this photo before generating a new voxel portrait.</span>';
+  const sourcePreview = document.createElement('div'); sourcePreview.className = 'contributorSourcePreview'; if (contributor.referencePhotoPath) loadPrivateImage(contributor.referencePhotoPath, sourcePreview, `${contributor.name} identity source`);
+  const photo = document.createElement('input'); photo.type = 'file'; photo.name = 'photo'; photo.accept = 'image/jpeg,image/png,image/webp'; photo.disabled = !state.me?.access?.edit; photoField.append(photoCopy, sourcePreview, photo); form.appendChild(photoField);
+  form.addEventListener('submit', async (event) => { event.preventDefault(); const clear = setButtonBusy(save, 'Saving…'); try { state.activeContributor = (await apiForm(`/api/contributors/${encodeURIComponent(contributor.id)}`, new FormData(form), 'PATCH')).contributor; renderContributorWorkspace(state.activeContributor); setStudioStatus('Contributor profile saved'); } catch (error) { setStudioStatus(error.message); } finally { clear(); } });
+  workspace.appendChild(form);
+  workspace.appendChild(renderContributorPortraitWorkflow({ contributorId: contributor.id, name: contributor.name, portraitStatus: contributor.portraitStatus }));
+}
+
+function loadPrivateImage(url, container, alt) {
+  fetch(url, { headers: state.token ? { authorization: `Bearer ${state.token}` } : {} }).then((response) => response.ok ? response.blob() : Promise.reject(new Error('Image unavailable'))).then((blob) => { const image = document.createElement('img'); image.src = URL.createObjectURL(blob); image.alt = alt; container.replaceChildren(image); }).catch(() => { container.textContent = 'Source photo unavailable'; });
+}
+
+async function refreshContributorDetail(contributorId) {
+  state.activeContributor = (await api(`/api/contributors/${encodeURIComponent(contributorId)}`)).contributor;
+  renderContributorWorkspace(state.activeContributor);
+}
+
 async function loadGraph() {
   showStudioPage('graphPage', 'Snack Studio / Graph'); setStudioStatus('Loading graph…');
   try { const payload = await api('/api/graph'); renderGraph(payload); setStudioStatus('Ready'); } catch (error) { $('graphWorkspace').textContent = error.message; setStudioStatus(error.message); }
@@ -543,6 +616,7 @@ function renderEpisodes() {
 
 async function loadEpisode(id, options = {}) {
   state.workspaceOrigin = options.origin || '/';
+  $('episodesBackButton').textContent = state.workspaceOrigin === '/review' ? '← Review Queue' : state.workspaceOrigin === '/publications' ? '← Publications' : '← All episodes';
   showStudioPage("episodePage", `Snack Studio / ${state.workspaceOrigin === '/review' ? 'Review Queue' : state.workspaceOrigin === '/publications' ? 'Publications' : 'Episodes'} / Workspace`);
   setStudioStatus("Loading workspace…");
   try {
@@ -640,8 +714,17 @@ function renderEpisodeWorkspace(episode, transcript, transcriptRevisions, auditE
   detailsButton.className = "btn btnSecondary episodeDetailsButton";
   detailsButton.textContent = state.episodeStage === "details" ? "Back to workflow" : "Details";
   detailsButton.addEventListener("click", () => setEpisodeStage(state.episodeStage === "details" ? episodeWorkspaceStage() : "details"));
-  headerActions.append(status, detailsButton);
+  headerActions.append(status);
+  if (state.workspaceOrigin === '/') headerActions.appendChild(detailsButton);
   header.appendChild(headerActions);
+
+  const destinations = document.createElement('nav'); destinations.className = 'episodeWorkspaceDestinations'; destinations.setAttribute('aria-label', 'Episode destinations');
+  for (const [route, label] of [[`/episodes/${episode.id}`, 'Overview'], [`/review/${episode.id}`, 'Snack Review'], [`/publications/${episode.id}`, 'Publication']]) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btnSecondary'; button.textContent = label;
+    const destination = route.startsWith('/review') ? '/review' : route.startsWith('/publications') ? '/publications' : '/';
+    if (state.workspaceOrigin === destination) button.classList.add('active');
+    button.addEventListener('click', () => navigate(route)); destinations.appendChild(button);
+  }
 
   const flow = document.createElement("nav");
   flow.className = "episodeFlow";
@@ -863,11 +946,11 @@ function renderEpisodeWorkspace(episode, transcript, transcriptRevisions, auditE
   transcriptDetails.append(transcriptDetailsHeader, transcriptNote);
   detailsStage.append(metadataForm, transcriptDetails, history);
   if (state.workspaceOrigin === '/') {
-    workspace.append(header, state.episodeStage === 'details' ? detailsStage : transcript ? renderEpisodeOverview(episode, transcript, candidates, processingStage) : setupStage);
+    workspace.append(header, destinations, state.episodeStage === 'details' ? detailsStage : transcript ? renderEpisodeOverview(episode, transcript, candidates, processingStage) : setupStage);
   } else if (state.workspaceOrigin === '/publications') {
-    workspace.append(header, state.episodeStage === 'details' ? detailsStage : publicationStage);
+    workspace.append(header, destinations, publicationStage);
   } else if (state.workspaceOrigin === '/review') {
-    workspace.append(header, state.episodeStage === 'details' ? detailsStage : state.episodeStage === 'publication' ? publicationStage : outputStage);
+    workspace.append(header, destinations, state.episodeStage === 'publication' ? publicationStage : outputStage);
   } else {
     workspace.append(header, flow, state.episodeStage === "details" ? detailsStage : state.episodeStage === "publication" ? publicationStage : state.episodeStage === "processing" ? processingStage : state.episodeStage === "output" ? outputStage : setupStage);
   }
@@ -1302,7 +1385,9 @@ function renderContributorPortraitWorkflow(item) {
   generate.textContent = ['generating', 'in-review'].includes(item.portraitStatus) ? 'Generate another set' : 'Generate portraits';
   generate.disabled = !state.me?.access?.edit || item.portraitStatus === 'generating';
   generate.addEventListener('click', () => generateContributorPortraits(item.contributorId, generate));
-  heading.append(copy, generate); panel.appendChild(heading);
+  const actions = document.createElement('div'); actions.className = 'contributorPortraitActions';
+  const profile = document.createElement('button'); profile.type = 'button'; profile.className = 'btn btnSecondary'; profile.textContent = 'Open profile'; profile.addEventListener('click', () => navigate(`/contributors/${encodeURIComponent(item.contributorId)}`));
+  actions.append(profile, generate); heading.append(copy, actions); panel.appendChild(heading);
   const gallery = document.createElement('div'); gallery.className = 'contributorPortraitGallery';
   panel.appendChild(gallery);
   queueMicrotask(() => loadContributorPortraitJobs(item.contributorId, gallery));
@@ -1342,8 +1427,11 @@ async function generateContributorPortraits(contributorId, triggerButton = null)
     await api(`/api/contributor-portrait-jobs/${encodeURIComponent(prepared.job.id)}/start`, {
       method: 'POST', body: JSON.stringify({ autopilotAuthorization: authorization, triggerRequest: prepared.triggerRequest }),
     });
-    state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
-    renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+    if (state.route.startsWith('/contributors/')) await refreshContributorDetail(contributorId);
+    else {
+      state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
+      renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+    }
     setStudioStatus('Generating contributor portraits…');
     pollContributorPortrait(contributorId);
   } catch (error) { clearBusy(); setStudioStatus(error.message); }
@@ -1352,13 +1440,16 @@ async function generateContributorPortraits(contributorId, triggerButton = null)
 async function pollContributorPortrait(contributorId) {
   const startedAt = Date.now();
   const check = async () => {
-    if (!state.activeEpisode || Date.now() - startedAt > 20 * 60 * 1000) return;
+    if ((!state.activeEpisode && !state.activeContributor) || Date.now() - startedAt > 20 * 60 * 1000) return;
     try {
       const payload = await api(`/api/contributors/${encodeURIComponent(contributorId)}/portrait-jobs`);
       const job = payload.jobs?.[0];
       if (job && ['in-review', 'approved', 'failed'].includes(job.status)) {
-        state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
-        renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+        if (state.route.startsWith('/contributors/')) await refreshContributorDetail(contributorId);
+        else {
+          state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
+          renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+        }
         setStudioStatus(job.status === 'in-review' ? 'Contributor portraits ready to review' : job.status === 'failed' ? (job.failureSummary || 'Portrait generation failed') : 'Contributor portrait approved');
         return;
       }
@@ -1372,9 +1463,12 @@ async function approveContributorPortrait(candidateId, triggerButton = null) {
   const clearBusy = setButtonBusy(triggerButton, 'Approving…');
   setStudioStatus('Approving contributor portrait…');
   try {
-    await api(`/api/contributor-portrait-candidates/${encodeURIComponent(candidateId)}/approve`, { method: 'POST', body: '{}' });
-    state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
-    renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+    const payload = await api(`/api/contributor-portrait-candidates/${encodeURIComponent(candidateId)}/approve`, { method: 'POST', body: '{}' });
+    if (state.route.startsWith('/contributors/')) { state.activeContributor = payload.contributor; renderContributorWorkspace(state.activeContributor); }
+    else {
+      state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
+      renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+    }
     setStudioStatus('Contributor portrait approved');
   } catch (error) { clearBusy(); setStudioStatus(error.message); }
 }
@@ -3410,6 +3504,7 @@ $("closeEpisodeDialogButton").addEventListener("click", closeEpisodeDialog);
 $("cancelEpisodeButton").addEventListener("click", closeEpisodeDialog);
 $("episodeForm").addEventListener("submit", createEpisodeWorkspace);
 $("episodesBackButton").addEventListener("click", () => navigate(state.workspaceOrigin || "/"));
+$("contributorsBackButton").addEventListener("click", () => navigate('/contributors'));
 for (const button of document.querySelectorAll("[data-studio-route]")) {
   button.addEventListener("click", () => navigate(button.dataset.studioRoute));
 }

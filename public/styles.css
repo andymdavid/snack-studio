@@ -2084,6 +2084,7 @@ div.publicationPreparationBlocker { display: flex; align-items: center; justify-
 .contributorProfileActions { display: flex; justify-content: flex-end; gap: 8px; }
 .contributorPortraitWorkflow { display: grid; gap: 18px; border: 1px solid var(--border); border-radius: var(--radius-card); padding: 18px; background: var(--surface-1); }
 .contributorPortraitWorkflow > div:first-child { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.contributorPortraitActions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .contributorPortraitWorkflow h3, .contributorPortraitWorkflow p { margin: 0; }
 .contributorPortraitWorkflow h3 { margin-block: 4px 6px; }
 .contributorPortraitWorkflow > div:first-child p:last-child { color: var(--text-muted); }
@@ -2133,9 +2134,29 @@ div.publicationPreparationBlocker { display: flex; align-items: center; justify-
 .episodeThumbnailWorkflow h3 { margin:.35rem 0; font-size:1.35rem; }
 .episodeThumbnailActions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .episodeThumbnailUploadStatus { flex-basis:100%; min-height:1.25rem; color:var(--text-secondary); font-size:var(--text-sm); text-align:right; }
+.episodeWorkspaceDestinations { display:flex; gap:8px; flex-wrap:wrap; padding:12px 0 18px; border-bottom:1px solid var(--border); }
+.episodeWorkspaceDestinations .active { border-color:var(--coral); background:var(--coral-soft); color:var(--text-primary); }
+.contributorLibrary { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
+.contributorLibraryCard { display:flex; align-items:center; gap:14px; min-height:112px; padding:16px; border:1px solid var(--border); border-radius:var(--radius-card); background:var(--surface-1); color:var(--text-primary); text-align:left; cursor:pointer; }
+.contributorLibraryCard:hover { border-color:var(--coral); transform:translateY(-1px); }
+.contributorLibraryPortrait,.contributorWorkspacePortrait { display:grid; place-items:center; flex:0 0 auto; overflow:hidden; border-radius:var(--radius-card); background:var(--surface-2); color:var(--text-muted); font-weight:700; }
+.contributorLibraryPortrait { width:76px; height:76px; font-size:var(--text-xl); }
+.contributorLibraryPortrait img,.contributorWorkspacePortrait img,.contributorSourcePreview img { width:100%; height:100%; object-fit:cover; }
+.contributorLibraryCard>div:last-child { display:grid; gap:5px; min-width:0; }
+.contributorLibraryCard>div:last-child>span:not(.statusPill) { color:var(--text-muted); }
+.contributorWorkspace { display:grid; gap:24px; }
+.contributorWorkspaceHeader { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:18px; padding-bottom:22px; border-bottom:1px solid var(--border); }
+.contributorWorkspaceHeader h1,.contributorWorkspaceHeader p { margin:0; }
+.contributorWorkspacePortrait { width:112px; height:112px; font-size:var(--text-2xl); }
+.contributorEditForm { display:grid; gap:18px; padding:18px; border:1px solid var(--border); border-radius:var(--radius-card); background:var(--surface-1); }
+.contributorIdentitySource { display:grid; grid-template-columns:1fr 120px minmax(220px,.5fr); align-items:center; gap:18px; padding-top:16px; border-top:1px solid var(--border); }
+.contributorIdentitySource>div:first-child { display:grid; gap:4px; }
+.contributorIdentitySource span { color:var(--text-muted); }
+.contributorSourcePreview { display:grid; place-items:center; width:96px; height:96px; overflow:hidden; border-radius:var(--radius-card); background:var(--surface-2); color:var(--text-muted); font-size:var(--text-sm); text-align:center; }
 .thumbnailLoadFailed { min-height:180px; border:1px solid var(--danger); border-radius:var(--radius-card); background:var(--danger-soft); }
 .episodeThumbnailActions { display:flex; align-items:center; gap:.75rem; flex:none; }
 @media (max-width: 760px) { .episodeThumbnailWorkflow { align-items:stretch; flex-direction:column; } .episodeThumbnailActions { flex-wrap:wrap; } }
+@media (max-width: 760px) { .contributorWorkspaceHeader,.contributorIdentitySource { grid-template-columns:1fr; } .contributorWorkspaceHeader .statusPill { justify-self:start; } }
 
 .publicationThumbnailQueue > div {
   min-width: 0;
