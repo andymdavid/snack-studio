@@ -66,6 +66,8 @@ const state = {
   activeContributor: null,
   assets: [],
   assetFilter: 'all',
+  diagnostics: [],
+  diagnosticFilter: 'attention',
   thumbnailPollTimers: {},
 };
 
@@ -194,6 +196,7 @@ function appRoute() {
   if (/^\/review(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
   if (/^\/assets(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
   if (window.location.pathname === '/library') return window.location.pathname;
+  if (window.location.pathname === '/diagnostics') return window.location.pathname;
   if (/^\/publications(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
   if (/^\/contributors(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
   if (window.location.pathname === '/graph') return window.location.pathname;
@@ -213,12 +216,12 @@ function showOnly(id) {
 }
 
 function showStudioPage(id, breadcrumb) {
-  for (const pageId of ["episodesPage", "episodePage", "reviewQueuePage", "assetReviewPage", "assetLibraryPage", "publicationsPage", "contributorsPage", "contributorPage", "graphPage", "studioSettingsPage"]) {
+  for (const pageId of ["episodesPage", "episodePage", "reviewQueuePage", "assetReviewPage", "assetLibraryPage", "publicationsPage", "contributorsPage", "contributorPage", "graphPage", "diagnosticsPage", "studioSettingsPage"]) {
     $(pageId).classList.toggle("hidden", pageId !== id);
   }
   $("studioBreadcrumb").textContent = breadcrumb;
   for (const button of document.querySelectorAll("[data-studio-route]")) {
-    const activeRoute = id === "studioSettingsPage" ? "/settings" : id === 'graphPage' ? '/graph' : id === 'assetLibraryPage' ? '/library' : ['contributorsPage','contributorPage'].includes(id) ? '/contributors' : id === "assetReviewPage" ? '/assets' : id === "reviewQueuePage" ? "/review" : id === "publicationsPage" ? "/publications" : id === "episodePage" ? state.workspaceOrigin || "/" : "/";
+    const activeRoute = id === "studioSettingsPage" ? "/settings" : id === 'diagnosticsPage' ? '/diagnostics' : id === 'graphPage' ? '/graph' : id === 'assetLibraryPage' ? '/library' : ['contributorsPage','contributorPage'].includes(id) ? '/contributors' : id === "assetReviewPage" ? '/assets' : id === "reviewQueuePage" ? "/review" : id === "publicationsPage" ? "/publications" : id === "episodePage" ? state.workspaceOrigin || "/" : "/";
     button.classList.toggle("active", button.dataset.studioRoute === activeRoute);
   }
 }
@@ -261,6 +264,7 @@ async function renderRoute() {
   }
   if (state.route.startsWith('/assets')) { showOnly('home'); await loadWorkflowRoute('assets'); return; }
   if (state.route === '/library') { showOnly('home'); await loadAssetLibrary(); return; }
+  if (state.route === '/diagnostics') { showOnly('home'); await loadDiagnostics(); return; }
   if (state.route.startsWith('/publications')) {
     showOnly('home'); await loadWorkflowRoute('publications'); return;
   }
@@ -473,6 +477,37 @@ async function loadAssetLibrary() {
   showStudioPage('assetLibraryPage', 'Snack Studio / Asset Library'); setStudioStatus('Loading assets…');
   try { state.assets = (await api('/api/assets')).assets || []; renderAssetLibrary(); setStudioStatus('Ready'); }
   catch (error) { $('assetLibraryGrid').textContent = error.message; setStudioStatus(error.message); }
+}
+
+async function loadDiagnostics() {
+  showStudioPage('diagnosticsPage', 'Snack Studio / Diagnostics'); setStudioStatus('Loading diagnostics…');
+  try {
+    state.diagnostics = (await api('/api/diagnostics')).items || [];
+    if (new URLSearchParams(window.location.search).has('episode')) state.diagnosticFilter = `episode:${new URLSearchParams(window.location.search).get('episode')}`;
+    renderDiagnostics(); setStudioStatus('Ready');
+  } catch (error) { $('diagnosticList').textContent = error.message; setStudioStatus(error.message); }
+}
+
+function diagnosticNeedsAttention(item) { return ['failed','timed-out','needs-review','cancelled','error'].includes(item.status); }
+
+function renderDiagnostics() {
+  const summary = $('diagnosticSummary'); const filters = $('diagnosticFilters'); const list = $('diagnosticList'); summary.innerHTML = ''; filters.innerHTML = ''; list.innerHTML = '';
+  const active = state.diagnostics.filter((item) => ['created','prepared','awaiting-authorization','queued','running','applying-result','extracting','grounding','generating'].includes(item.status)).length;
+  const attention = state.diagnostics.filter(diagnosticNeedsAttention).length;
+  for (const [label, value] of [['Needs attention', attention], ['Running', active], ['Recorded jobs', state.diagnostics.length]]) { const card = document.createElement('article'); card.className = 'card cardCompact'; const name = document.createElement('span'); name.textContent = label; const count = document.createElement('strong'); count.className = 'num'; count.textContent = String(value); card.append(name, count); summary.appendChild(card); }
+  const episodeFilter = state.diagnosticFilter.startsWith('episode:');
+  for (const [value, label] of [['attention','Needs attention'],['active','Running'],['all','All history']]) { const button = document.createElement('button'); button.type = 'button'; button.className = `btn btnSecondary${state.diagnosticFilter === value ? ' active' : ''}`; button.textContent = label; button.addEventListener('click', () => { state.diagnosticFilter = value; history.replaceState({}, '', '/diagnostics'); renderDiagnostics(); }); filters.appendChild(button); }
+  if (episodeFilter) { const item = state.diagnostics.find((entry) => entry.episodeId === state.diagnosticFilter.slice(8)); const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btnSecondary active'; button.textContent = item?.episodeNumber ? `Episode ${item.episodeNumber}` : 'Selected episode'; button.addEventListener('click', () => { state.diagnosticFilter = 'all'; history.replaceState({}, '', '/diagnostics'); renderDiagnostics(); }); filters.appendChild(button); }
+  const items = state.diagnostics.filter((item) => state.diagnosticFilter === 'all' ? true : state.diagnosticFilter === 'attention' ? diagnosticNeedsAttention(item) : state.diagnosticFilter === 'active' ? ['created','prepared','awaiting-authorization','queued','running','applying-result','extracting','grounding','generating'].includes(item.status) : item.episodeId === state.diagnosticFilter.slice(8));
+  if (!items.length) { const empty = document.createElement('div'); empty.className = 'workflowQueueEmpty'; empty.innerHTML = `<strong>${state.diagnosticFilter === 'attention' ? 'Nothing needs attention' : 'No matching jobs'}</strong><span>${state.diagnosticFilter === 'attention' ? 'Failed or interrupted work will appear here.' : 'Try another filter.'}</span>`; list.appendChild(empty); return; }
+  for (const item of items) {
+    const row = document.createElement('article'); row.className = `diagnosticItem${diagnosticNeedsAttention(item) ? ' needsAttention' : ''}`;
+    const copy = document.createElement('div'); const kind = document.createElement('span'); kind.className = 'metadata'; kind.textContent = item.kind === 'pipeline' ? 'Text pipeline' : item.kind === 'thumbnail' ? 'Artwork pipeline' : 'Portrait pipeline'; const title = document.createElement('strong'); title.textContent = formatEpisodeStatus(item.label); const context = document.createElement('span'); context.textContent = item.episodeTitle ? `${item.episodeNumber ? `Episode ${item.episodeNumber} · ` : ''}${item.episodeTitle}` : item.contributorName || 'Contributor'; copy.append(kind, title, context);
+    if (item.failureSummary) { const failure = document.createElement('p'); failure.className = 'pipelineRequestFailure'; failure.textContent = item.failureSummary; copy.appendChild(failure); }
+    const facts = document.createElement('div'); facts.className = 'diagnosticFacts'; const status = document.createElement('span'); status.className = `statusPill ${statusClass(item.status)}`; status.textContent = formatEpisodeStatus(item.status); const time = document.createElement('span'); time.className = 'metadata'; time.textContent = formatActivity(item.updatedAt); facts.append(status, time);
+    const open = document.createElement('button'); open.type = 'button'; open.className = 'btn btnSecondary'; open.textContent = diagnosticNeedsAttention(item) ? 'Open recovery' : 'Open context'; open.addEventListener('click', () => navigate(item.kind === 'portrait' ? `/contributors/${encodeURIComponent(item.contributorId)}` : item.kind === 'thumbnail' ? `/assets/${encodeURIComponent(item.episodeId)}` : `/episodes/${encodeURIComponent(item.episodeId)}`)); facts.appendChild(open);
+    row.append(copy, facts); list.appendChild(row);
+  }
 }
 
 function renderAssetLibrary() {
@@ -1669,7 +1704,7 @@ function renderSimplePipelineProgress() {
   detail.type = "button";
   detail.className = "textButton";
   detail.textContent = "View run details";
-  detail.addEventListener("click", () => setEpisodeStage("details"));
+  detail.addEventListener("click", () => navigate(`/diagnostics?episode=${encodeURIComponent(state.activeEpisode.id)}`));
   section.appendChild(detail);
   return section;
 }

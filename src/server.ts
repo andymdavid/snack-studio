@@ -104,6 +104,7 @@ import { getLatestGitPublication, publishValidatedPackageToMain } from './git-pu
 import { deployPublishedCommit, getLatestGitDeployment } from './git-deployment.ts';
 import { getEpisodeWorkflow, listEpisodeWorkflows } from './episode-workflow.ts';
 import { createContributor, getContributor, listContributors, photoMediaType, publicContributor, updateContributor } from "./contributors.ts";
+import { listDiagnostics } from './diagnostics.ts';
 import { validateContributorPhoto, validateContributorProfile } from "./contributor-input.ts";
 import { approvePortraitCandidate, applyPortraitResult, createPortraitJob, getPortraitCandidate, listPortraitJobs, markPortraitJobStarted, verifyPortraitTrigger } from "./contributor-portraits.ts";
 
@@ -277,6 +278,11 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
     if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
     return json({ episodes: listEpisodeWorkflows() });
+  }
+  if (pathname === '/api/diagnostics' && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    return json({ items: listDiagnostics() });
   }
   if (pathname === '/api/graph' && req.method === 'GET') {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);

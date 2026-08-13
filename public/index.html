@@ -49,6 +49,7 @@
             <button type="button" data-studio-route="/publications">Publications</button>
             <button type="button" data-studio-route="/contributors">Contributors</button>
             <button type="button" data-studio-route="/graph">Graph</button>
+            <button type="button" data-studio-route="/diagnostics">Diagnostics</button>
             <button type="button" data-studio-route="/settings">Settings</button>
           </nav>
           <div class="studioUser">
@@ -147,6 +148,13 @@
           <div class="studioContent hidden" id="graphPage">
             <header class="studioPageHeader"><div><p class="eyebrow">Knowledge system</p><h1>Graph</h1><p>Review evidence-backed conceptual links across approved Snacks.</p></div></header>
             <section class="workflowQueue" id="graphWorkspace" aria-live="polite"></section>
+          </div>
+
+          <div class="studioContent hidden" id="diagnosticsPage">
+            <header class="studioPageHeader"><div><p class="eyebrow">Troubleshooting</p><h1>Diagnostics</h1><p>Pipeline and generation history, kept outside the editorial workflow.</p></div></header>
+            <section class="diagnosticSummary" id="diagnosticSummary"></section>
+            <nav class="diagnosticFilters" id="diagnosticFilters" aria-label="Filter diagnostics"></nav>
+            <section class="diagnosticList" id="diagnosticList" aria-live="polite"></section>
           </div>
 
           <div class="studioContent hidden" id="studioSettingsPage">
