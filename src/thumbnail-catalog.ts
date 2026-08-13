@@ -6,8 +6,12 @@ export const THUMBNAIL_CONTRIBUTORS = [
 
 export const THUMBNAIL_TOPICS = [
   { id: "ai-coding", name: "AI Coding", colour: "#fe7141" },
+  { id: "ai-models-infrastructure", name: "AI Models & Infrastructure", colour: "#75c9c8" },
   { id: "software-systems", name: "Software Systems", colour: "#cdabfe" },
   { id: "agents", name: "Agents", colour: "#d1ddd3" },
+  { id: "knowledge-memory", name: "Knowledge & Memory", colour: "#ef8fb1" },
+  { id: "privacy-security", name: "Privacy & Security", colour: "#d89b72" },
+  { id: "business-markets", name: "Business & Markets", colour: "#f4bf58" },
 ] as const;
 
 export const THUMBNAIL_CANDIDATES_PER_ROUND = 3;

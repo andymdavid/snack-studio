@@ -7,8 +7,12 @@ const CURRENT_SNACK_PROMPT_SUITE = "v3-intelligence-snacks-natural-prose";
 const CURRENT_SNACK_PIPELINE_VERSION = "3";
 const THEME_CATALOG = {
   'ai-coding': { name: 'AI Coding', colour: '#fe7141' },
+  'ai-models-infrastructure': { name: 'AI Models & Infrastructure', colour: '#75c9c8' },
   'software-systems': { name: 'Software Systems', colour: '#cdabfe' },
   agents: { name: 'Agents', colour: '#d1ddd3' },
+  'knowledge-memory': { name: 'Knowledge & Memory', colour: '#ef8fb1' },
+  'privacy-security': { name: 'Privacy & Security', colour: '#d89b72' },
+  'business-markets': { name: 'Business & Markets', colour: '#f4bf58' },
 };
 const PROFILE_RELAYS = [
   "wss://relay.damus.io",
@@ -2388,8 +2392,8 @@ async function startPublicationMetadataClassification() {
     body: JSON.stringify({
       operation: "publication-metadata",
       pipelineName: "snack-studio-publication-metadata",
-      pipelineVersion: "2",
-      promptSuiteVersion: "v2-transcript-theme-resolver",
+      pipelineVersion: "3",
+      promptSuiteVersion: "v3-governed-theme-classifier",
       resultSchemaVersion: "2",
       idempotencyKey: crypto.randomUUID(),
       autopilotTargetId: state.activeAutopilotTargetId || undefined,

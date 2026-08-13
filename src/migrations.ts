@@ -1188,6 +1188,34 @@ const migrations: Migration[] = [
       if (!hasColumn(db, 'relationships', 'evidence_excerpt')) db.exec('ALTER TABLE relationships ADD COLUMN evidence_excerpt TEXT');
     },
   },
+  {
+    id: '032_governed_theme_taxonomy',
+    description: 'Seed a controlled reusable theme taxonomy',
+    up(db) {
+      const now = Date.now();
+      const seed = db.query("INSERT OR IGNORE INTO themes(id,name,description,colour,source,created_at,updated_at) VALUES(?1,?2,?3,?4,'website',?5,?5)");
+      seed.run('ai-models-infrastructure', 'AI Models & Infrastructure', 'Model capabilities, compute, deployment, economics and the infrastructure used to operate AI.', '#75c9c8', now);
+      seed.run('knowledge-memory', 'Knowledge & Memory', 'How information is captured, connected, retrieved and developed into useful memory.', '#ef8fb1', now);
+      seed.run('privacy-security', 'Privacy & Security', 'Trust boundaries, data protection, system safety and the practical costs of securing technology.', '#d89b72', now);
+      seed.run('business-markets', 'Business & Markets', 'Competition, positioning, adoption, economics and the formation of technology markets.', '#f4bf58', now);
+      const mappings = [
+        ['local-ai-deployment-constraints', 'ai-models-infrastructure'],
+        ['category-education-by-competitors', 'business-markets'],
+        ['connected-personal-knowledge-memory', 'knowledge-memory'],
+        ['deterministic-agent-workflows', 'agents'],
+        ['multi-agent-work-coordination', 'agents'],
+        ['privacy-complexity-tradeoffs', 'privacy-security'],
+      ];
+      for (const [specific, governed] of mappings) {
+        db.query(`INSERT OR IGNORE INTO episode_theme_assignments(episode_id,theme_id,rationale,evidence_excerpt,pipeline_request_id,created_at)
+          SELECT episode_id,?1,rationale,evidence_excerpt,pipeline_request_id,created_at FROM episode_theme_assignments WHERE theme_id=?2`).run(governed, specific);
+        db.query('UPDATE snack_theme_assignments SET theme_id=?1 WHERE theme_id=?2').run(governed, specific);
+      }
+      for (const [specific] of mappings) db.query('DELETE FROM episode_theme_assignments WHERE theme_id=?1').run(specific);
+      db.exec(`UPDATE thumbnail_jobs SET topic_colour=(SELECT t.colour FROM snack_theme_assignments sta JOIN themes t ON t.id=sta.theme_id WHERE sta.snack_revision_id=thumbnail_jobs.snack_revision_id) WHERE snack_revision_id IS NOT NULL`);
+      for (const [specific] of mappings) db.query("DELETE FROM themes WHERE id=?1 AND source='studio'").run(specific);
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

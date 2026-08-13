@@ -11,14 +11,14 @@ export function validateSuccessfulThemeResult(value: Record<string, unknown>): {
   try {
     const required = (key: string) => { const item = typeof value[key] === 'string' ? String(value[key]).trim() : ''; if (!item) throw new Error(`${key} is required`); return item; };
     if (value.operation !== 'publication-metadata') throw new Error('operation must be publication-metadata');
-    if (!Array.isArray(value.episodeThemes) || value.episodeThemes.length < 2 || value.episodeThemes.length > 12) throw new Error('episodeThemes must contain 2 to 12 grounded themes');
+    if (!Array.isArray(value.episodeThemes) || value.episodeThemes.length < 1 || value.episodeThemes.length > 7) throw new Error('episodeThemes must contain 1 to 7 governed themes');
     const catalog = new Set(listThemes().map((item) => item.id));
     const episodeThemes = value.episodeThemes.map((item, index) => {
       if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`episode theme ${index + 1} must be an object`);
       const row = item as Record<string, unknown>; const key = String(row.key || '').trim(); const existingThemeId = typeof row.existingThemeId === 'string' && row.existingThemeId.trim() ? row.existingThemeId.trim() : null;
       const name = String(row.name || '').trim(); const description = String(row.description || '').trim(); const rationale = String(row.rationale || '').trim(); const evidenceExcerpt = String(row.evidenceExcerpt || '').trim();
       if (!key || !name || !description || !rationale || !evidenceExcerpt) throw new Error(`episode theme ${index + 1} is incomplete`);
-      if (existingThemeId && !catalog.has(existingThemeId)) throw new Error(`episode theme ${key} references an unknown existing theme`);
+      if (!existingThemeId || !catalog.has(existingThemeId)) throw new Error(`episode theme ${key} must use one governed theme from the registry`);
       return { key, existingThemeId, name, description, rationale, evidenceExcerpt };
     });
     const keys = new Set(episodeThemes.map((item) => item.key)); if (keys.size !== episodeThemes.length) throw new Error('episode theme keys must be unique');

@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import { db as appDb } from './db.ts';
 import { getPipelineRequest, getPipelineRequestTranscript, getPipelineRun } from './pipeline-requests.ts';
-import { createTheme, getTheme } from './themes.ts';
+import { getTheme } from './themes.ts';
 import type { SuccessfulThemeResult } from './theme-result-input.ts';
 
 export function normalizeThemeEvidence(value: string) {
@@ -31,7 +31,7 @@ export function applySuccessfulThemeResult(input: { localRunId: string; result: 
   database.transaction(() => {
     const keyToTheme = new Map<string, ReturnType<typeof getTheme>>();
     for (const theme of input.result.episodeThemes) {
-      const resolved = theme.existingThemeId ? getTheme(theme.existingThemeId, database) : createTheme({ name: theme.name, description: theme.description }, database);
+      const resolved = theme.existingThemeId ? getTheme(theme.existingThemeId, database) : null;
       if (!resolved) throw new Error(`Could not resolve theme ${theme.key}`); keyToTheme.set(theme.key, resolved);
     }
     database.query('DELETE FROM episode_theme_assignments WHERE episode_id=?1').run(request.episodeId);
