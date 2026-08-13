@@ -8,12 +8,12 @@ import { getContributor } from './contributors.ts';
 import { getCurrentAutopilotTarget } from './db.ts';
 import { recordAuditEvent } from './episodes.ts';
 
-const PROMPT_VERSION = 'v2-contributor-voxel-reconstruction';
+const PROMPT_VERSION = 'v3-contributor-identity-locked-voxel';
 const STYLE_REFERENCES = [
   resolve('public/images/contributors/pete-winn-voxel.webp'),
   resolve('public/images/contributors/andy-david-voxel.webp'),
 ];
-const PIPELINE_VERSION = 2;
+const PIPELINE_VERSION = 3;
 
 function tokenHash(value: string): string {
   return bytesToHex(sha256(new TextEncoder().encode(value)));
