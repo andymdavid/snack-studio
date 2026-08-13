@@ -2023,6 +2023,18 @@ textarea {
   border-bottom: 1px solid var(--border);
   padding-bottom: 24px;
 }
+.publicationChannelTabs { margin-top: -24px; }
+.newsletterEditionWorkspace { display:grid; grid-template-columns:minmax(260px,.72fr) minmax(320px,1fr); gap:16px; align-items:start; }
+.newsletterEditionSelection { grid-row:1 / span 2; }
+.newsletterEditionComposer { align-content:start; }
+.newsletterEditionField { display:grid; gap:6px; color:var(--text-muted); font-size:var(--text-sm); }
+.newsletterEditionField input, .newsletterEditionField textarea { width:100%; }
+.newsletterEditionPreview { grid-column:2; display:grid; gap:18px; border:1px solid var(--border); border-radius:var(--radius-card); background:var(--surface-1); padding:24px; }
+.newsletterEditionPreview h2, .newsletterEditionPreview h3, .newsletterEditionPreview p { margin:0; }
+.newsletterMarkdown { white-space:pre-wrap; color:var(--text-muted); font-size:var(--text-md); line-height:1.65; }
+.newsletterPreviewSnack { display:grid; gap:10px; border-top:1px solid var(--border); padding-top:20px; }
+.newsletterPreviewSnack > strong { font-size:var(--text-sm); line-height:1.5; }
+.newsletterEditionActions { display:flex; flex-wrap:wrap; gap:8px; border-top:1px solid var(--border); padding-top:18px; }
 .publicationPreparationActions, .thumbnailReviewActions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .assetLibraryFilters { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:20px; }
 .assetLibraryFilters .active { border-color:var(--text-primary); background:var(--text-primary); color:var(--surface-1); }
@@ -2435,6 +2447,9 @@ div.publicationPreparationBlocker { display: flex; align-items: center; justify-
   .publicationPreparation { width: calc(100% - 32px); }
   .publicationPreparationHeader { flex-direction: column; }
   .publicationPreparationFacts { grid-template-columns: 1fr; }
+  .newsletterEditionWorkspace { grid-template-columns:1fr; }
+  .newsletterEditionSelection { grid-row:auto; }
+  .newsletterEditionPreview { grid-column:auto; }
   .publicationPreparationFacts > div { border-right: 0; border-bottom: 1px solid var(--border); }
   .publicationPreparationFacts > div:last-child { border-bottom: 0; }
 

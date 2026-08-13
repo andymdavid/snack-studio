@@ -218,7 +218,7 @@ function episodeTabUrl(tab = state.activeEpisodeTab, changes = {}) {
   const suffix = tab === 'overview' ? '' : `/${tab}`;
   const url = new URL(`/episodes/${encodeURIComponent(episodeId)}${suffix}`, window.location.origin);
   const current = new URLSearchParams(window.location.search);
-  for (const key of ['run','snack','mode','asset','contributor','gate','detail']) if (current.has(key)) url.searchParams.set(key, current.get(key));
+  for (const key of ['run','snack','mode','asset','contributor','gate','detail','channel']) if (current.has(key)) url.searchParams.set(key, current.get(key));
   for (const [key, value] of Object.entries(changes)) value == null || value === '' ? url.searchParams.delete(key) : url.searchParams.set(key, String(value));
   return `${url.pathname}${url.search}`;
 }
@@ -1135,6 +1135,21 @@ function renderPublicationPreparation(episode, candidates, options = {}) {
   header.append(copy);
   section.appendChild(header);
 
+  if (!assetsOnly) {
+    const channel = new URLSearchParams(window.location.search).get('channel') === 'newsletter' ? 'newsletter' : 'website';
+    const channels = document.createElement('nav'); channels.className = 'sectionTabs publicationChannelTabs'; channels.setAttribute('aria-label', 'Publication destinations');
+    for (const [value, label] of [['website', 'Website'], ['newsletter', 'Newsletter']]) {
+      const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.classList.toggle('active', channel === value);
+      button.addEventListener('click', () => navigate(episodeTabUrl('publication', { channel: value, gate: null })));
+      channels.appendChild(button);
+    }
+    section.appendChild(channels);
+    if (channel === 'newsletter') {
+      section.appendChild(renderNewsletterEdition(candidates));
+      return section;
+    }
+  }
+
   const preparation = state.publicationPreparation;
   if (!preparation) {
     const empty = document.createElement("p");
@@ -1172,8 +1187,7 @@ function renderPublicationPreparation(episode, candidates, options = {}) {
   }
   if (!assetsOnly) {
     const transcriptWorkflow = renderPublicTranscriptWorkflow(); transcriptWorkflow.dataset.publicationGate = 'transcript';
-    const newsletterWorkflow = renderNewsletterWorkflow(candidates); newsletterWorkflow.dataset.publicationGate = 'newsletter';
-    section.append(transcriptWorkflow, newsletterWorkflow);
+    section.append(transcriptWorkflow);
   }
   if (preparation.themes?.length) {
     const themeList = document.createElement('div'); themeList.className = 'episodeThemeList';
@@ -1317,7 +1331,7 @@ function publicationBlockerDestination(blocker) {
   const base = `/episodes/${encodeURIComponent(episodeId)}`;
   if (['episode-not-approved'].includes(blocker.code) || blocker.code?.startsWith('approved-')) return { label: 'Open Snacks', path: `${base}/snacks` };
   if (blocker.code === 'public-transcript-missing') return { label: 'Review transcript', path: `${base}/publication?gate=transcript` };
-  if (blocker.code === 'newsletter-selection-incomplete') return { label: 'Choose Snacks', path: `${base}/publication?gate=newsletter` };
+  if (blocker.code === 'newsletter-selection-incomplete') return { label: 'Choose Snacks', path: `${base}/publication?channel=newsletter` };
   if (blocker.code === 'portrait-missing' && blocker.sourceId) return { label: 'Open contributor', path: `${base}/assets?contributor=${encodeURIComponent(blocker.sourceId)}` };
   if (blocker.code === 'snack-thumbnail-missing' && blocker.sourceId) {
     const job = state.publicationPreparation?.jobs?.find((item) => item.assetKind === 'snack' && item.snackCandidateId === blocker.sourceId);
@@ -2667,6 +2681,67 @@ function renderNewsletterWorkflow(candidates) {
     panel.appendChild(order);
   }
   return panel;
+}
+
+function newsletterField(labelText, name, value, options = {}) {
+  const label = document.createElement('label'); label.className = 'newsletterEditionField';
+  const text = document.createElement('span'); text.textContent = labelText;
+  const input = options.multiline ? document.createElement('textarea') : document.createElement('input');
+  input.name = name; input.value = value || ''; input.disabled = !state.me?.access?.edit;
+  if (options.multiline) input.rows = options.rows || 5;
+  if (options.placeholder) input.placeholder = options.placeholder;
+  label.append(text, input); return label;
+}
+
+function renderNewsletterEdition(candidates) {
+  const wrapper = document.createElement('div'); wrapper.className = 'newsletterEditionWorkspace';
+  const draft = state.curation.newsletterDraft || {};
+  const selection = renderNewsletterWorkflow(candidates); selection.classList.add('newsletterEditionSelection');
+  const composer = document.createElement('form'); composer.className = 'curationPanel newsletterEditionComposer';
+  const composerHeader = document.createElement('div'); composerHeader.className = 'curationPanelHeader';
+  const heading = document.createElement('h3'); heading.textContent = 'Edition copy';
+  const save = document.createElement('button'); save.type = 'submit'; save.className = 'btn btnPrimary'; save.textContent = 'Save edition'; save.disabled = !state.me?.access?.edit;
+  composerHeader.append(heading, save);
+  const help = document.createElement('p'); help.textContent = 'Write the short editorial frame around the selected Snacks. Future editions should use a concise introduction.';
+  composer.append(
+    composerHeader, help,
+    newsletterField('Internal edition title', 'workingTitle', draft.workingTitle, { placeholder: `Intelligence Snacks ${state.activeEpisode?.episodeNumber || ''}` }),
+    newsletterField('Email subject line', 'subjectLine', draft.subjectLine),
+    newsletterField('Preview text', 'previewText', draft.previewText),
+    newsletterField('Introduction', 'introMarkdown', draft.introMarkdown, { multiline: true, rows: 7 }),
+    newsletterField('Closing', 'closingMarkdown', draft.closingMarkdown, { multiline: true, rows: 4, placeholder: 'Optional' }),
+  );
+  composer.addEventListener('submit', async (event) => {
+    event.preventDefault(); const clear = setButtonBusy(save, 'Saving…');
+    try {
+      const data = Object.fromEntries(new FormData(composer));
+      state.curation.newsletterDraft = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/newsletter-draft`, { method: 'PATCH', body: JSON.stringify(data) })).newsletterDraft;
+      renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates); setStudioStatus('Newsletter edition saved');
+    } catch (error) { setStudioStatus(error.message); } finally { clear(); }
+  });
+
+  const preview = document.createElement('section'); preview.className = 'newsletterEditionPreview';
+  const previewHeader = document.createElement('div'); previewHeader.className = 'curationPanelHeader';
+  const previewTitle = document.createElement('h3'); previewTitle.textContent = 'Newsletter preview';
+  const status = document.createElement('span'); status.className = `statusPill ${draft.status === 'ready' ? 'statusSuccess' : 'statusPending'}`; status.textContent = draft.status === 'ready' ? 'Reviewed' : 'Draft';
+  previewHeader.append(previewTitle, status); preview.appendChild(previewHeader);
+  const subject = document.createElement('h2'); subject.textContent = draft.subjectLine || 'Subject line not set'; preview.appendChild(subject);
+  if (draft.previewText) { const preheader = document.createElement('p'); preheader.className = 'metadata'; preheader.textContent = draft.previewText; preview.appendChild(preheader); }
+  if (draft.introMarkdown) { const intro = document.createElement('div'); intro.className = 'newsletterMarkdown'; intro.textContent = draft.introMarkdown; preview.appendChild(intro); }
+  for (const item of state.curation.newsletterItems || []) {
+    const snack = document.createElement('article'); snack.className = 'newsletterPreviewSnack';
+    const title = document.createElement('h3'); title.textContent = item.title; const standfirst = document.createElement('strong'); standfirst.textContent = item.standfirst;
+    const body = document.createElement('div'); body.className = 'newsletterMarkdown'; body.textContent = item.bodyMarkdown; snack.append(title, standfirst, body); preview.appendChild(snack);
+  }
+  if (draft.closingMarkdown) { const closing = document.createElement('div'); closing.className = 'newsletterMarkdown'; closing.textContent = draft.closingMarkdown; preview.appendChild(closing); }
+  const actions = document.createElement('div'); actions.className = 'newsletterEditionActions';
+  const review = document.createElement('button'); review.type = 'button'; review.className = 'btn btnSecondary'; review.textContent = draft.status === 'ready' ? 'Return to draft' : 'Mark reviewed'; review.disabled = !state.me?.access?.edit;
+  review.addEventListener('click', async () => { const clear = setButtonBusy(review, 'Saving…'); try { state.curation.newsletterDraft = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/newsletter-draft`, { method: 'PATCH', body: JSON.stringify({ status: draft.status === 'ready' ? 'draft' : 'ready' }) })).newsletterDraft; renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates); } catch (error) { setStudioStatus(error.message); } finally { clear(); } });
+  const beehiiv = document.createElement('button'); beehiiv.type = 'button'; beehiiv.className = 'btn btnPrimary'; beehiiv.textContent = draft.beehiivPostId ? 'Update Beehiiv draft' : 'Create Beehiiv draft'; beehiiv.disabled = true; beehiiv.title = 'Connect Beehiiv before synchronising this edition';
+  actions.append(review, beehiiv);
+  if (draft.beehiivPreviewUrl) { const open = document.createElement('a'); open.className = 'btn btnSecondary'; open.href = draft.beehiivPreviewUrl; open.target = '_blank'; open.rel = 'noreferrer'; open.textContent = 'Open Beehiiv preview'; actions.appendChild(open); }
+  preview.appendChild(actions);
+  wrapper.append(selection, composer, preview); return wrapper;
 }
 
 async function startPublicTranscriptCleanup() {

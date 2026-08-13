@@ -6,7 +6,13 @@ export const RELATIONSHIP_TYPES = ["overlaps", "develops", "contradicts", "revis
 export type RelationshipType = typeof RELATIONSHIP_TYPES[number];
 export type RelationshipState = "draft" | "approved" | "rejected";
 
-export type NewsletterItem = { candidateId: string; position: number; title: string; reviewDecision: string };
+export type NewsletterItem = { candidateId: string; position: number; title: string; standfirst: string; bodyMarkdown: string; reviewDecision: string };
+export type NewsletterDraft = {
+  id: string; episodeId: string; workingTitle: string; subjectLine: string; previewText: string;
+  introMarkdown: string; closingMarkdown: string; status: 'draft' | 'ready'; beehiivPostId: string | null;
+  beehiivPreviewUrl: string | null; beehiivSyncedAt: number | null; beehiivContentFingerprint: string | null;
+  beehiivFailureSummary: string | null; createdAt: number; updatedAt: number;
+};
 export type Relationship = {
   id: string; episodeId: string; sourceCandidateId: string; targetCandidateId: string;
   sourceTitle: string; targetTitle: string; relationshipType: RelationshipType;
@@ -27,13 +33,49 @@ function ensureNewsletter(episodeId: string) {
 export function listNewsletterItems(episodeId: string): NewsletterItem[] {
   const draft = ensureNewsletter(episodeId);
   const rows = db.query(`
-    SELECT ni.candidate_id, ni.position, sc.review_decision, sr.public_title
+    SELECT ni.candidate_id, ni.position, sc.review_decision, sr.public_title, sr.standfirst, sr.body_markdown
     FROM newsletter_items ni
     JOIN snack_candidates sc ON sc.id = ni.candidate_id
     JOIN snack_revisions sr ON sr.id = sc.current_revision_id
     WHERE ni.newsletter_id = ?1 ORDER BY ni.position ASC
   `).all(String(draft.id)) as Record<string, unknown>[];
-  return rows.map((row) => ({ candidateId: String(row.candidate_id), position: Number(row.position), title: String(row.public_title), reviewDecision: String(row.review_decision) }));
+  return rows.map((row) => ({ candidateId: String(row.candidate_id), position: Number(row.position), title: String(row.public_title), standfirst: String(row.standfirst), bodyMarkdown: String(row.body_markdown), reviewDecision: String(row.review_decision) }));
+}
+
+function mapNewsletterDraft(row: Record<string, unknown>): NewsletterDraft {
+  return {
+    id: String(row.id), episodeId: String(row.episode_id), workingTitle: String(row.working_title || ''),
+    subjectLine: String(row.subject_line || ''), previewText: String(row.preview_text || ''),
+    introMarkdown: String(row.intro_markdown || ''), closingMarkdown: String(row.closing_markdown || ''),
+    status: String(row.status) as NewsletterDraft['status'], beehiivPostId: row.beehiiv_post_id == null ? null : String(row.beehiiv_post_id),
+    beehiivPreviewUrl: row.beehiiv_preview_url == null ? null : String(row.beehiiv_preview_url),
+    beehiivSyncedAt: row.beehiiv_synced_at == null ? null : Number(row.beehiiv_synced_at),
+    beehiivContentFingerprint: row.beehiiv_content_fingerprint == null ? null : String(row.beehiiv_content_fingerprint),
+    beehiivFailureSummary: row.beehiiv_failure_summary == null ? null : String(row.beehiiv_failure_summary),
+    createdAt: Number(row.created_at), updatedAt: Number(row.updated_at),
+  };
+}
+
+export function getNewsletterDraft(episodeId: string): NewsletterDraft {
+  return mapNewsletterDraft(ensureNewsletter(episodeId));
+}
+
+export function updateNewsletterDraft(episodeId: string, input: Partial<Pick<NewsletterDraft, 'workingTitle' | 'subjectLine' | 'previewText' | 'introMarkdown' | 'closingMarkdown' | 'status'>>, actorPubkey: string): NewsletterDraft {
+  const draft = getNewsletterDraft(episodeId);
+  const status = input.status === 'ready' ? 'ready' : input.status === 'draft' ? 'draft' : draft.status;
+  const values = {
+    workingTitle: input.workingTitle?.trim() ?? draft.workingTitle,
+    subjectLine: input.subjectLine?.trim() ?? draft.subjectLine,
+    previewText: input.previewText?.trim() ?? draft.previewText,
+    introMarkdown: input.introMarkdown?.trim() ?? draft.introMarkdown,
+    closingMarkdown: input.closingMarkdown?.trim() ?? draft.closingMarkdown,
+  };
+  if (status === 'ready' && (!values.subjectLine || !values.introMarkdown || listNewsletterItems(episodeId).length < 3)) throw new Error('A subject line, introduction and at least three Snacks are required before review is complete');
+  const now = Date.now();
+  db.query(`UPDATE newsletter_drafts SET working_title=?1,subject_line=?2,preview_text=?3,intro_markdown=?4,closing_markdown=?5,status=?6,updated_at=?7 WHERE id=?8`)
+    .run(values.workingTitle, values.subjectLine, values.previewText, values.introMarkdown, values.closingMarkdown, status, now, draft.id);
+  recordAuditEvent({ actorPubkey, action: 'newsletter.draft.updated', entityType: 'episode', entityId: episodeId, detail: { newsletterId: draft.id, status } });
+  return getNewsletterDraft(episodeId);
 }
 
 export function setNewsletterItems(episodeId: string, candidateIds: string[], actorPubkey: string): NewsletterItem[] {
@@ -171,5 +213,5 @@ export function validateEpisodePackage(episodeId: string) {
 }
 
 export function getCuration(episodeId: string) {
-  return { newsletterItems: listNewsletterItems(episodeId), relationships: listRelationships(episodeId), validation: validateEpisodePackage(episodeId) };
+  return { newsletterDraft: getNewsletterDraft(episodeId), newsletterItems: listNewsletterItems(episodeId), relationships: listRelationships(episodeId), validation: validateEpisodePackage(episodeId) };
 }

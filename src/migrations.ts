@@ -1216,6 +1216,26 @@ const migrations: Migration[] = [
       for (const [specific] of mappings) db.query("DELETE FROM themes WHERE id=?1 AND source='studio'").run(specific);
     },
   },
+  {
+    id: '033_newsletter_edition_workflow',
+    description: 'Extend curated newsletter selections into provider-ready editions',
+    up(db) {
+      const columns: Array<[string, string]> = [
+        ['subject_line', 'TEXT'],
+        ['preview_text', 'TEXT'],
+        ['intro_markdown', 'TEXT'],
+        ['closing_markdown', 'TEXT'],
+        ['beehiiv_post_id', 'TEXT'],
+        ['beehiiv_preview_url', 'TEXT'],
+        ['beehiiv_synced_at', 'INTEGER'],
+        ['beehiiv_content_fingerprint', 'TEXT'],
+        ['beehiiv_failure_summary', 'TEXT'],
+      ];
+      for (const [column, definition] of columns) {
+        if (!hasColumn(db, 'newsletter_drafts', column)) db.exec(`ALTER TABLE newsletter_drafts ADD COLUMN ${column} ${definition}`);
+      }
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

@@ -37,7 +37,7 @@ import { validateEpisodeInput } from "./episode-input.ts";
 import { validateCandidateRevision, validateReviewDecision } from "./candidate-input.ts";
 import { activateCandidateRevision, approveCandidateBatch, createCandidateRevision, generateFixtureCandidates, getCandidate, listCandidates, setApprovedCandidateOrder, updateCandidateDecision, validateApprovedCandidateBatch } from "./candidates.ts";
 import { buildCandidateGenerations } from "./candidate-generations.ts";
-import { createFixtureRelationshipSuggestions, createRelationship, deleteRelationship, getCuration, listAllRelationships, listGraphCandidates, RELATIONSHIP_TYPES, setNewsletterItems, updateRelationshipState } from "./curation.ts";
+import { createFixtureRelationshipSuggestions, createRelationship, deleteRelationship, getCuration, listAllRelationships, listGraphCandidates, RELATIONSHIP_TYPES, setNewsletterItems, updateNewsletterDraft, updateRelationshipState } from "./curation.ts";
 import { normalizeTranscriptText, validateEpisodeMetadata, validateTranscriptUpload } from "./transcript-input.ts";
 import {
   activateTranscriptRevision,
@@ -1136,6 +1136,28 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     if (!Array.isArray(body.candidateIds)) return json({ error: "candidateIds must be an array" }, 400);
     try {
       return json({ newsletterItems: setNewsletterItems(episodeId, body.candidateIds.map(String), session.pubkey), validation: getCuration(episodeId).validation });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+  }
+
+  const newsletterDraftMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/newsletter-draft$/);
+  if (newsletterDraftMatch && req.method === 'PATCH') {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: 'edit access required' }, 403);
+    const episodeId = decodeURIComponent(newsletterDraftMatch[1]!);
+    if (!getEpisode(episodeId)) return json({ error: 'episode not found' }, 404);
+    const body = await readJson(req);
+    try {
+      const draft = updateNewsletterDraft(episodeId, {
+        workingTitle: typeof body.workingTitle === 'string' ? body.workingTitle : undefined,
+        subjectLine: typeof body.subjectLine === 'string' ? body.subjectLine : undefined,
+        previewText: typeof body.previewText === 'string' ? body.previewText : undefined,
+        introMarkdown: typeof body.introMarkdown === 'string' ? body.introMarkdown : undefined,
+        closingMarkdown: typeof body.closingMarkdown === 'string' ? body.closingMarkdown : undefined,
+        status: body.status === 'ready' || body.status === 'draft' ? body.status : undefined,
+      }, session.pubkey);
+      return json({ newsletterDraft: draft });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 400);
     }
