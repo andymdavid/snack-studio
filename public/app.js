@@ -585,7 +585,18 @@ function renderContributorWorkspace(contributor) {
   if (contributor.portraitPath) { const img = document.createElement('img'); img.src = contributor.portraitPath; img.alt = `${contributor.name} approved portrait`; portrait.appendChild(img); } else portrait.textContent = contributor.name.slice(0, 1).toUpperCase();
   const identity = document.createElement('div'); const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = contributor.source === 'website' ? 'Website contributor' : 'Studio contributor'; const title = document.createElement('h1'); title.textContent = contributor.name; const role = document.createElement('p'); role.textContent = contributor.role; identity.append(eyebrow, title, role);
   const status = document.createElement('span'); status.className = `statusPill ${contributor.portraitStatus === 'approved' ? 'statusSuccess' : 'statusPending'}`; status.textContent = contributor.portraitStatus === 'approved' ? 'Portrait approved' : formatEpisodeStatus(contributor.portraitStatus);
-  header.append(portrait, identity, status); workspace.appendChild(header);
+  const headerActions = document.createElement('div'); headerActions.className = 'contributorWorkspaceHeaderActions'; headerActions.appendChild(status);
+  if (contributor.portraitPath) {
+    const removePortrait = document.createElement('button'); removePortrait.type = 'button'; removePortrait.className = 'btn btnSecondary'; removePortrait.textContent = 'Remove portrait'; removePortrait.disabled = !state.me?.access?.edit;
+    removePortrait.addEventListener('click', async () => {
+      if (!window.confirm(`Remove ${contributor.name}'s approved portrait? Thumbnail approvals using this portrait will return to draft until they are regenerated.`)) return;
+      const clear = setButtonBusy(removePortrait, 'Removing…');
+      try { state.activeContributor = (await api(`/api/contributors/${encodeURIComponent(contributor.id)}/portrait`, { method: 'DELETE' })).contributor; renderContributorWorkspace(state.activeContributor); setStudioStatus('Portrait removed · ready to regenerate'); }
+      catch (error) { setStudioStatus(error.message); clear(); }
+    });
+    headerActions.appendChild(removePortrait);
+  }
+  header.append(portrait, identity, headerActions); workspace.appendChild(header);
 
   const form = document.createElement('form'); form.className = 'contributorEditForm';
   const formHeader = document.createElement('div'); formHeader.className = 'workspaceSectionHeader'; formHeader.innerHTML = '<div><h2>Public profile</h2><p>These details and identity assets persist across every episode.</p></div>';
@@ -1563,7 +1574,7 @@ function renderContributorPortraitWorkflow(item) {
   const copy = document.createElement('div');
   const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Contributor portrait';
   const title = document.createElement('h3'); title.textContent = item.name;
-  const detail = document.createElement('p'); detail.textContent = 'Real photo for identity · Pete’s approved portrait for voxel style.';
+  const detail = document.createElement('p'); detail.textContent = 'Real photo for identity · Pete and Andy jointly define the coarse voxel style.';
   copy.append(eyebrow, title, detail);
   const generate = document.createElement('button');
   generate.type = 'button'; generate.className = 'btn btnPrimary';
@@ -1575,12 +1586,13 @@ function renderContributorPortraitWorkflow(item) {
   actions.append(profile, generate); heading.append(copy, actions); panel.appendChild(heading);
   const gallery = document.createElement('div'); gallery.className = 'contributorPortraitGallery';
   panel.appendChild(gallery);
-  queueMicrotask(() => loadContributorPortraitJobs(item.contributorId, gallery));
+  queueMicrotask(() => loadContributorPortraitJobs(item.contributorId, gallery, item.portraitStatus));
   return panel;
 }
 
-async function loadContributorPortraitJobs(contributorId, gallery) {
+async function loadContributorPortraitJobs(contributorId, gallery, portraitStatus = '') {
   try {
+    if (portraitStatus === 'ready-to-generate') { gallery.textContent = 'The previous approved portrait is no longer active. Generate a new coarse-voxel reconstruction from the retained identity photo.'; return; }
     const payload = await api(`/api/contributors/${encodeURIComponent(contributorId)}/portrait-jobs`);
     state.contributorPortraitJobs[contributorId] = payload.jobs || [];
     const job = payload.jobs?.[0];

@@ -2190,6 +2190,7 @@ div.publicationPreparationBlocker { display: flex; align-items: center; justify-
 .contributorWorkspace { display:grid; gap:24px; }
 .contributorWorkspaceHeader { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:18px; padding-bottom:22px; border-bottom:1px solid var(--border); }
 .contributorWorkspaceHeader h1,.contributorWorkspaceHeader p { margin:0; }
+.contributorWorkspaceHeaderActions { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
 .contributorWorkspacePortrait { width:112px; height:112px; font-size:var(--text-2xl); }
 .contributorEditForm { display:grid; gap:18px; padding:18px; border:1px solid var(--border); border-radius:var(--radius-card); background:var(--surface-1); }
 .contributorIdentitySource { display:grid; grid-template-columns:1fr 120px minmax(220px,.5fr); align-items:center; gap:18px; padding-top:16px; border-top:1px solid var(--border); }

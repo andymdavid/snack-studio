@@ -103,7 +103,7 @@ import { getLatestWebsiteValidation, stageAndValidateWebsitePackage } from './we
 import { getLatestGitPublication, publishValidatedPackageToMain } from './git-publication.ts';
 import { deployPublishedCommit, getLatestGitDeployment } from './git-deployment.ts';
 import { getEpisodeWorkflow, getEpisodeWorkProjection, listEpisodeWorkflows, listEpisodeWorkProjections, listWorkQueue, type WorkQueueKind } from './episode-workflow.ts';
-import { createContributor, getContributor, listContributors, photoMediaType, publicContributor, updateContributor } from "./contributors.ts";
+import { createContributor, getContributor, listContributors, photoMediaType, publicContributor, removeContributorPortrait, updateContributor } from "./contributors.ts";
 import { listDiagnostics } from './diagnostics.ts';
 import { validateContributorPhoto, validateContributorProfile } from "./contributor-input.ts";
 import { approvePortraitCandidate, applyPortraitResult, createPortraitJob, getPortraitCandidate, listPortraitJobs, markPortraitJobStarted, verifyPortraitTrigger } from "./contributor-portraits.ts";
@@ -488,6 +488,13 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     } catch {
       return json({ error: "reference photo not found" }, 404);
     }
+  }
+
+  const contributorPortraitMatch = pathname.match(/^\/api\/contributors\/([^/]+)\/portrait$/);
+  if (contributorPortraitMatch && req.method === 'DELETE') {
+    const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
+    try { return json({ contributor: publicContributor(removeContributorPortrait(decodeURIComponent(contributorPortraitMatch[1]!), session.pubkey)) }); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 400); }
   }
 
   const contributorPortraitJobsMatch = pathname.match(/^\/api\/contributors\/([^/]+)\/portrait-jobs$/);

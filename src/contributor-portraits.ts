@@ -8,8 +8,12 @@ import { getContributor } from './contributors.ts';
 import { getCurrentAutopilotTarget } from './db.ts';
 import { recordAuditEvent } from './episodes.ts';
 
-const PROMPT_VERSION = 'v1-contributor-voxel-portrait';
-const STYLE_REFERENCE = resolve('public/images/contributors/pete-winn-voxel.webp');
+const PROMPT_VERSION = 'v2-contributor-voxel-reconstruction';
+const STYLE_REFERENCES = [
+  resolve('public/images/contributors/pete-winn-voxel.webp'),
+  resolve('public/images/contributors/andy-david-voxel.webp'),
+];
+const PIPELINE_VERSION = 2;
 
 function tokenHash(value: string): string {
   return bytesToHex(sha256(new TextEncoder().encode(value)));
@@ -53,7 +57,7 @@ export function listPortraitJobs(contributorId: string): ContributorPortraitJob[
 export function createPortraitJob(contributorId: string, actorPubkey: string, publicOrigin: string) {
   const contributor = getContributor(contributorId);
   if (!contributor?.referencePhotoPath || !existsSync(contributor.referencePhotoPath)) throw new Error('Contributor identity photo is required');
-  if (!existsSync(STYLE_REFERENCE)) throw new Error('Canonical portrait style reference is unavailable');
+  if (STYLE_REFERENCES.some((path) => !existsSync(path))) throw new Error('Canonical portrait style references are unavailable');
   const id = crypto.randomUUID();
   const token = `${crypto.randomUUID().replaceAll('-', '')}${crypto.randomUUID().replaceAll('-', '')}`;
   const now = Date.now();
@@ -70,13 +74,13 @@ export function createPortraitJob(contributorId: string, actorPubkey: string, pu
   const input = {
     source: 'snack-studio', operation: 'contributor-portrait', jobId: id, contributorId: contributor.id,
     contributorName: contributor.name, identityReferencePath: resolve(contributor.referencePhotoPath),
-    styleReferencePath: STYLE_REFERENCE, outputDirectory, promptVersion: PROMPT_VERSION,
+    styleReferencePaths: STYLE_REFERENCES, outputDirectory, promptVersion: PROMPT_VERSION,
     webhook: { url: `${origin}/api/contributor-portrait-webhooks/${id}`, token, authHeader: 'x-snack-studio-token' },
     agent: 'codex',
   };
   return {
     job: listPortraitJobs(contributor.id)[0],
-    triggerRequest: { url: new URL('/api/pipelines/triggers/http/snack-studio-contributor-portrait.v1', target.url).toString(), method: 'POST', body: { input } },
+    triggerRequest: { url: new URL(`/api/pipelines/triggers/http/snack-studio-contributor-portrait.v${PIPELINE_VERSION}`, target.url).toString(), method: 'POST', body: { input } },
   };
 }
 
@@ -101,7 +105,7 @@ export function verifyPortraitTrigger(jobId: string, trigger: Record<string, unk
   let url: URL; try { url = new URL(String(trigger.url || '')); } catch { return false; }
   const target = getCurrentAutopilotTarget();
   return Boolean(row && String(trigger.method) === 'POST' && input.jobId === jobId
-    && url.origin === new URL(target.url).origin && url.pathname.endsWith('/snack-studio-contributor-portrait.v1')
+    && url.origin === new URL(target.url).origin && url.pathname.endsWith(`/snack-studio-contributor-portrait.v${PIPELINE_VERSION}`)
     && tokenHash(String(webhook.token || '')) === row.callback_token_hash);
 }
 

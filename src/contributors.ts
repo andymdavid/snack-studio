@@ -88,6 +88,22 @@ export async function updateContributor(id: string, input: ContributorProfileInp
   return getContributor(id)!;
 }
 
+export function removeContributorPortrait(id: string, actorPubkey: string): Contributor {
+  const existing = getContributor(id);
+  if (!existing) throw new Error('Contributor not found');
+  if (!existing.referencePhotoPath) throw new Error('An identity source photo is required before regenerating a portrait');
+  if (existing.portraitStatus === 'generating') throw new Error('Wait for the active portrait generation to finish');
+  const now = Date.now();
+  db.transaction(() => {
+    db.query("UPDATE contributors SET portrait_path=NULL, portrait_status='ready-to-generate', updated_at=?1 WHERE id=?2").run(now, id);
+    db.query(`UPDATE thumbnail_jobs SET status='draft', selected_candidate_id=NULL, failure_summary=NULL, updated_at=?1
+      WHERE EXISTS (SELECT 1 FROM json_each(thumbnail_jobs.contributor_ids_json) WHERE value=?2)`).run(now, id);
+    recordAuditEvent({ actorPubkey, action: 'contributor.portrait.removed', entityType: 'contributor', entityId: id,
+      detail: { previousPortraitPath: existing.portraitPath, dependentThumbnailsInvalidated: true } });
+  })();
+  return getContributor(id)!;
+}
+
 export function publicContributor(contributor: Contributor) {
   return {
     ...contributor,
