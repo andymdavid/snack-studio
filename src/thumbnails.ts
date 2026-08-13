@@ -271,7 +271,7 @@ export function finishEpisodeThumbnail(row: Record<string, unknown>, destination
   const accent = words.slice(split).join(' ') || words.slice(0, split).join(' ');
   const contributorIds = parseStringArray(row.contributor_ids_json);
   const guests = contributorIds.map(getContributor).filter((item) => item && !['pete-winn','andy-david'].includes(item.id));
-  const guestLine = guests.length ? `FEAT. ${guests.map((item) => item!.name).join(' & ').toUpperCase()}` : '';
+  const guestLine = guests.length ? `Feat. ${guests.map((item) => item!.name).join(' & ')}` : '';
   const displayFont = resolve('public/fonts/Anton-Regular.ttf');
   const pixelFont = resolve('public/fonts/Jersey15-Regular.ttf');
   const temporary = mkdtempSync('/tmp/snack-studio-episode-');
@@ -294,20 +294,20 @@ export function finishEpisodeThumbnail(row: Record<string, unknown>, destination
     return { path, ...dimensions };
   };
   try {
-    const leadLayer = renderLabel('lead', lead, displayFont, 190, '#242424', 990);
-    const accentLayer = renderLabel('accent', accent, displayFont, 190, '#f2f2f2', 990);
-    const guestLayer = guestLine ? renderLabel('guest', guestLine, displayFont, 78, '#242424', 740) : null;
-    const brandLayer = renderLabel('brand', 'INTELLIGENCE SNACKS', pixelFont, 58, '#f2f2f2', 460);
-    const episodeLayer = renderLabel('episode', `- EP ${episode.episodeNumber || ''}`, pixelFont, 58, '#ff751f', 170);
-    const accentX = 62; const accentY = 420; const accentPadX = 24; const accentPadY = 24;
-    const brandX = 62; const brandY = 830; const brandPadX = 18; const brandPadY = 10;
+    const leadLayer = renderLabel('lead', lead, displayFont, 255, '#242424', 810);
+    const accentLayer = renderLabel('accent', accent, displayFont, 235, '#f2f2f2', 620);
+    const guestLayer = guestLine ? renderLabel('guest', guestLine, displayFont, 105, '#242424', 740) : null;
+    const brandLayer = renderLabel('brand', 'INTELLIGENCE SNACKS', pixelFont, 68, '#f2f2f2', 540);
+    const episodeLayer = renderLabel('episode', `- EP ${episode.episodeNumber || ''}`, pixelFont, 68, '#ff751f', 200);
+    const accentX = 54; const accentY = 460; const accentPadX = 34; const accentPadY = 30;
+    const brandX = 45; const brandY = 64; const brandPadX = 18; const brandPadY = 10;
     const args = ['magick', String(row.source_uri), '-resize', '1672x941^', '-gravity', 'center', '-extent', '1672x941',
       '-gravity', 'northwest',
       '(', '-size', '1672x941', 'xc:none', '-fill', 'rgba(36,36,36,.22)', '-draw', `roundrectangle ${accentX + 3},${accentY + 7} ${accentX + accentLayer.width + accentPadX * 2 + 3},${accentY + accentLayer.height + accentPadY * 2 + 7} 3,3`, '-blur', '0x15', ')', '-composite',
       '-fill', '#ff751f', '-draw', `roundrectangle ${accentX},${accentY} ${accentX + accentLayer.width + accentPadX * 2},${accentY + accentLayer.height + accentPadY * 2} 3,3`,
-      '(', leadLayer.path, ')', '-gravity', 'northwest', '-geometry', '+62+232', '-composite',
+      '(', leadLayer.path, ')', '-gravity', 'northwest', '-geometry', '+52+205', '-composite',
       '(', accentLayer.path, ')', '-gravity', 'northwest', '-geometry', `+${accentX + accentPadX}+${accentY + accentPadY}`, '-composite'];
-    if (guestLayer) args.push('(', guestLayer.path, ')', '-gravity', 'northwest', '-geometry', '+64+716', '-composite');
+    if (guestLayer) args.push('(', guestLayer.path, ')', '-gravity', 'northwest', '-geometry', '+54+770', '-composite');
     const brandGap = 10; const brandWidth = brandLayer.width + episodeLayer.width + brandGap;
     args.push('-fill', '#242424', '-draw', `roundrectangle ${brandX},${brandY} ${brandX + brandWidth + brandPadX * 2},${brandY + Math.max(brandLayer.height, episodeLayer.height) + brandPadY * 2} 12,12`,
       '(', brandLayer.path, ')', '-gravity', 'northwest', '-geometry', `+${brandX + brandPadX}+${brandY + brandPadY}`, '-composite',
