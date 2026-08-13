@@ -213,6 +213,23 @@ function navigate(path) {
   void renderRoute();
 }
 
+function episodeTabUrl(tab = state.activeEpisodeTab, changes = {}) {
+  const episodeId = state.activeEpisode?.id; if (!episodeId) return '/episodes';
+  const suffix = tab === 'overview' ? '' : `/${tab}`;
+  const url = new URL(`/episodes/${encodeURIComponent(episodeId)}${suffix}`, window.location.origin);
+  const current = new URLSearchParams(window.location.search);
+  for (const key of ['run','snack','mode','asset','contributor','gate','detail']) if (current.has(key)) url.searchParams.set(key, current.get(key));
+  for (const [key, value] of Object.entries(changes)) value == null || value === '' ? url.searchParams.delete(key) : url.searchParams.set(key, String(value));
+  return `${url.pathname}${url.search}`;
+}
+
+function replaceEpisodeTabState(changes) {
+  const path = episodeTabUrl(state.activeEpisodeTab, changes); history.replaceState({}, '', path); state.route = appRoute();
+}
+
+function pushEpisodeTabState(changes) { navigate(episodeTabUrl(state.activeEpisodeTab, changes)); }
+function pushEpisodeTabHistory(changes) { const path = episodeTabUrl(state.activeEpisodeTab, changes); history.pushState({}, '', path); state.route = appRoute(); }
+
 function showOnly(id) {
   for (const sectionId of ["login", "home", "actPage", "shell"]) {
     $(sectionId).classList.toggle("hidden", sectionId !== id);
@@ -691,6 +708,7 @@ function renderEpisodes() {
 }
 
 async function loadEpisode(id, options = {}) {
+  document.querySelector('.candidateEditorDialog')?.remove();
   state.activeEpisodeTab = options.tab || (state.activeEpisode?.id === id ? state.activeEpisodeTab : 'overview');
   state.workspaceOrigin = state.activeEpisodeTab === 'snacks' ? '/review' : state.activeEpisodeTab === 'assets' ? '/assets' : state.activeEpisodeTab === 'publication' ? '/publications' : '/';
   $('episodesBackButton').textContent = state.activeEpisodeTab === 'snacks' ? '← Snack Review' : state.activeEpisodeTab === 'assets' ? '← Asset Review' : state.activeEpisodeTab === 'publication' ? '← Publications' : '← All episodes';
@@ -718,6 +736,12 @@ async function loadEpisode(id, options = {}) {
     state.candidateGenerations = candidateGenerations(state.candidates, candidatePayload.generations);
     state.approvedBatch = candidatePayload.approvedBatch || { ready: false, checks: [], candidateIds: [] };
     state.regenerationProposals = candidatePayload.regenerationProposals || {};
+    if (state.activeEpisodeTab === 'snacks') {
+      const query = new URLSearchParams(window.location.search);
+      const requestedRun = query.get('run'); const requestedSnack = query.get('snack');
+      state.activeGenerationId = requestedRun === 'approved' || state.candidateGenerations.some((item) => item.id === requestedRun) ? requestedRun : state.candidateGenerations.at(-1)?.id || '';
+      state.activeCandidateId = state.candidates.some((item) => item.id === requestedSnack) ? requestedSnack : '';
+    }
     if (!hasCandidateGeneration(state.activeGenerationId)) {
       state.activeGenerationId = state.candidateGenerations.at(-1)?.id || "";
       state.activeCandidateId = "";
@@ -2118,6 +2142,7 @@ function renderCandidateSection(episode, candidates) {
   generationSelect.addEventListener("change", () => {
     state.activeGenerationId = generationSelect.value;
     state.activeCandidateId = "";
+    replaceEpisodeTabState({ run: state.activeGenerationId, snack: null, mode: null });
     renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
   });
   const generateAgain = document.createElement("button");
@@ -2170,6 +2195,7 @@ function renderCandidateSection(episode, candidates) {
     button.append(itemTitle, itemMeta);
     button.addEventListener("click", () => {
       state.activeCandidateId = candidate.id;
+      replaceEpisodeTabState({ run: activeGenerationId, snack: candidate.id, mode: 'read' });
       renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
     });
     list.appendChild(button);
@@ -2184,9 +2210,15 @@ function renderCandidateSection(episode, candidates) {
     section.appendChild(layout);
     return section;
   }
-  if (state.activeCandidateId !== active.id) state.activeCandidateId = active.id;
+  if (state.activeCandidateId !== active.id) {
+    state.activeCandidateId = active.id;
+    replaceEpisodeTabState({ run: activeGenerationId, snack: active.id, mode: 'read' });
+  }
   layout.appendChild(renderCandidateReader(active));
   section.appendChild(layout);
+  if (new URLSearchParams(window.location.search).get('mode') === 'edit') queueMicrotask(() => {
+    if (!document.querySelector('.candidateEditorDialog')) openCandidateEditor(active, { preserveUrl: true });
+  });
   return section;
 }
 
@@ -2231,7 +2263,8 @@ function renderCandidateReader(candidate) {
   return article;
 }
 
-function openCandidateEditor(candidate) {
+function openCandidateEditor(candidate, options = {}) {
+  if (!options.preserveUrl) pushEpisodeTabHistory({ run: state.activeGenerationId, snack: candidate.id, mode: 'edit' });
   const dialog = document.createElement("dialog");
   dialog.className = "candidateEditorDialog";
   const close = document.createElement("button");
@@ -2240,7 +2273,7 @@ function openCandidateEditor(candidate) {
   close.setAttribute("aria-label", "Close editor");
   close.textContent = "x";
   close.addEventListener("click", () => dialog.close());
-  dialog.addEventListener("close", () => dialog.remove());
+  dialog.addEventListener("close", () => { dialog.remove(); if (new URLSearchParams(window.location.search).get('mode') === 'edit') replaceEpisodeTabState({ mode: 'read' }); });
   dialog.append(close, renderCandidateEditor(candidate));
   document.body.appendChild(dialog);
   dialog.showModal();
