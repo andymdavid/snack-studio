@@ -64,6 +64,7 @@ const state = {
   contributorPortraitJobs: {},
   contributors: [],
   activeContributor: null,
+  contributorReturnTo: '/contributors',
   assets: [],
   assetFilter: 'all',
   diagnostics: [],
@@ -423,7 +424,7 @@ async function loadWorkflowRoute(kind) {
   if (match) {
     state.workspaceOrigin = kind === 'review' ? '/review' : kind === 'assets' ? '/assets' : '/publications';
     await loadEpisode(decodeURIComponent(match[1]), { stage: kind === 'review' ? 'output' : 'publication', origin: state.workspaceOrigin });
-    if (kind === 'publications' && state.activeEpisode?.status === 'approved' && !state.publicationPreparation?.jobs?.length) await preparePublication();
+    if (['assets','publications'].includes(kind) && state.activeEpisode?.status === 'approved' && !state.publicationPreparation?.jobs?.length) await preparePublication();
     return;
   }
   state.workspaceOrigin = kind === 'review' ? '/review' : kind === 'assets' ? '/assets' : '/publications';
@@ -462,6 +463,9 @@ function renderWorkflowQueue(kind, errorMessage = '') {
 async function loadContributorRoute() {
   const match = state.route.match(/^\/contributors\/([^/]+)$/);
   if (match) {
+    const requestedReturn = new URLSearchParams(window.location.search).get('returnTo');
+    state.contributorReturnTo = requestedReturn?.startsWith('/') ? requestedReturn : '/contributors';
+    $('contributorsBackButton').textContent = state.contributorReturnTo.startsWith('/assets/') ? '← Asset Review' : '← All contributors';
     showStudioPage('contributorPage', 'Snack Studio / Contributors / Profile'); setStudioStatus('Loading contributor…');
     try {
       state.activeContributor = (await api(`/api/contributors/${encodeURIComponent(decodeURIComponent(match[1]))}`)).contributor;
@@ -686,8 +690,8 @@ function renderEpisodes() {
 
 async function loadEpisode(id, options = {}) {
   state.workspaceOrigin = options.origin || '/';
-  $('episodesBackButton').textContent = state.workspaceOrigin === '/review' ? '← Review Queue' : state.workspaceOrigin === '/assets' ? '← Asset Review' : state.workspaceOrigin === '/publications' ? '← Publications' : '← All episodes';
-  showStudioPage("episodePage", `Snack Studio / ${state.workspaceOrigin === '/review' ? 'Review Queue' : state.workspaceOrigin === '/assets' ? 'Asset Review' : state.workspaceOrigin === '/publications' ? 'Publications' : 'Episodes'} / Workspace`);
+  $('episodesBackButton').textContent = state.workspaceOrigin === '/review' ? '← Review' : state.workspaceOrigin === '/assets' ? '← Asset Review' : state.workspaceOrigin === '/publications' ? '← Publications' : '← All episodes';
+  showStudioPage("episodePage", `Snack Studio / ${state.workspaceOrigin === '/review' ? 'Review' : state.workspaceOrigin === '/assets' ? 'Asset Review' : state.workspaceOrigin === '/publications' ? 'Publications' : 'Episodes'} / Workspace`);
   setStudioStatus("Loading workspace…");
   try {
     const [payload, candidatePayload, curationPayload, pipelinePayload, publicationPayload, packagePayload, validationPayload, gitPublicationPayload, gitDeploymentPayload, workflowPayload, publicTranscriptPayload] = await Promise.all([
@@ -788,11 +792,17 @@ function renderEpisodeWorkspace(episode, transcript, transcriptRevisions, auditE
   if (state.workspaceOrigin === '/') headerActions.appendChild(detailsButton);
   header.appendChild(headerActions);
 
-  const destinations = document.createElement('nav'); destinations.className = 'episodeWorkspaceDestinations'; destinations.setAttribute('aria-label', 'Episode destinations');
-  for (const [route, label] of [[`/episodes/${episode.id}`, 'Overview'], [`/review/${episode.id}`, 'Snack Review'], [`/assets/${episode.id}`, 'Asset Review'], [`/publications/${episode.id}`, 'Publication']]) {
-    const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btnSecondary'; button.textContent = label;
+  const destinations = document.createElement('nav'); destinations.className = 'sectionTabs episodeWorkspaceDestinations'; destinations.setAttribute('aria-label', 'Episode sections');
+  for (const [route, label, available, unavailableReason] of [
+    [`/episodes/${episode.id}`, 'Overview', true, ''],
+    [`/review/${episode.id}`, 'Snacks', Boolean(candidates.length), 'Snacks will appear after generation finishes.'],
+    [`/assets/${episode.id}`, 'Assets', ['approved','published'].includes(episode.status), 'Approve the final Snack set before preparing assets.'],
+    [`/publications/${episode.id}`, 'Publication', ['approved','published'].includes(episode.status), 'Approve the final Snack set before preparing publication.'],
+  ]) {
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = label;
     const destination = route.startsWith('/review') ? '/review' : route.startsWith('/assets') ? '/assets' : route.startsWith('/publications') ? '/publications' : '/';
     if (state.workspaceOrigin === destination) button.classList.add('active');
+    button.disabled = !available; if (!available) button.title = unavailableReason;
     button.addEventListener('click', () => navigate(route)); destinations.appendChild(button);
   }
 
@@ -1074,13 +1084,7 @@ function renderPublicationPreparation(episode, candidates, options = {}) {
   const help = document.createElement("p");
   help.textContent = assetsOnly ? "Everything requiring a visual or identity decision remains available here, including approved items and replacement controls." : "Snack Studio is assembling the website package while visual decisions remain in Asset Review.";
   copy.append(eyebrow, title, help);
-  const headerActions = document.createElement('div');
-  headerActions.className = 'publicationPreparationActions';
-  const reviewSnacks = document.createElement('button');
-  reviewSnacks.type = 'button'; reviewSnacks.className = 'btn btnSecondary'; reviewSnacks.textContent = 'Review Snacks';
-  reviewSnacks.addEventListener('click', () => navigate(`/review/${encodeURIComponent(episode.id)}`));
-  headerActions.appendChild(reviewSnacks);
-  header.append(copy, headerActions);
+  header.append(copy);
   section.appendChild(header);
 
   const preparation = state.publicationPreparation;
@@ -1480,7 +1484,7 @@ function renderContributorPortraitWorkflow(item) {
   generate.disabled = !state.me?.access?.edit || item.portraitStatus === 'generating';
   generate.addEventListener('click', () => generateContributorPortraits(item.contributorId, generate));
   const actions = document.createElement('div'); actions.className = 'contributorPortraitActions';
-  const profile = document.createElement('button'); profile.type = 'button'; profile.className = 'btn btnSecondary'; profile.textContent = 'Open profile'; profile.addEventListener('click', () => navigate(`/contributors/${encodeURIComponent(item.contributorId)}`));
+  const profile = document.createElement('button'); profile.type = 'button'; profile.className = 'btn btnSecondary'; profile.textContent = 'Open profile'; profile.addEventListener('click', () => navigate(`/contributors/${encodeURIComponent(item.contributorId)}?returnTo=${encodeURIComponent(`/assets/${state.activeEpisode.id}`)}`));
   actions.append(profile, generate); heading.append(copy, actions); panel.appendChild(heading);
   const gallery = document.createElement('div'); gallery.className = 'contributorPortraitGallery';
   panel.appendChild(gallery);
@@ -1870,7 +1874,7 @@ function startEpisodePipelinePolling() {
   }
   const episodeId = state.activeEpisode.id;
   state.pollTimer = setInterval(async () => {
-    if (state.activeEpisode?.id !== episodeId || !/^\/(episodes|review|publications)\//.test(window.location.pathname)) return stopPolling();
+    if (state.activeEpisode?.id !== episodeId || !/^\/(episodes|review|assets|publications)\//.test(window.location.pathname)) return stopPolling();
     try {
       const [pipelinePayload, candidatePayload, curationPayload, publicationPayload, publicTranscriptPayload, packagePayload] = await Promise.all([
         api(`/api/episodes/${encodeURIComponent(episodeId)}/pipeline-requests`),
@@ -2138,9 +2142,9 @@ function renderCandidateSection(episode, candidates) {
       const prepare = document.createElement("button");
       prepare.type = "button";
       prepare.className = "btn btnSecondary";
-      prepare.textContent = "Continue to Publications";
+      prepare.textContent = "Continue to Assets";
       prepare.disabled = !state.me?.access?.edit;
-      prepare.addEventListener("click", () => navigate(`/publications/${encodeURIComponent(episode.id)}`));
+      prepare.addEventListener("click", () => navigate(`/assets/${encodeURIComponent(episode.id)}`));
       batchBar.appendChild(prepare);
     }
     list.appendChild(batchBar);
@@ -3598,7 +3602,7 @@ $("closeEpisodeDialogButton").addEventListener("click", closeEpisodeDialog);
 $("cancelEpisodeButton").addEventListener("click", closeEpisodeDialog);
 $("episodeForm").addEventListener("submit", createEpisodeWorkspace);
 $("episodesBackButton").addEventListener("click", () => navigate(state.workspaceOrigin || "/"));
-$("contributorsBackButton").addEventListener("click", () => navigate('/contributors'));
+$("contributorsBackButton").addEventListener("click", () => navigate(state.contributorReturnTo || '/contributors'));
 for (const button of document.querySelectorAll("[data-studio-route]")) {
   button.addEventListener("click", () => navigate(button.dataset.studioRoute));
 }
