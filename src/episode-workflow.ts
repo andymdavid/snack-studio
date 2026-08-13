@@ -31,7 +31,7 @@ export function deriveEpisodeWorkflow(input: WorkflowInput) {
   else if (input.publicationCurrent) { phase = 'published-main'; status = 'Published to main'; action = { label: 'Deploy website', route: 'publications' }; }
   else if (input.validationCurrent) { phase = 'validated'; status = 'Validated'; action = { label: 'Publish to main', route: 'publications' }; }
   else if (input.packageReady) { phase = 'ready-to-validate'; status = 'Ready to validate'; action = { label: 'Validate publication', route: 'publications' }; }
-  else if (input.assetReviewCount) { phase = 'asset-review'; status = `${input.assetReviewCount} item${input.assetReviewCount === 1 ? '' : 's'} to review`; action = { label: 'Review outstanding items', route: 'review' }; }
+  else if (input.assetReviewCount) { phase = 'asset-review'; status = `${input.assetReviewCount} item${input.assetReviewCount === 1 ? '' : 's'} to review`; action = { label: 'Review outstanding assets', route: 'assets' }; }
   else if (input.publicationActive) { phase = 'publication-preparing'; status = 'Preparing publication'; action = null; }
   else { phase = 'publication-blocked'; status = input.blockers[0]?.message || 'Publication needs attention'; action = { label: 'Complete publication', route: 'publications' }; }
   return { phase, status, recommendedAction: action };
@@ -51,7 +51,7 @@ export function getEpisodeWorkflow(episodeId: string) {
     packageValue = buildPublicationPackage(episodeId);
     try {
       const preparation = getPublicationPreparation(episodeId);
-      assetReviewCount = preparation.jobs.filter((job) => job.status === 'in-review').length
+      assetReviewCount = preparation.jobs.filter((job) => job.status !== 'approved').length
         + preparation.participants.unresolved.length + preparation.contributorsNeedingPortraits.length;
     } catch {}
   }

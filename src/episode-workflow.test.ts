@@ -8,6 +8,7 @@ describe('deriveEpisodeWorkflow', () => {
     expect(deriveEpisodeWorkflow({ ...base, candidateCount: 0, generationStatus: 'running' }).phase).toBe('generating');
     expect(deriveEpisodeWorkflow(base).recommendedAction?.route).toBe('review');
     expect(deriveEpisodeWorkflow({ ...base, finalSetReady: true }).phase).toBe('final-set-ready');
+    expect(deriveEpisodeWorkflow({ ...base, episodeApproved: true, assetReviewCount: 2 }).recommendedAction?.route).toBe('assets');
   });
 
   test('orders immutable release gates', () => {

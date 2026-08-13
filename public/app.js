@@ -190,6 +190,7 @@ function appRoute() {
   if (["/act", "/chat", "/settings"].includes(window.location.pathname)) return window.location.pathname;
   if (/^\/episodes\/[^/]+$/.test(window.location.pathname)) return window.location.pathname;
   if (/^\/review(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
+  if (/^\/assets(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
   if (/^\/publications(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
   if (/^\/contributors(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
   if (window.location.pathname === '/graph') return window.location.pathname;
@@ -209,12 +210,12 @@ function showOnly(id) {
 }
 
 function showStudioPage(id, breadcrumb) {
-  for (const pageId of ["episodesPage", "episodePage", "reviewQueuePage", "publicationsPage", "contributorsPage", "contributorPage", "graphPage", "studioSettingsPage"]) {
+  for (const pageId of ["episodesPage", "episodePage", "reviewQueuePage", "assetReviewPage", "publicationsPage", "contributorsPage", "contributorPage", "graphPage", "studioSettingsPage"]) {
     $(pageId).classList.toggle("hidden", pageId !== id);
   }
   $("studioBreadcrumb").textContent = breadcrumb;
   for (const button of document.querySelectorAll("[data-studio-route]")) {
-    const activeRoute = id === "studioSettingsPage" ? "/settings" : id === 'graphPage' ? '/graph' : ['contributorsPage','contributorPage'].includes(id) ? '/contributors' : id === "reviewQueuePage" ? "/review" : id === "publicationsPage" ? "/publications" : id === "episodePage" ? state.workspaceOrigin || "/" : "/";
+    const activeRoute = id === "studioSettingsPage" ? "/settings" : id === 'graphPage' ? '/graph' : ['contributorsPage','contributorPage'].includes(id) ? '/contributors' : id === "assetReviewPage" ? '/assets' : id === "reviewQueuePage" ? "/review" : id === "publicationsPage" ? "/publications" : id === "episodePage" ? state.workspaceOrigin || "/" : "/";
     button.classList.toggle("active", button.dataset.studioRoute === activeRoute);
   }
 }
@@ -255,6 +256,7 @@ async function renderRoute() {
   if (state.route.startsWith('/review')) {
     showOnly('home'); await loadWorkflowRoute('review'); return;
   }
+  if (state.route.startsWith('/assets')) { showOnly('home'); await loadWorkflowRoute('assets'); return; }
   if (state.route.startsWith('/publications')) {
     showOnly('home'); await loadWorkflowRoute('publications'); return;
   }
@@ -407,19 +409,18 @@ async function loadEpisodeRoute() {
 }
 
 async function loadWorkflowRoute(kind) {
-  const match = state.route.match(kind === 'review' ? /^\/review\/([^/]+)$/ : /^\/publications\/([^/]+)$/);
+  const routePattern = kind === 'review' ? /^\/review\/([^/]+)$/ : kind === 'assets' ? /^\/assets\/([^/]+)$/ : /^\/publications\/([^/]+)$/;
+  const match = state.route.match(routePattern);
   if (match) {
-    state.workspaceOrigin = kind === 'review' ? '/review' : '/publications';
+    state.workspaceOrigin = kind === 'review' ? '/review' : kind === 'assets' ? '/assets' : '/publications';
     await loadEpisode(decodeURIComponent(match[1]), { stage: kind === 'review' ? 'output' : 'publication', origin: state.workspaceOrigin });
-    if (kind === 'review' && state.activeWorkflow?.phase === 'asset-review') {
-      state.episodeStage = 'publication';
-      renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
-    }
     if (kind === 'publications' && state.activeEpisode?.status === 'approved' && !state.publicationPreparation?.jobs?.length) await preparePublication();
     return;
   }
-  state.workspaceOrigin = kind === 'review' ? '/review' : '/publications';
-  showStudioPage(kind === 'review' ? 'reviewQueuePage' : 'publicationsPage', `Snack Studio / ${kind === 'review' ? 'Review Queue' : 'Publications'}`);
+  state.workspaceOrigin = kind === 'review' ? '/review' : kind === 'assets' ? '/assets' : '/publications';
+  const page = kind === 'review' ? 'reviewQueuePage' : kind === 'assets' ? 'assetReviewPage' : 'publicationsPage';
+  const label = kind === 'review' ? 'Review Queue' : kind === 'assets' ? 'Asset Review' : 'Publications';
+  showStudioPage(page, `Snack Studio / ${label}`);
   setStudioStatus('Loading workflow…');
   try {
     state.workflows = (await api('/api/workflow')).episodes || [];
@@ -428,14 +429,15 @@ async function loadWorkflowRoute(kind) {
 }
 
 function renderWorkflowQueue(kind, errorMessage = '') {
-  const container = $(kind === 'review' ? 'reviewQueue' : 'publicationsQueue'); container.innerHTML = '';
-  const reviewPhases = new Set(['snack-review', 'final-set-ready', 'asset-review']);
+  const container = $(kind === 'review' ? 'reviewQueue' : kind === 'assets' ? 'assetReviewQueue' : 'publicationsQueue'); container.innerHTML = '';
+  const reviewPhases = new Set(['snack-review', 'final-set-ready']);
+  const assetPhases = new Set(['asset-review']);
   const publicationPhases = new Set(['publication-preparing', 'publication-blocked', 'ready-to-validate', 'validated', 'published-main', 'deployed']);
-  const items = state.workflows.filter((item) => (kind === 'review' ? reviewPhases : publicationPhases).has(item.phase));
+  const items = state.workflows.filter((item) => (kind === 'review' ? reviewPhases : kind === 'assets' ? assetPhases : publicationPhases).has(item.phase));
   if (errorMessage || !items.length) {
     const empty = document.createElement('div'); empty.className = 'workflowQueueEmpty';
-    const title = document.createElement('strong'); title.textContent = errorMessage ? 'The queue could not be loaded' : kind === 'review' ? 'Nothing needs review' : 'No approved episodes are awaiting publication';
-    const detail = document.createElement('span'); detail.textContent = errorMessage || (kind === 'review' ? 'New editorial decisions will appear here automatically.' : 'Approve a final Snack set to begin publication preparation.');
+    const title = document.createElement('strong'); title.textContent = errorMessage ? 'The queue could not be loaded' : kind === 'review' ? 'Nothing needs review' : kind === 'assets' ? 'No assets need review' : 'No approved episodes are awaiting publication';
+    const detail = document.createElement('span'); detail.textContent = errorMessage || (kind === 'review' ? 'New editorial decisions will appear here automatically.' : kind === 'assets' ? 'Contributor and artwork decisions will appear here automatically.' : 'Approve a final Snack set to begin publication preparation.');
     empty.append(title, detail); container.appendChild(empty); return;
   }
   for (const item of items) {
@@ -444,7 +446,7 @@ function renderWorkflowQueue(kind, errorMessage = '') {
     const title = document.createElement('strong'); title.textContent = item.title; identity.append(eyebrow, title);
     const status = document.createElement('div'); const pill = document.createElement('span'); pill.className = `statusPill ${item.phase === 'deployed' ? 'statusSuccess' : 'statusPending'}`; pill.textContent = item.status;
     const action = document.createElement('span'); action.className = 'workflowQueueAction'; action.textContent = item.recommendedAction?.label || 'View episode'; status.append(pill, action);
-    card.append(identity, status); card.addEventListener('click', () => navigate(`/${kind === 'review' ? 'review' : 'publications'}/${encodeURIComponent(item.episodeId)}`)); container.appendChild(card);
+    card.append(identity, status); card.addEventListener('click', () => navigate(`/${kind === 'review' ? 'review' : kind === 'assets' ? 'assets' : 'publications'}/${encodeURIComponent(item.episodeId)}`)); container.appendChild(card);
   }
 }
 
@@ -616,8 +618,8 @@ function renderEpisodes() {
 
 async function loadEpisode(id, options = {}) {
   state.workspaceOrigin = options.origin || '/';
-  $('episodesBackButton').textContent = state.workspaceOrigin === '/review' ? '← Review Queue' : state.workspaceOrigin === '/publications' ? '← Publications' : '← All episodes';
-  showStudioPage("episodePage", `Snack Studio / ${state.workspaceOrigin === '/review' ? 'Review Queue' : state.workspaceOrigin === '/publications' ? 'Publications' : 'Episodes'} / Workspace`);
+  $('episodesBackButton').textContent = state.workspaceOrigin === '/review' ? '← Review Queue' : state.workspaceOrigin === '/assets' ? '← Asset Review' : state.workspaceOrigin === '/publications' ? '← Publications' : '← All episodes';
+  showStudioPage("episodePage", `Snack Studio / ${state.workspaceOrigin === '/review' ? 'Review Queue' : state.workspaceOrigin === '/assets' ? 'Asset Review' : state.workspaceOrigin === '/publications' ? 'Publications' : 'Episodes'} / Workspace`);
   setStudioStatus("Loading workspace…");
   try {
     const [payload, candidatePayload, curationPayload, pipelinePayload, publicationPayload, packagePayload, validationPayload, gitPublicationPayload, gitDeploymentPayload, workflowPayload, publicTranscriptPayload] = await Promise.all([
@@ -719,9 +721,9 @@ function renderEpisodeWorkspace(episode, transcript, transcriptRevisions, auditE
   header.appendChild(headerActions);
 
   const destinations = document.createElement('nav'); destinations.className = 'episodeWorkspaceDestinations'; destinations.setAttribute('aria-label', 'Episode destinations');
-  for (const [route, label] of [[`/episodes/${episode.id}`, 'Overview'], [`/review/${episode.id}`, 'Snack Review'], [`/publications/${episode.id}`, 'Publication']]) {
+  for (const [route, label] of [[`/episodes/${episode.id}`, 'Overview'], [`/review/${episode.id}`, 'Snack Review'], [`/assets/${episode.id}`, 'Asset Review'], [`/publications/${episode.id}`, 'Publication']]) {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btnSecondary'; button.textContent = label;
-    const destination = route.startsWith('/review') ? '/review' : route.startsWith('/publications') ? '/publications' : '/';
+    const destination = route.startsWith('/review') ? '/review' : route.startsWith('/assets') ? '/assets' : route.startsWith('/publications') ? '/publications' : '/';
     if (state.workspaceOrigin === destination) button.classList.add('active');
     button.addEventListener('click', () => navigate(route)); destinations.appendChild(button);
   }
@@ -949,6 +951,8 @@ function renderEpisodeWorkspace(episode, transcript, transcriptRevisions, auditE
     workspace.append(header, destinations, state.episodeStage === 'details' ? detailsStage : transcript ? renderEpisodeOverview(episode, transcript, candidates, processingStage) : setupStage);
   } else if (state.workspaceOrigin === '/publications') {
     workspace.append(header, destinations, publicationStage);
+  } else if (state.workspaceOrigin === '/assets') {
+    workspace.append(header, destinations, renderPublicationPreparation(episode, candidates, { assetsOnly: true }));
   } else if (state.workspaceOrigin === '/review') {
     workspace.append(header, destinations, state.episodeStage === 'publication' ? publicationStage : outputStage);
   } else {
@@ -969,6 +973,7 @@ function renderEpisodeOverview(episode, transcript, candidates, processingStage)
     const action = document.createElement('button'); action.type = 'button'; action.className = 'btn btnPrimary'; action.textContent = workflow.recommendedAction.label;
     action.addEventListener('click', () => {
       if (workflow.recommendedAction.route === 'review') navigate(`/review/${encodeURIComponent(episode.id)}`);
+      else if (workflow.recommendedAction.route === 'assets') navigate(`/assets/${encodeURIComponent(episode.id)}`);
       else if (workflow.recommendedAction.route === 'publications') navigate(`/publications/${encodeURIComponent(episode.id)}`);
       else if (workflow.phase === 'generation-failed') void startEpisodeExtraction();
     });
@@ -986,7 +991,8 @@ function renderEpisodeOverview(episode, transcript, candidates, processingStage)
   overview.append(statusCard, facts); return overview;
 }
 
-function renderPublicationPreparation(episode, candidates) {
+function renderPublicationPreparation(episode, candidates, options = {}) {
+  const assetsOnly = options.assetsOnly === true;
   const section = document.createElement("section");
   section.className = "publicationPreparation";
   const header = document.createElement("header");
@@ -994,11 +1000,11 @@ function renderPublicationPreparation(episode, candidates) {
   const copy = document.createElement("div");
   const eyebrow = document.createElement("p");
   eyebrow.className = "eyebrow metadata";
-  eyebrow.textContent = "Publishing";
+  eyebrow.textContent = assetsOnly ? "Asset review" : "Publishing";
   const title = document.createElement("h2");
-  title.textContent = "Prepare episode package";
+  title.textContent = assetsOnly ? "Review contributors and artwork" : "Prepare episode package";
   const help = document.createElement("p");
-  help.textContent = "Snack Studio is assembling canonical topics, contributor portraits and transcript-grounded thumbnail work for the approved set.";
+  help.textContent = assetsOnly ? "Everything requiring a visual or identity decision remains available here, including approved items and replacement controls." : "Snack Studio is assembling the website package while visual decisions remain in Asset Review.";
   copy.append(eyebrow, title, help);
   const headerActions = document.createElement('div');
   headerActions.className = 'publicationPreparationActions';
@@ -1044,12 +1050,24 @@ function renderPublicationPreparation(episode, candidates) {
     retry.addEventListener('click', () => retryPipelineRequest(topicRequest.id));
     retryPanel.append(retryCopy, retry); section.appendChild(retryPanel);
   }
-  section.appendChild(renderPublicTranscriptWorkflow());
-  section.appendChild(renderNewsletterWorkflow(candidates));
+  if (!assetsOnly) {
+    section.appendChild(renderPublicTranscriptWorkflow());
+    section.appendChild(renderNewsletterWorkflow(candidates));
+  }
   if (preparation.themes?.length) {
     const themeList = document.createElement('div'); themeList.className = 'episodeThemeList';
     for (const theme of preparation.themes) { const item = document.createElement('span'); const swatch = document.createElement('i'); swatch.className = 'topicSwatch'; swatch.style.backgroundColor = theme.colour; item.append(swatch, theme.name); item.title = theme.description; themeList.appendChild(item); }
     section.appendChild(themeList);
+  }
+  if (!assetsOnly) {
+    const assetSummary = document.createElement('div'); assetSummary.className = 'publicationPreparationBlocker';
+    const assetCopy = document.createElement('p');
+    const unfinished = [...snackJobs, ...(episodeJob ? [episodeJob] : [])].filter((job) => job.status !== 'approved').length + portraitsNeededCount(preparation) + unresolved.length;
+    assetCopy.textContent = unfinished ? `${unfinished} contributor or artwork decision${unfinished === 1 ? '' : 's'} remain in Asset Review.` : 'Contributor identities and finished artwork are approved.';
+    const openAssets = document.createElement('button'); openAssets.type = 'button'; openAssets.className = 'btn btnSecondary'; openAssets.textContent = unfinished ? 'Open Asset Review' : 'View approved assets'; openAssets.addEventListener('click', () => navigate(`/assets/${encodeURIComponent(episode.id)}`));
+    assetSummary.append(assetCopy, openAssets); section.appendChild(assetSummary);
+    if (state.publicationPackage) section.appendChild(renderPublicationPackageManifest(state.publicationPackage));
+    return section;
   }
   if (unresolved.length) {
     const blocker = document.createElement("div");
@@ -1100,9 +1118,10 @@ function renderPublicationPreparation(episode, candidates) {
     if (['extracting','grounding','generating'].includes(job.status)) startThumbnailStatusPolling(job.id);
   }
   section.appendChild(queue);
-  if (state.publicationPackage) section.appendChild(renderPublicationPackageManifest(state.publicationPackage));
   return section;
 }
+
+function portraitsNeededCount(preparation) { return preparation.contributorsNeedingPortraits?.length || 0; }
 
 function renderPublicationPackageManifest(packageValue) {
   const panel = document.createElement('section');
