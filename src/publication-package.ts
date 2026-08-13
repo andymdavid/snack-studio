@@ -1,5 +1,6 @@
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
+import { isAbsolute, resolve } from 'node:path';
 import { db } from './db.ts';
 import { getCandidate, validateApprovedCandidateBatch } from './candidates.ts';
 import { getContributor } from './contributors.ts';
@@ -28,6 +29,11 @@ export function publicationSlug(value: string) {
 
 export function episodePublicationSlug(number: number) {
   return `episode-${String(number).padStart(3, '0')}`;
+}
+
+export function resolvePublicationAssetSource(path: string) {
+  if (path.startsWith('/images/')) return resolve('public', path.slice(1));
+  return isAbsolute(path) ? path : resolve(path);
 }
 
 function selectedFinishedAsset(jobId: string) {
@@ -68,7 +74,7 @@ export function buildPublicationPackage(episodeId: string) {
   if (publicTranscript && episodeNumber) files.push({ kind: 'transcript', destination: `src/content/transcripts/${episodeSlug}.txt`, sourceId: publicTranscript.id, sourceRevisionId: publicTranscript.sourceTranscriptRevisionId, sizeBytes: new TextEncoder().encode(publicTranscript.transcriptText).byteLength });
   for (const person of people.filter((item) => item.source === 'studio')) {
     files.push({ kind: 'person', destination: `src/content/people/${person.id}.md`, sourceId: person.id });
-    if (person.portraitPath) files.push({ kind: 'person-portrait', destination: `public/images/${person.id}-voxel.webp`, sourceId: person.id, sourcePath: person.portraitPath });
+    if (person.portraitPath) files.push({ kind: 'person-portrait', destination: `public/images/${person.id}-voxel.webp`, sourceId: person.id, sourcePath: resolvePublicationAssetSource(person.portraitPath) });
   }
   const episodeThemeRows = db.query('SELECT theme_id,rationale,evidence_excerpt FROM episode_theme_assignments WHERE episode_id=?1 ORDER BY created_at,theme_id').all(episodeId) as Array<{ theme_id: string; rationale: string; evidence_excerpt: string }>;
   const themes = episodeThemeRows.map((row) => ({ ...getTheme(row.theme_id)!, rationale: row.rationale, evidenceExcerpt: row.evidence_excerpt })).filter((item) => item.id);
