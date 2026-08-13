@@ -1578,7 +1578,7 @@ function renderContributorPortraitWorkflow(item) {
   copy.append(eyebrow, title, detail);
   const generate = document.createElement('button');
   generate.type = 'button'; generate.className = 'btn btnPrimary';
-  generate.textContent = ['generating', 'in-review'].includes(item.portraitStatus) ? 'Generate another set' : 'Generate portraits';
+  generate.textContent = ['generating', 'in-review'].includes(item.portraitStatus) ? 'Generate another' : 'Generate portrait';
   generate.disabled = !state.me?.access?.edit || item.portraitStatus === 'generating';
   generate.addEventListener('click', () => generateContributorPortraits(item.contributorId, generate));
   const actions = document.createElement('div'); actions.className = 'contributorPortraitActions';
