@@ -2087,7 +2087,10 @@ textarea {
 .publicationReleaseProgress .isActive > span { border-color:var(--text-primary); }
 .publicationReleaseProgress .isComplete { color:var(--success); }
 .publicationReleaseProgress .isComplete > span { border-color:var(--success); background:var(--success); color:white; }
-.publicationPackageBlockers { display:grid; gap:7px; margin:0; padding:14px 16px 14px 34px; border-left:3px solid var(--warning); background:var(--warning-soft); }
+.publicationPackageBlockers { display:grid; gap:9px; margin:0; padding:14px 16px 14px 34px; border-left:3px solid var(--warning); background:var(--warning-soft); }
+.publicationPackageBlockers li { min-height:var(--control-height); }
+.publicationPackageBlockers li:has(.btn) { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.publicationPackageBlockers .btn { flex:0 0 auto; }
 .publicationPackageManifest details { border:1px solid var(--border); border-radius:var(--radius-card); }
 .publicationPackageManifest summary { padding:12px 14px; cursor:pointer; font-weight:600; }
 .publicationTechnicalDetails > p { padding:0 14px 12px; }
@@ -2110,6 +2113,7 @@ textarea {
 .gitPublicationResult p { margin-top:4px; }
 div.publicationPreparationBlocker { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .publicationPreparationBlocker p { margin: 0; }
+.assetRowFocused { outline:2px solid var(--coral); outline-offset:3px; }
 
 .contributorProfileForm { display: grid; gap: 22px; border: 1px solid var(--border); border-radius: var(--radius-card); padding: 22px; background: var(--surface-1); }
 .contributorProfileForm h3, .contributorProfileForm p { margin: 0; }

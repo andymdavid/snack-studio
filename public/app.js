@@ -253,6 +253,8 @@ function stopPolling() {
 }
 
 async function renderRoute() {
+  document.querySelector('.candidateEditorDialog')?.remove();
+  document.querySelector('.thumbnailReviewDialog')?.remove();
   state.route = appRoute();
   if (!state.token || !state.me) {
     stopPolling();
@@ -835,6 +837,22 @@ function renderEpisodeWorkspace(episode, transcript, transcriptRevisions, auditE
     button.addEventListener('click', () => navigate(route)); destinations.appendChild(button);
   }
 
+  // The canonical episode destinations are separate work surfaces. Render the
+  // selected surface directly instead of constructing the legacy all-in-one
+  // workflow and hiding most of it afterwards.
+  if (state.activeEpisodeTab === 'snacks') {
+    workspace.append(header, destinations, renderCandidateSection(episode, candidates));
+    return;
+  }
+  if (state.activeEpisodeTab === 'assets') {
+    workspace.append(header, destinations, renderPublicationPreparation(episode, candidates, { assetsOnly: true }));
+    return;
+  }
+  if (state.activeEpisodeTab === 'publication') {
+    workspace.append(header, destinations, renderPublicationPreparation(episode, candidates));
+    return;
+  }
+
   const flow = document.createElement("nav");
   flow.className = "episodeFlow";
   flow.setAttribute("aria-label", "Episode workflow");
@@ -1054,17 +1072,7 @@ function renderEpisodeWorkspace(episode, transcript, transcriptRevisions, auditE
   const transcriptNote = document.createElement('p'); transcriptNote.className = 'metadata'; transcriptNote.textContent = 'The source transcript is preserved unchanged. A separate cleanup step for the public website transcript is planned for the publishing flow and has not yet been implemented.';
   transcriptDetails.append(transcriptDetailsHeader, transcriptNote);
   detailsStage.append(metadataForm, transcriptDetails, history);
-  if (state.activeEpisodeTab === 'overview') {
-    workspace.append(header, destinations, state.episodeStage === 'details' ? detailsStage : transcript ? renderEpisodeOverview(episode, transcript, candidates, processingStage) : setupStage);
-  } else if (state.activeEpisodeTab === 'publication') {
-    workspace.append(header, destinations, publicationStage);
-  } else if (state.activeEpisodeTab === 'assets') {
-    workspace.append(header, destinations, renderPublicationPreparation(episode, candidates, { assetsOnly: true }));
-  } else if (state.activeEpisodeTab === 'snacks') {
-    workspace.append(header, destinations, state.episodeStage === 'publication' ? publicationStage : outputStage);
-  } else {
-    workspace.append(header, flow, state.episodeStage === "details" ? detailsStage : state.episodeStage === "publication" ? publicationStage : state.episodeStage === "processing" ? processingStage : state.episodeStage === "output" ? outputStage : setupStage);
-  }
+  workspace.append(header, destinations, state.episodeStage === 'details' ? detailsStage : transcript ? renderEpisodeOverview(episode, transcript, candidates, processingStage) : setupStage);
 }
 
 function renderEpisodeOverview(episode, transcript, candidates, processingStage) {
@@ -1152,8 +1160,9 @@ function renderPublicationPreparation(episode, candidates, options = {}) {
     retryPanel.append(retryCopy, retry); section.appendChild(retryPanel);
   }
   if (!assetsOnly) {
-    section.appendChild(renderPublicTranscriptWorkflow());
-    section.appendChild(renderNewsletterWorkflow(candidates));
+    const transcriptWorkflow = renderPublicTranscriptWorkflow(); transcriptWorkflow.dataset.publicationGate = 'transcript';
+    const newsletterWorkflow = renderNewsletterWorkflow(candidates); newsletterWorkflow.dataset.publicationGate = 'newsletter';
+    section.append(transcriptWorkflow, newsletterWorkflow);
   }
   if (preparation.themes?.length) {
     const themeList = document.createElement('div'); themeList.className = 'episodeThemeList';
@@ -1168,6 +1177,11 @@ function renderPublicationPreparation(episode, candidates, options = {}) {
     const openAssets = document.createElement('button'); openAssets.type = 'button'; openAssets.className = 'btn btnSecondary'; openAssets.textContent = unfinished ? 'Open Asset Review' : 'View approved assets'; openAssets.addEventListener('click', () => navigate(`/episodes/${encodeURIComponent(episode.id)}/assets`));
     assetSummary.append(assetCopy, openAssets); section.appendChild(assetSummary);
     if (state.publicationPackage) section.appendChild(renderPublicationPackageManifest(state.publicationPackage));
+    const requestedGate = new URLSearchParams(window.location.search).get('gate');
+    if (requestedGate) queueMicrotask(() => {
+      const target = section.querySelector(`[data-publication-gate="${CSS.escape(requestedGate)}"]`);
+      target?.classList.add('assetRowFocused'); target?.scrollIntoView({ block: 'center' });
+    });
     return section;
   }
   if (unresolved.length) {
@@ -1197,7 +1211,7 @@ function renderPublicationPreparation(episode, candidates, options = {}) {
   queue.className = "publicationThumbnailQueue";
   for (const job of snackJobs) {
     const candidate = candidates.find((item) => item.id === job.snackCandidateId);
-    const row = document.createElement("div");
+    const row = document.createElement("div"); row.dataset.assetJob = job.id;
     const identity = document.createElement("div");
     const name = document.createElement("strong"); name.textContent = candidate?.revision?.publicTitle || "Approved Snack";
     const detail = document.createElement("span");
@@ -1213,12 +1227,26 @@ function renderPublicationPreparation(episode, candidates, options = {}) {
       status.addEventListener('click', () => ['in-review','approved'].includes(job.status) ? openThumbnailReview(job.id, name.textContent, status) : generateSnackThumbnail(job.id, '', status));
     } else {
       status.className = `statusPill ${job.status === 'in-review' || job.status === 'approved' ? 'statusSuccess' : 'statusWarning'}`;
-      status.textContent = job.status === 'in-review' ? 'Ready to review' : job.status === 'approved' ? 'Approved' : ['extracting','grounding','generating'].includes(job.status) ? 'Generating…' : job.topicColour ? 'Ready' : topicsRunning ? 'Running' : 'Needs metadata';
+      status.textContent = job.status === 'in-review' ? 'Ready to review' : job.status === 'approved' ? 'Approved' : ['extracting','grounding','generating'].includes(job.status) ? 'Generating…' : unresolved.length ? 'Waiting for contributor' : portraitsNeeded.length ? 'Waiting for portrait' : !job.topicColour && topicsRunning ? 'Resolving theme' : !job.topicColour ? 'Theme needed' : 'Ready';
     }
     row.append(identity, status); queue.appendChild(row);
     if (['extracting','grounding','generating'].includes(job.status)) startThumbnailStatusPolling(job.id);
   }
   section.appendChild(queue);
+  const requestedAsset = new URLSearchParams(window.location.search).get('asset');
+  if (requestedAsset) queueMicrotask(() => {
+    const targetJob = [...snackJobs, ...(episodeJob ? [episodeJob] : [])].find((job) => job.id === requestedAsset);
+    const target = section.querySelector(`[data-asset-job="${CSS.escape(requestedAsset)}"]`); target?.classList.add('assetRowFocused'); target?.scrollIntoView({ block:'center' });
+    if (targetJob && ['in-review','approved'].includes(targetJob.status) && !document.querySelector('.thumbnailReviewDialog')) {
+      const candidate = candidates.find((item) => item.id === targetJob.snackCandidateId);
+      void openThumbnailReview(targetJob.id, targetJob.assetKind === 'episode' ? episode.publicTitle || episode.workingTitle : candidate?.revision?.publicTitle || 'Approved Snack', null, targetJob.assetKind === 'episode');
+    }
+  });
+  const requestedContributor = new URLSearchParams(window.location.search).get('contributor');
+  if (requestedContributor) queueMicrotask(() => {
+    const target = section.querySelector(`[data-contributor-id="${CSS.escape(requestedContributor)}"]`);
+    target?.classList.add('assetRowFocused'); target?.scrollIntoView({ block: 'center' });
+  });
   return section;
 }
 
@@ -1253,9 +1281,14 @@ function renderPublicationPackageManifest(packageValue) {
     const snackThemes = blockers.filter((item) => /needs one theme from the episode/i.test(item.message)).length;
     const snackThumbnails = blockers.filter((item) => /needs an approved finished thumbnail/i.test(item.message) && !/^The episode/i.test(item.message)).length;
     const grouped = blockers.filter((item) => !/needs one theme from the episode/i.test(item.message) && !(/needs an approved finished thumbnail/i.test(item.message) && !/^The episode/i.test(item.message)));
-    if (snackThemes) grouped.push({ message: `Automatic theme assignment is pending for ${snackThemes} Snacks.` });
-    if (snackThumbnails) grouped.push({ message: `${snackThumbnails} Snack thumbnails need generation or approval.` });
-    for (const blocker of grouped) { const item = document.createElement('li'); item.textContent = blocker.message; list.appendChild(item); }
+    if (snackThemes) grouped.push({ code: 'snack-themes-group', message: `Automatic theme assignment is pending for ${snackThemes} Snacks.` });
+    if (snackThumbnails) grouped.push({ code: 'snack-thumbnails-group', message: `${snackThumbnails} Snack thumbnails need generation or approval.` });
+    for (const blocker of grouped) {
+      const item = document.createElement('li'); const message = document.createElement('span'); message.textContent = blocker.message; item.appendChild(message);
+      const destination = publicationBlockerDestination(blocker);
+      if (destination) { const action = document.createElement('button'); action.type = 'button'; action.className = 'btn btnSecondary'; action.textContent = destination.label; action.addEventListener('click', () => navigate(destination.path)); item.appendChild(action); }
+      list.appendChild(item);
+    }
     panel.appendChild(list);
   }
   const paths = document.createElement('details'); paths.className = 'publicationTechnicalDetails';
@@ -1266,6 +1299,26 @@ function renderPublicationPackageManifest(packageValue) {
   paths.append(summary, fingerprint, fileList); panel.appendChild(paths);
   if (state.websiteValidation) panel.appendChild(renderWebsiteValidation(state.websiteValidation, packageValue, state.gitPublication, state.gitDeployment));
   return panel;
+}
+
+function publicationBlockerDestination(blocker) {
+  const episodeId = state.activeEpisode?.id; if (!episodeId) return null;
+  const base = `/episodes/${encodeURIComponent(episodeId)}`;
+  if (['episode-not-approved'].includes(blocker.code) || blocker.code?.startsWith('approved-')) return { label: 'Open Snacks', path: `${base}/snacks` };
+  if (blocker.code === 'public-transcript-missing') return { label: 'Review transcript', path: `${base}/publication?gate=transcript` };
+  if (blocker.code === 'newsletter-selection-incomplete') return { label: 'Choose Snacks', path: `${base}/publication?gate=newsletter` };
+  if (blocker.code === 'portrait-missing' && blocker.sourceId) return { label: 'Open contributor', path: `${base}/assets?contributor=${encodeURIComponent(blocker.sourceId)}` };
+  if (blocker.code === 'snack-thumbnail-missing' && blocker.sourceId) {
+    const job = state.publicationPreparation?.jobs?.find((item) => item.assetKind === 'snack' && item.snackCandidateId === blocker.sourceId);
+    return { label: 'Open thumbnail', path: `${base}/assets${job ? `?asset=${encodeURIComponent(job.id)}` : ''}` };
+  }
+  if (blocker.code === 'episode-thumbnail-missing') {
+    const job = state.publicationPreparation?.jobs?.find((item) => item.assetKind === 'episode');
+    return { label: 'Open thumbnail', path: `${base}/assets${job ? `?asset=${encodeURIComponent(job.id)}` : ''}` };
+  }
+  if (['participant-unresolved','episode-themes-missing','snack-theme-missing','snack-themes-group','snack-thumbnails-group'].includes(blocker.code)) return { label: 'Open Assets', path: `${base}/assets` };
+  if (['episode-number-missing','transcript-missing'].includes(blocker.code)) return { label: 'Open Overview', path: base };
+  return null;
 }
 
 function renderWebsiteValidation(validation, packageValue, publication, deployment) {
@@ -1335,10 +1388,12 @@ function renderWebsiteValidation(validation, packageValue, publication, deployme
 
 function renderEpisodeThumbnailWorkflow(episode, job, resolved, portraitsNeeded) {
   const panel = document.createElement('section'); panel.className = 'episodeThumbnailWorkflow';
+  panel.dataset.assetJob = job.id;
   const copy = document.createElement('div');
   const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Episode thumbnail';
   const title = document.createElement('h3'); title.textContent = episode.publicTitle || episode.workingTitle;
   const detail = document.createElement('p'); detail.textContent = `16:9 · ${resolved.some((item) => !['pete-winn','andy-david'].includes(item.contributorId)) ? 'Guest layout' : 'Host-only layout'} · deterministic title and branding`;
+  if (portraitsNeeded.length) detail.textContent += ` · waiting for ${portraitsNeeded.map((item) => item.name).join(', ')} portrait approval`;
   copy.append(eyebrow, title, detail);
   const actions = document.createElement('div'); actions.className = 'episodeThumbnailActions';
   const active = ['extracting','grounding','generating'].includes(job.status);
@@ -1381,7 +1436,7 @@ function renderEpisodeThumbnailWorkflow(episode, job, resolved, portraitsNeeded)
 function startThumbnailStatusPolling(jobId) {
   if (state.thumbnailPollTimers[jobId]) return;
   const poll = async () => {
-    if (!state.activeEpisode || state.episodeStage !== 'publication') {
+    if (!state.activeEpisode || !['assets', 'publication'].includes(state.activeEpisodeTab)) {
       clearInterval(state.thumbnailPollTimers[jobId]);
       delete state.thumbnailPollTimers[jobId];
       return;
@@ -1426,6 +1481,7 @@ async function generateSnackThumbnail(jobId, reviewNote = '', triggerButton = nu
 }
 
 async function openThumbnailReview(jobId, snackTitle, triggerButton = null, isEpisode = false) {
+  if (state.activeEpisodeTab === 'assets' && new URLSearchParams(window.location.search).get('asset') !== jobId) pushEpisodeTabHistory({ asset: jobId });
   const clearBusy = setButtonBusy(triggerButton, 'Opening…');
   setStudioStatus('Loading thumbnail review…');
   try {
@@ -1438,7 +1494,8 @@ async function openThumbnailReview(jobId, snackTitle, triggerButton = null, isEp
     const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = isEpisode ? 'Episode thumbnail review' : 'Thumbnail review';
     const title = document.createElement('h2'); title.textContent = snackTitle;
     copy.append(eyebrow, title);
-    const close = document.createElement('button'); close.type = 'button'; close.className = 'btn btnSecondary'; close.textContent = 'Back to queue'; close.addEventListener('click', () => dialog.close());
+    const close = document.createElement('button'); close.type = 'button'; close.className = 'btn btnSecondary'; close.textContent = 'Back to assets'; close.addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => { dialog.remove(); if (state.activeEpisodeTab === 'assets' && new URLSearchParams(window.location.search).get('asset') === jobId) replaceEpisodeTabState({ asset: null }); });
     header.append(copy, close); shell.appendChild(header);
     const currentRound = Math.max(0, ...payload.job.candidates.map((item) => item.generationRound));
     const candidates = payload.job.candidates.filter((item) => item.generationRound === currentRound);
@@ -1501,6 +1558,7 @@ async function approveSnackThumbnail(candidateId, dialog, triggerButton = null) 
 function renderContributorPortraitWorkflow(item) {
   const panel = document.createElement('section');
   panel.className = 'contributorPortraitWorkflow';
+  panel.dataset.contributorId = item.contributorId;
   const heading = document.createElement('div');
   const copy = document.createElement('div');
   const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Contributor portrait';
