@@ -14,7 +14,7 @@ import { getCurrentAutopilotTarget } from './db.ts';
 
 export type ThumbnailJobStatus = "draft" | "extracting" | "grounding" | "generating" | "in-review" | "approved" | "failed";
 
-const EPISODE_THUMBNAIL_PIPELINE_VERSION = '5';
+const EPISODE_THUMBNAIL_PIPELINE_VERSION = '6';
 const SNACK_THUMBNAIL_PIPELINE_VERSION = '3';
 const EPISODE_THUMBNAIL_VISUAL_REFERENCE = resolve('public/images/references/episode-thumbnail-guest-canonical.png');
 
@@ -137,13 +137,12 @@ export function createThumbnailGeneration(jobId: string, actorPubkey: string, pu
   const targetedNote = String(reviewNote || '').trim().slice(0, 600);
   const outputDirectory = resolve(join(CONTRIBUTOR_UPLOAD_DIR, '..', 'thumbnails', job.id, `round-${round}`));
   mkdirSync(outputDirectory, { recursive: true });
-  if (job.assetKind === 'episode' && !existsSync(EPISODE_THUMBNAIL_VISUAL_REFERENCE)) throw new Error('Canonical episode thumbnail reference is unavailable');
   const contextPath = join(outputDirectory, 'context.json');
   writeFileSync(contextPath, JSON.stringify({
     jobId: job.id, assetKind: job.assetKind, snack: candidate?.revision || null, transcript: transcript.transcriptText, topicColour: job.topicColour,
     episode: { number: episode.episodeNumber, title: episode.publicTitle || episode.workingTitle },
     contributors: contributors.map((item) => ({ id: item!.id, name: item!.name, portraitPath: resolve(`public${item!.portraitPath}`) })),
-    visualReferencePath: job.assetKind === 'episode' ? EPISODE_THUMBNAIL_VISUAL_REFERENCE : null,
+    calibrationReferencePath: job.assetKind === 'episode' && existsSync(EPISODE_THUMBNAIL_VISUAL_REFERENCE) ? EPISODE_THUMBNAIL_VISUAL_REFERENCE : null,
     reviewNote: targetedNote || null,
   }, null, 2));
   const token = `${crypto.randomUUID().replaceAll('-', '')}${crypto.randomUUID().replaceAll('-', '')}`;
