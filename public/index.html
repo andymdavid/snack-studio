@@ -43,13 +43,10 @@
           </div>
           <nav class="studioNav" aria-label="Primary navigation">
             <button class="active" type="button" data-studio-route="/">Episodes</button>
-            <button type="button" data-studio-route="/review">Review queue</button>
-            <button type="button" data-studio-route="/assets">Asset review</button>
-            <button type="button" data-studio-route="/library">Asset library</button>
+            <button type="button" data-studio-route="/review">Review</button>
             <button type="button" data-studio-route="/publications">Publications</button>
-            <button type="button" data-studio-route="/contributors">Contributors</button>
+            <button type="button" data-studio-route="/library">Library</button>
             <button type="button" data-studio-route="/graph">Graph</button>
-            <button type="button" data-studio-route="/diagnostics">Diagnostics</button>
             <button type="button" data-studio-route="/settings">Settings</button>
           </nav>
           <div class="studioUser">
@@ -108,16 +105,19 @@
                 <p>Snack drafts, regeneration proposals and final sets waiting for editorial judgment.</p>
               </div>
             </header>
+            <nav class="sectionTabs" aria-label="Review sections"><button class="active" type="button" data-section-route="/review">Snack review</button><button type="button" data-section-route="/assets">Asset review</button></nav>
             <section class="workflowQueue" id="reviewQueue" aria-live="polite"></section>
           </div>
 
           <div class="studioContent hidden" id="assetReviewPage">
             <header class="studioPageHeader"><div><p class="eyebrow">Visual decisions</p><h1>Asset Review</h1><p>Contributor identities, portraits and episode artwork waiting for approval.</p></div></header>
+            <nav class="sectionTabs" aria-label="Review sections"><button type="button" data-section-route="/review">Snack review</button><button class="active" type="button" data-section-route="/assets">Asset review</button></nav>
             <section class="workflowQueue" id="assetReviewQueue" aria-live="polite"></section>
           </div>
 
           <div class="studioContent hidden" id="assetLibraryPage">
             <header class="studioPageHeader"><div><p class="eyebrow">Finished work</p><h1>Asset Library</h1><p>Approved contributor portraits, Snack thumbnails and episode artwork.</p></div></header>
+            <nav class="sectionTabs" aria-label="Library sections"><button class="active" type="button" data-section-route="/library">Assets</button><button type="button" data-section-route="/contributors">Contributors</button></nav>
             <nav class="assetLibraryFilters" id="assetLibraryFilters" aria-label="Filter assets"></nav>
             <section class="assetLibraryGrid" id="assetLibraryGrid" aria-live="polite"></section>
           </div>
@@ -137,6 +137,7 @@
             <header class="studioPageHeader">
               <div><p class="eyebrow">People library</p><h1>Contributors</h1><p>Manage reusable public profiles, identity sources and approved voxel portraits.</p></div>
             </header>
+            <nav class="sectionTabs" aria-label="Library sections"><button type="button" data-section-route="/library">Assets</button><button class="active" type="button" data-section-route="/contributors">Contributors</button></nav>
             <section class="contributorLibrary" id="contributorLibrary" aria-live="polite"></section>
           </div>
 
@@ -228,6 +229,10 @@
                   <button id="clearImportButton" type="button">Clear pending</button>
                 </div>
                 <div id="snapshotList" class="snapshotList"></div>
+              </div>
+              <div class="settingsPanel widePanel settingsDiagnostics">
+                <div><h2>Diagnostics</h2><p>Inspect failed, running and historical pipeline jobs when troubleshooting is needed.</p></div>
+                <button class="btn btnSecondary" id="openDiagnosticsButton" type="button">Open diagnostics</button>
               </div>
             </section>
           </div>

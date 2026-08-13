@@ -918,6 +918,12 @@ textarea {
   font-family: var(--font-figures);
   font-size: var(--text-xs);
 }
+.sectionTabs { display:flex; align-items:center; gap:22px; margin:-4px 0 20px; border-bottom:1px solid var(--border); }
+.sectionTabs button { min-height:38px; border:0; border-bottom:2px solid transparent; border-radius:0; padding:7px 0; background:transparent; color:var(--text-muted); }
+.sectionTabs button:hover,.sectionTabs button.active { border-bottom-color:var(--text-primary); color:var(--text-primary); }
+.settingsDiagnostics { display:flex; align-items:center; justify-content:space-between; gap:20px; }
+.settingsDiagnostics h2,.settingsDiagnostics p { margin:0; }
+.settingsDiagnostics p { margin-top:5px; color:var(--text-muted); }
 
 .studioUser {
   margin-top: auto;

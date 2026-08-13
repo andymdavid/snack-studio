@@ -204,8 +204,9 @@ function appRoute() {
 }
 
 function navigate(path) {
-  if (window.location.pathname !== path) history.pushState({}, "", path);
-  state.route = path;
+  const target = new URL(path, window.location.origin);
+  if (`${window.location.pathname}${window.location.search}` !== `${target.pathname}${target.search}`) history.pushState({}, "", path);
+  state.route = appRoute();
   void renderRoute();
 }
 
@@ -221,7 +222,7 @@ function showStudioPage(id, breadcrumb) {
   }
   $("studioBreadcrumb").textContent = breadcrumb;
   for (const button of document.querySelectorAll("[data-studio-route]")) {
-    const activeRoute = id === "studioSettingsPage" ? "/settings" : id === 'diagnosticsPage' ? '/diagnostics' : id === 'graphPage' ? '/graph' : id === 'assetLibraryPage' ? '/library' : ['contributorsPage','contributorPage'].includes(id) ? '/contributors' : id === "assetReviewPage" ? '/assets' : id === "reviewQueuePage" ? "/review" : id === "publicationsPage" ? "/publications" : id === "episodePage" ? state.workspaceOrigin || "/" : "/";
+    const activeRoute = ['studioSettingsPage','diagnosticsPage'].includes(id) ? '/settings' : id === 'graphPage' ? '/graph' : ['assetLibraryPage','contributorsPage','contributorPage'].includes(id) ? '/library' : ['assetReviewPage','reviewQueuePage'].includes(id) ? '/review' : id === "publicationsPage" ? "/publications" : id === "episodePage" ? state.workspaceOrigin === '/assets' ? '/review' : state.workspaceOrigin || "/" : "/";
     button.classList.toggle("active", button.dataset.studioRoute === activeRoute);
   }
 }
@@ -3601,6 +3602,8 @@ $("contributorsBackButton").addEventListener("click", () => navigate('/contribut
 for (const button of document.querySelectorAll("[data-studio-route]")) {
   button.addEventListener("click", () => navigate(button.dataset.studioRoute));
 }
+for (const button of document.querySelectorAll('[data-section-route]')) button.addEventListener('click', () => navigate(button.dataset.sectionRoute));
+$('openDiagnosticsButton').addEventListener('click', () => navigate('/diagnostics'));
 $("saveSettingsButton").addEventListener("click", saveSettings);
 $("loadPipelinesButton").addEventListener("click", loadPipelines);
 $("newTargetButton").addEventListener("click", createAutopilotTarget);
