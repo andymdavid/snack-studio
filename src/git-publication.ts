@@ -39,6 +39,22 @@ export function validationAuthorizesPublication(packageFingerprint: string, vali
   );
 }
 
+export function publicationCanResume(
+  publication: ReturnType<typeof getLatestGitPublication>,
+  validation: ReturnType<typeof getLatestWebsiteValidation>,
+  packageFingerprint: string,
+) {
+  return Boolean(
+    publication
+    && validation
+    && publication.status === 'failed'
+    && publication.validationAttemptId === validation.id
+    && publication.packageFingerprint === packageFingerprint
+    && publication.commitSha
+    && publication.cleanBuildOutput,
+  );
+}
+
 export function publishValidatedPackageToMain(episodeId: string, actorPubkey: string) {
   const packageValue = buildPublicationPackage(episodeId);
   const validation = getLatestWebsiteValidation(episodeId);
@@ -50,6 +66,10 @@ export function publishValidatedPackageToMain(episodeId: string, actorPubkey: st
   if (active) throw new Error('A publication attempt is already in progress for this episode.');
   const episode = getEpisode(episodeId);
   if (!episode) throw new Error('Episode not found.');
+  const resumablePublication = mapPublication(db.query(`SELECT * FROM git_publication_attempts
+    WHERE episode_id=?1 AND validation_attempt_id=?2 AND package_fingerprint=?3 AND status='failed'
+      AND commit_sha IS NOT NULL AND clean_build_output IS NOT NULL
+    ORDER BY created_at DESC LIMIT 1`).get(episodeId, validation.id, packageValue.fingerprint) as Record<string, unknown> | null);
   const message = `Publish ${episode.publicTitle || episode.workingTitle}`.slice(0, 180);
   const attemptId = crypto.randomUUID(); const now = Date.now();
   db.query(`INSERT INTO git_publication_attempts(id,episode_id,validation_attempt_id,package_fingerprint,status,base_commit,commit_message,actor_pubkey,created_at,updated_at)
@@ -58,25 +78,36 @@ export function publishValidatedPackageToMain(episodeId: string, actorPubkey: st
     run(['git', 'fetch', 'origin', 'main'], INTELLIGENCE_SNACKS_REPO);
     const currentMain = run(['git', 'rev-parse', 'origin/main'], INTELLIGENCE_SNACKS_REPO);
     if (currentMain !== validation.baseCommit) throw new Error('Intelligence Snacks main changed after validation. Validate the package again.');
-    const paths = packageValue.files.map((file) => file.destination);
-    run(['git', 'add', '--', ...paths], validation.worktreePath);
-    const stagedOutsideManifest = run(['git', 'diff', '--cached', '--name-only'], validation.worktreePath).split('\n').filter(Boolean).filter((path) => !paths.includes(path));
-    if (stagedOutsideManifest.length) throw new Error(`Publication contains files outside the manifest: ${stagedOutsideManifest.join(', ')}`);
-    if (!run(['git', 'diff', '--cached', '--name-only'], validation.worktreePath)) throw new Error('The validated package does not contain any website changes.');
-    run(['git', '-c', 'user.name=Snack Studio', '-c', 'user.email=studio@intelligencesnacks.com', 'commit', '-m', message], validation.worktreePath);
-    const commitSha = run(['git', 'rev-parse', 'HEAD'], validation.worktreePath);
-    db.query("UPDATE git_publication_attempts SET status='validating-commit',commit_sha=?1,updated_at=?2 WHERE id=?3").run(commitSha, Date.now(), attemptId);
+    let commitSha: string;
+    let cleanOutput: string;
+    if (publicationCanResume(resumablePublication, validation, packageValue.fingerprint)
+      && run(['git', 'rev-parse', 'HEAD'], validation.worktreePath) === resumablePublication!.commitSha
+      && run(['git', 'rev-parse', `${resumablePublication!.commitSha}^`], validation.worktreePath) === validation.baseCommit) {
+      commitSha = resumablePublication!.commitSha!;
+      cleanOutput = resumablePublication!.cleanBuildOutput!;
+      db.query("UPDATE git_publication_attempts SET status='validating-commit',commit_sha=?1,clean_build_output=?2,updated_at=?3 WHERE id=?4")
+        .run(commitSha, cleanOutput, Date.now(), attemptId);
+    } else {
+      const paths = packageValue.files.map((file) => file.destination);
+      run(['git', 'add', '--', ...paths], validation.worktreePath);
+      const stagedOutsideManifest = run(['git', 'diff', '--cached', '--name-only'], validation.worktreePath).split('\n').filter(Boolean).filter((path) => !paths.includes(path));
+      if (stagedOutsideManifest.length) throw new Error(`Publication contains files outside the manifest: ${stagedOutsideManifest.join(', ')}`);
+      if (!run(['git', 'diff', '--cached', '--name-only'], validation.worktreePath)) throw new Error('The validated package does not contain any website changes.');
+      run(['git', '-c', 'user.name=Snack Studio', '-c', 'user.email=studio@intelligencesnacks.com', 'commit', '-m', message], validation.worktreePath);
+      commitSha = run(['git', 'rev-parse', 'HEAD'], validation.worktreePath);
+      db.query("UPDATE git_publication_attempts SET status='validating-commit',commit_sha=?1,updated_at=?2 WHERE id=?3").run(commitSha, Date.now(), attemptId);
 
-    const cleanWorktree = resolve(PUBLICATION_WORKTREE_DIR, `clean-${attemptId}`); mkdirSync(dirname(cleanWorktree), { recursive: true });
-    let cleanOutput = '';
-    try {
-      run(['git', 'worktree', 'add', '--detach', cleanWorktree, commitSha], INTELLIGENCE_SNACKS_REPO);
-      const install = run(['bun', 'install', '--frozen-lockfile'], cleanWorktree);
-      const build = run(['bun', 'run', 'build'], cleanWorktree);
-      cleanOutput = `${install}\n${build}`.trim();
-    } finally {
-      if (existsSync(cleanWorktree)) {
-        try { run(['git', 'worktree', 'remove', '--force', cleanWorktree], INTELLIGENCE_SNACKS_REPO); } catch {}
+      const cleanWorktree = resolve(PUBLICATION_WORKTREE_DIR, `clean-${attemptId}`); mkdirSync(dirname(cleanWorktree), { recursive: true });
+      cleanOutput = '';
+      try {
+        run(['git', 'worktree', 'add', '--detach', cleanWorktree, commitSha], INTELLIGENCE_SNACKS_REPO);
+        const install = run(['bun', 'install', '--frozen-lockfile'], cleanWorktree);
+        const build = run(['bun', 'run', 'build'], cleanWorktree);
+        cleanOutput = `${install}\n${build}`.trim();
+      } finally {
+        if (existsSync(cleanWorktree)) {
+          try { run(['git', 'worktree', 'remove', '--force', cleanWorktree], INTELLIGENCE_SNACKS_REPO); } catch {}
+        }
       }
     }
     db.query("UPDATE git_publication_attempts SET status='pushing-main',clean_build_output=?1,updated_at=?2 WHERE id=?3").run(cleanOutput.slice(0, 40_000), Date.now(), attemptId);

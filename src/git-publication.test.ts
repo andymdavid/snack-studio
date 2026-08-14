@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { validationAuthorizesPublication } from './git-publication.ts';
+import { publicationCanResume, validationAuthorizesPublication } from './git-publication.ts';
 
 const passedValidation = {
   id: 'validation-1',
@@ -28,5 +28,19 @@ describe('validationAuthorizesPublication', () => {
     expect(validationAuthorizesPublication('fingerprint-2', passedValidation)).toBe(false);
     expect(validationAuthorizesPublication('fingerprint-1', { ...passedValidation, status: 'failed' })).toBe(false);
     expect(validationAuthorizesPublication('fingerprint-1', { ...passedValidation, baseCommit: '' })).toBe(false);
+  });
+});
+
+describe('publicationCanResume', () => {
+  const failedPublication = {
+    status: 'failed', validationAttemptId: 'validation-1', packageFingerprint: 'fingerprint-1',
+    commitSha: 'commit-1', cleanBuildOutput: 'build passed',
+  } as any;
+
+  test('reuses only a built commit from the exact failed validation', () => {
+    expect(publicationCanResume(failedPublication, passedValidation, 'fingerprint-1')).toBe(true);
+    expect(publicationCanResume({ ...failedPublication, cleanBuildOutput: null }, passedValidation, 'fingerprint-1')).toBe(false);
+    expect(publicationCanResume({ ...failedPublication, validationAttemptId: 'other' }, passedValidation, 'fingerprint-1')).toBe(false);
+    expect(publicationCanResume(failedPublication, passedValidation, 'other')).toBe(false);
   });
 });
