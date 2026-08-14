@@ -2,16 +2,17 @@ import { db } from './db.ts';
 import { INTELLIGENCE_SNACKS_REPO } from './config.ts';
 import { recordAuditEvent } from './episodes.ts';
 import { getLatestGitPublication } from './git-publication.ts';
+import { gitEnvironment } from './git-auth.ts';
 
 function run(command: string[], cwd = INTELLIGENCE_SNACKS_REPO) {
-  const result = Bun.spawnSync(command, { cwd, env: process.env });
+  const result = Bun.spawnSync(command, { cwd, env: gitEnvironment() });
   const stdout = result.stdout.toString(); const stderr = result.stderr.toString();
   if (result.exitCode !== 0) throw new Error(`${command.join(' ')} failed\n${stderr || stdout}`.trim());
   return stdout.trim();
 }
 
 function isAncestor(ancestor: string, descendant: string) {
-  return Bun.spawnSync(['git', 'merge-base', '--is-ancestor', ancestor, descendant], { cwd: INTELLIGENCE_SNACKS_REPO, env: process.env }).exitCode === 0;
+  return Bun.spawnSync(['git', 'merge-base', '--is-ancestor', ancestor, descendant], { cwd: INTELLIGENCE_SNACKS_REPO, env: gitEnvironment() }).exitCode === 0;
 }
 
 function mapDeployment(row: Record<string, unknown> | null) {

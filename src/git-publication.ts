@@ -5,9 +5,10 @@ import { INTELLIGENCE_SNACKS_REPO, PUBLICATION_WORKTREE_DIR } from './config.ts'
 import { getEpisode, recordAuditEvent } from './episodes.ts';
 import { buildPublicationPackage } from './publication-package.ts';
 import { getLatestWebsiteValidation } from './website-validation.ts';
+import { gitEnvironment } from './git-auth.ts';
 
 function run(command: string[], cwd: string) {
-  const result = Bun.spawnSync(command, { cwd, env: process.env });
+  const result = Bun.spawnSync(command, { cwd, env: gitEnvironment() });
   const stdout = result.stdout.toString(); const stderr = result.stderr.toString();
   if (result.exitCode !== 0) throw new Error(`${command.join(' ')} failed\n${stderr || stdout}`.trim());
   return stdout.trim();
