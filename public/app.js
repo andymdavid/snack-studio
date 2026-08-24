@@ -80,6 +80,7 @@ const state = {
   thumbnailPollTimers: {},
   liveEventAbortController: null,
   liveRefreshTimer: null,
+  liveCacheRefreshTimer: null,
   liveReconnectTimer: null,
 };
 
@@ -399,8 +400,61 @@ function stopLiveEvents() {
   state.liveEventAbortController = null;
   if (state.liveRefreshTimer) clearTimeout(state.liveRefreshTimer);
   state.liveRefreshTimer = null;
+  if (state.liveCacheRefreshTimer) clearTimeout(state.liveCacheRefreshTimer);
+  state.liveCacheRefreshTimer = null;
   if (state.liveReconnectTimer) clearTimeout(state.liveReconnectTimer);
   state.liveReconnectTimer = null;
+}
+
+function scheduleLiveCacheRefresh() {
+  if (state.liveCacheRefreshTimer) clearTimeout(state.liveCacheRefreshTimer);
+  const token = state.token;
+  state.liveCacheRefreshTimer = setTimeout(async () => {
+    state.liveCacheRefreshTimer = null;
+    if (!token || token !== state.token) return;
+    const refreshes = [];
+
+    if (state.loadedRoutes.has('episodes')) refreshes.push(
+      api('/api/episodes').then((payload) => {
+        if (token !== state.token) return;
+        state.episodes = payload.episodes || [];
+        if (state.route === '/') renderEpisodes();
+      }),
+    );
+    for (const [kind, projection, route] of [['review', 'snacks', '/review'], ['assets', 'assets', '/assets'], ['publications', 'publications', '/publications']]) {
+      if (!state.loadedRoutes.has(`workflow:${kind}`)) continue;
+      refreshes.push(api(`/api/work/${projection}`).then((payload) => {
+        if (token !== state.token) return;
+        state.workflowCache[kind] = payload.episodes || [];
+        if (state.route === route) {
+          state.workflows = state.workflowCache[kind];
+          renderWorkflowQueue(kind);
+        }
+      }));
+    }
+    if (state.loadedRoutes.has('assets')) refreshes.push(
+      api('/api/assets').then((payload) => {
+        if (token !== state.token) return;
+        state.assets = payload.assets || [];
+        if (state.route === '/library') renderAssetLibrary();
+      }),
+    );
+    if (state.loadedRoutes.has('contributors')) refreshes.push(
+      api('/api/contributors').then((payload) => {
+        if (token !== state.token) return;
+        state.contributors = payload.contributors || [];
+        if (state.route === '/contributors') renderContributorLibrary();
+      }),
+    );
+    if (state.loadedRoutes.has('diagnostics')) refreshes.push(
+      api('/api/diagnostics').then((payload) => {
+        if (token !== state.token) return;
+        state.diagnostics = payload.items || [];
+        if (state.route === '/diagnostics') renderDiagnostics();
+      }),
+    );
+    await Promise.allSettled(refreshes);
+  }, 120);
 }
 
 function scheduleLiveEpisodeRefresh(event) {
@@ -493,6 +547,7 @@ async function startLiveEvents() {
           if (event.type === 'thumbnail.updated') scheduleLiveEpisodeRefresh(event);
           else if (event.type === 'portrait.updated') scheduleLivePortraitRefresh(event);
           else if (event.type === 'regeneration.updated') scheduleLiveRegenerationRefresh(event);
+          scheduleLiveCacheRefresh();
         } catch { /* ignore malformed event */ }
       }
     }
