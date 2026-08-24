@@ -37,6 +37,7 @@ const state = {
   directNsec: "",
   episodes: [],
   workflows: [],
+  workflowCache: {},
   workspaceOrigin: "/",
   activeEpisodeTab: 'overview',
   activeWorkflow: null,
@@ -71,6 +72,10 @@ const state = {
   assets: [],
   assetFilter: 'all',
   diagnostics: [],
+  graphPayload: null,
+  loadedRoutes: new Set(),
+  routeRequestController: null,
+  routeGeneration: 0,
   diagnosticFilter: 'attention',
   thumbnailPollTimers: {},
   liveEventAbortController: null,
@@ -257,6 +262,14 @@ function stopPolling() {
 }
 
 async function renderRoute() {
+  state.routeRequestController?.abort();
+  const controller = new AbortController();
+  state.routeRequestController = controller;
+  const routeContext = {
+    route: appRoute(),
+    generation: ++state.routeGeneration,
+    signal: controller.signal,
+  };
   document.querySelector('.candidateEditorDialog')?.remove();
   document.querySelector('.thumbnailReviewDialog')?.remove();
   state.route = appRoute();
@@ -287,19 +300,29 @@ async function renderRoute() {
   }
 
   if (state.route.startsWith('/review')) {
-    showOnly('home'); await loadWorkflowRoute('review'); return;
+    showOnly('home'); await loadWorkflowRoute('review', routeContext); return;
   }
-  if (state.route.startsWith('/assets')) { showOnly('home'); await loadWorkflowRoute('assets'); return; }
-  if (state.route === '/library') { showOnly('home'); await loadAssetLibrary(); return; }
+  if (state.route.startsWith('/assets')) { showOnly('home'); await loadWorkflowRoute('assets', routeContext); return; }
+  if (state.route === '/library') { showOnly('home'); await loadAssetLibrary(routeContext); return; }
   if (state.route === '/diagnostics') { showOnly('home'); await loadDiagnostics(); return; }
   if (state.route.startsWith('/publications')) {
-    showOnly('home'); await loadWorkflowRoute('publications'); return;
+    showOnly('home'); await loadWorkflowRoute('publications', routeContext); return;
   }
-  if (state.route.startsWith('/contributors')) { showOnly('home'); await loadContributorRoute(); return; }
-  if (state.route === '/graph') { showOnly('home'); await loadGraph(); return; }
+  if (state.route.startsWith('/contributors')) { showOnly('home'); await loadContributorRoute(routeContext); return; }
+  if (state.route === '/graph') { showOnly('home'); await loadGraph(routeContext); return; }
 
   showOnly("home");
-  await loadEpisodeRoute();
+  await loadEpisodeRoute(routeContext);
+}
+
+function routeIsCurrent(context) {
+  return !context?.signal.aborted
+    && context.generation === state.routeGeneration
+    && context.route === state.route;
+}
+
+function routeErrorIsAbort(error, context) {
+  return context?.signal.aborted || error?.name === 'AbortError';
 }
 
 async function finishLoginWithSigner(getPubkey, signChallenge) {
@@ -547,17 +570,17 @@ function formatActivity(timestamp) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(value));
 }
 
-async function loadEpisodeRoute() {
+async function loadEpisodeRoute(routeContext) {
   const match = state.route.match(/^\/episodes\/([^/]+)(?:\/(snacks|assets|publication))?$/);
   if (match) {
     const tab = match[2] || 'overview';
-    await loadEpisode(decodeURIComponent(match[1]), { tab, stage: tab === 'snacks' ? 'output' : tab === 'assets' || tab === 'publication' ? 'publication' : undefined });
+    await loadEpisode(decodeURIComponent(match[1]), { tab, stage: tab === 'snacks' ? 'output' : tab === 'assets' || tab === 'publication' ? 'publication' : undefined, routeContext });
     return;
   }
-  await loadEpisodes();
+  await loadEpisodes(routeContext);
 }
 
-async function loadWorkflowRoute(kind) {
+async function loadWorkflowRoute(kind, routeContext) {
   const routePattern = kind === 'review' ? /^\/review\/([^/]+)$/ : kind === 'assets' ? /^\/assets\/([^/]+)$/ : /^\/publications\/([^/]+)$/;
   const match = state.route.match(routePattern);
   if (match) {
@@ -569,12 +592,21 @@ async function loadWorkflowRoute(kind) {
   const page = kind === 'review' ? 'reviewQueuePage' : kind === 'assets' ? 'assetReviewPage' : 'publicationsPage';
   const label = kind === 'review' ? 'Review Queue' : kind === 'assets' ? 'Asset Review' : 'Publications';
   showStudioPage(page, `Snack Studio / ${label}`);
-  setStudioStatus('Loading workflow…');
+  const cacheKey = `workflow:${kind}`;
+  if (state.loadedRoutes.has(cacheKey)) {
+    state.workflows = state.workflowCache[kind] || [];
+    renderWorkflowQueue(kind);
+    setStudioStatus('Refreshing…');
+  } else setStudioStatus('Loading workflow…');
   try {
     const projection = kind === 'review' ? 'snacks' : kind === 'assets' ? 'assets' : 'publications';
-    state.workflows = (await api(`/api/work/${projection}`)).episodes || [];
+    const workflows = (await api(`/api/work/${projection}`, { signal: routeContext.signal })).episodes || [];
+    if (!routeIsCurrent(routeContext)) return;
+    state.workflows = workflows;
+    state.workflowCache[kind] = workflows;
+    state.loadedRoutes.add(cacheKey);
     renderWorkflowQueue(kind); setStudioStatus('Ready');
-  } catch (error) { setStudioStatus(error.message); renderWorkflowQueue(kind, error.message); }
+  } catch (error) { if (!routeErrorIsAbort(error, routeContext)) { setStudioStatus(error.message); renderWorkflowQueue(kind, error.message); } }
 }
 
 function renderWorkflowQueue(kind, errorMessage = '') {
@@ -598,7 +630,7 @@ function renderWorkflowQueue(kind, errorMessage = '') {
   }
 }
 
-async function loadContributorRoute() {
+async function loadContributorRoute(routeContext) {
   const match = state.route.match(/^\/contributors\/([^/]+)$/);
   if (match) {
     const requestedReturn = new URLSearchParams(window.location.search).get('returnTo');
@@ -606,20 +638,32 @@ async function loadContributorRoute() {
     $('contributorsBackButton').textContent = /\/episodes\/[^/]+\/assets$/.test(state.contributorReturnTo) ? '← Asset Review' : '← All contributors';
     showStudioPage('contributorPage', 'Snack Studio / Contributors / Profile'); setStudioStatus('Loading contributor…');
     try {
-      state.activeContributor = (await api(`/api/contributors/${encodeURIComponent(decodeURIComponent(match[1]))}`)).contributor;
+      const contributor = (await api(`/api/contributors/${encodeURIComponent(decodeURIComponent(match[1]))}`, { signal: routeContext.signal })).contributor;
+      if (!routeIsCurrent(routeContext)) return;
+      state.activeContributor = contributor;
       renderContributorWorkspace(state.activeContributor); setStudioStatus('Ready');
-    } catch (error) { $('contributorWorkspace').textContent = error.message; setStudioStatus(error.message); }
+    } catch (error) { if (!routeErrorIsAbort(error, routeContext)) { $('contributorWorkspace').textContent = error.message; setStudioStatus(error.message); } }
     return;
   }
-  showStudioPage('contributorsPage', 'Snack Studio / Contributors'); setStudioStatus('Loading contributors…');
-  try { state.contributors = (await api('/api/contributors')).contributors || []; renderContributorLibrary(); setStudioStatus('Ready'); }
-  catch (error) { $('contributorLibrary').textContent = error.message; setStudioStatus(error.message); }
+  showStudioPage('contributorsPage', 'Snack Studio / Contributors');
+  if (state.loadedRoutes.has('contributors')) { renderContributorLibrary(); setStudioStatus('Refreshing…'); }
+  else setStudioStatus('Loading contributors…');
+  try {
+    const contributors = (await api('/api/contributors', { signal: routeContext.signal })).contributors || [];
+    if (!routeIsCurrent(routeContext)) return;
+    state.contributors = contributors; state.loadedRoutes.add('contributors'); renderContributorLibrary(); setStudioStatus('Ready');
+  } catch (error) { if (!routeErrorIsAbort(error, routeContext)) { $('contributorLibrary').textContent = error.message; setStudioStatus(error.message); } }
 }
 
-async function loadAssetLibrary() {
-  showStudioPage('assetLibraryPage', 'Snack Studio / Asset Library'); setStudioStatus('Loading assets…');
-  try { state.assets = (await api('/api/assets')).assets || []; renderAssetLibrary(); setStudioStatus('Ready'); }
-  catch (error) { $('assetLibraryGrid').textContent = error.message; setStudioStatus(error.message); }
+async function loadAssetLibrary(routeContext) {
+  showStudioPage('assetLibraryPage', 'Snack Studio / Asset Library');
+  if (state.loadedRoutes.has('assets')) { renderAssetLibrary(); setStudioStatus('Refreshing…'); }
+  else setStudioStatus('Loading assets…');
+  try {
+    const assets = (await api('/api/assets', { signal: routeContext.signal })).assets || [];
+    if (!routeIsCurrent(routeContext)) return;
+    state.assets = assets; state.loadedRoutes.add('assets'); renderAssetLibrary(); setStudioStatus('Ready');
+  } catch (error) { if (!routeErrorIsAbort(error, routeContext)) { $('assetLibraryGrid').textContent = error.message; setStudioStatus(error.message); } }
 }
 
 async function loadDiagnostics() {
@@ -751,9 +795,15 @@ async function refreshContributorDetail(contributorId) {
   renderContributorWorkspace(state.activeContributor);
 }
 
-async function loadGraph() {
-  showStudioPage('graphPage', 'Snack Studio / Graph'); setStudioStatus('Loading graph…');
-  try { const payload = await api('/api/graph'); renderGraph(payload); setStudioStatus('Ready'); } catch (error) { $('graphWorkspace').textContent = error.message; setStudioStatus(error.message); }
+async function loadGraph(routeContext) {
+  showStudioPage('graphPage', 'Snack Studio / Graph');
+  if (state.loadedRoutes.has('graph')) { renderGraph(state.graphPayload); setStudioStatus('Refreshing…'); }
+  else setStudioStatus('Loading graph…');
+  try {
+    const payload = await api('/api/graph', { signal: routeContext.signal });
+    if (!routeIsCurrent(routeContext)) return;
+    state.graphPayload = payload; state.loadedRoutes.add('graph'); renderGraph(payload); setStudioStatus('Ready');
+  } catch (error) { if (!routeErrorIsAbort(error, routeContext)) { $('graphWorkspace').textContent = error.message; setStudioStatus(error.message); } }
 }
 
 function renderGraph(payload) {
@@ -766,22 +816,27 @@ function renderGraph(payload) {
     const note = document.createElement('span'); note.textContent = relationship.explanation || 'No explanation supplied'; copy.append(title, note);
     if (relationship.evidenceExcerpt) { const evidence = document.createElement('span'); evidence.className = 'metadata'; evidence.textContent = `Evidence: ${relationship.evidenceExcerpt}`; copy.appendChild(evidence); }
     const actions = document.createElement('div'); const pill = document.createElement('span'); pill.className = `statusPill ${relationship.reviewState === 'approved' ? 'statusSuccess' : relationship.reviewState === 'rejected' ? 'statusDanger' : 'statusPending'}`; pill.textContent = formatEpisodeStatus(relationship.reviewState); actions.appendChild(pill);
-    if (relationship.reviewState === 'draft') for (const [reviewState, label] of [['approved','Approve'],['rejected','Reject']]) { const button = document.createElement('button'); button.type = 'button'; button.className = reviewState === 'approved' ? 'btn btnPrimary' : 'btn btnSecondary'; button.textContent = label; button.addEventListener('click', async () => { await api(`/api/relationships/${encodeURIComponent(relationship.id)}`, { method: 'PATCH', body: JSON.stringify({ reviewState }) }); await loadGraph(); }); actions.appendChild(button); }
+    if (relationship.reviewState === 'draft') for (const [reviewState, label] of [['approved','Approve'],['rejected','Reject']]) { const button = document.createElement('button'); button.type = 'button'; button.className = reviewState === 'approved' ? 'btn btnPrimary' : 'btn btnSecondary'; button.textContent = label; button.addEventListener('click', async () => { await api(`/api/relationships/${encodeURIComponent(relationship.id)}`, { method: 'PATCH', body: JSON.stringify({ reviewState }) }); await renderRoute(); }); actions.appendChild(button); }
     row.append(copy, actions); container.appendChild(row);
   }
 }
 
-async function loadEpisodes() {
+async function loadEpisodes(routeContext) {
   showStudioPage("episodesPage", "Snack Studio / Episodes");
-  setStudioStatus("Loading episodes…");
+  if (state.loadedRoutes.has('episodes')) { renderEpisodes(); setStudioStatus('Refreshing…'); }
+  else setStudioStatus("Loading episodes…");
   try {
-    const payload = await api("/api/episodes");
+    const payload = await api("/api/episodes", { signal: routeContext.signal });
+    if (!routeIsCurrent(routeContext)) return;
     state.episodes = payload.episodes || [];
+    state.loadedRoutes.add('episodes');
     renderEpisodes();
     setStudioStatus("Ready");
   } catch (error) {
-    setStudioStatus(error.message);
-    renderEpisodeError(error.message);
+    if (!routeErrorIsAbort(error, routeContext)) {
+      setStudioStatus(error.message);
+      renderEpisodeError(error.message);
+    }
   }
 }
 
@@ -850,6 +905,8 @@ function renderEpisodes() {
 }
 
 async function loadEpisode(id, options = {}) {
+  const routeContext = options.routeContext;
+  const requestOptions = routeContext ? { signal: routeContext.signal } : {};
   document.querySelector('.candidateEditorDialog')?.remove();
   state.activeEpisodeTab = options.tab || (state.activeEpisode?.id === id ? state.activeEpisodeTab : 'overview');
   state.workspaceOrigin = state.activeEpisodeTab === 'snacks' ? '/review' : state.activeEpisodeTab === 'assets' ? '/assets' : state.activeEpisodeTab === 'publication' ? '/publications' : '/';
@@ -858,18 +915,19 @@ async function loadEpisode(id, options = {}) {
   setStudioStatus("Loading workspace…");
   try {
     const [payload, candidatePayload, curationPayload, pipelinePayload, publicationPayload, packagePayload, validationPayload, gitPublicationPayload, gitDeploymentPayload, workPayload, publicTranscriptPayload] = await Promise.all([
-      api(`/api/episodes/${encodeURIComponent(id)}`),
-      api(`/api/episodes/${encodeURIComponent(id)}/candidates`),
-      api(`/api/episodes/${encodeURIComponent(id)}/curation`),
-      api(`/api/episodes/${encodeURIComponent(id)}/pipeline-requests`),
-      api(`/api/episodes/${encodeURIComponent(id)}/publication-preparation`).catch(() => ({ preparation: null })),
-      api(`/api/episodes/${encodeURIComponent(id)}/publication-package`).catch(() => ({ package: null })),
-      api(`/api/episodes/${encodeURIComponent(id)}/website-validation`).catch(() => ({ validation: null })),
-      api(`/api/episodes/${encodeURIComponent(id)}/git-publication`).catch(() => ({ publication: null })),
-      api(`/api/episodes/${encodeURIComponent(id)}/git-deployment`).catch(() => ({ deployment: null })),
-      api(`/api/episodes/${encodeURIComponent(id)}/work`).catch(() => ({ work: null })),
-      api(`/api/episodes/${encodeURIComponent(id)}/public-transcript`).catch(() => ({ publicTranscript: null })),
+      api(`/api/episodes/${encodeURIComponent(id)}`, requestOptions),
+      api(`/api/episodes/${encodeURIComponent(id)}/candidates`, requestOptions),
+      api(`/api/episodes/${encodeURIComponent(id)}/curation`, requestOptions),
+      api(`/api/episodes/${encodeURIComponent(id)}/pipeline-requests`, requestOptions),
+      api(`/api/episodes/${encodeURIComponent(id)}/publication-preparation`, requestOptions).catch((error) => ({ preparation: null, error: error.message })),
+      api(`/api/episodes/${encodeURIComponent(id)}/publication-package`, requestOptions).catch(() => ({ package: null })),
+      api(`/api/episodes/${encodeURIComponent(id)}/website-validation`, requestOptions).catch(() => ({ validation: null })),
+      api(`/api/episodes/${encodeURIComponent(id)}/git-publication`, requestOptions).catch(() => ({ publication: null })),
+      api(`/api/episodes/${encodeURIComponent(id)}/git-deployment`, requestOptions).catch(() => ({ deployment: null })),
+      api(`/api/episodes/${encodeURIComponent(id)}/work`, requestOptions).catch(() => ({ work: null })),
+      api(`/api/episodes/${encodeURIComponent(id)}/public-transcript`, requestOptions).catch(() => ({ publicTranscript: null })),
     ]);
+    if (routeContext && !routeIsCurrent(routeContext)) return;
     state.activeEpisode = payload.episode;
     state.activeTranscript = payload.transcript || null;
     state.publicTranscript = publicTranscriptPayload.publicTranscript || null;
@@ -910,6 +968,7 @@ async function loadEpisode(id, options = {}) {
     startEpisodePipelinePolling();
     setStudioStatus("Ready");
   } catch (error) {
+    if (routeErrorIsAbort(error, routeContext)) return;
     setStudioStatus(error.message);
     $("episodeWorkspace").textContent = error.message;
   }
