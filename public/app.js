@@ -4157,6 +4157,85 @@ function base64Utf8(value) {
   return btoa(binary);
 }
 
+const COMMAND_ROUTES = [
+  { id: 'episodes', label: 'Go to Episodes', route: '/', shortcut: 'G E' },
+  { id: 'review', label: 'Go to Snack Review', route: '/review', shortcut: 'G R' },
+  { id: 'assets', label: 'Go to Asset Review', route: '/assets', shortcut: 'G A' },
+  { id: 'publications', label: 'Go to Publications', route: '/publications', shortcut: 'G P' },
+  { id: 'library', label: 'Go to Library', route: '/library', shortcut: 'G L' },
+  { id: 'graph', label: 'Go to Graph', route: '/graph', shortcut: 'G G' },
+  { id: 'diagnostics', label: 'Go to Diagnostics', route: '/diagnostics', shortcut: 'G D' },
+  { id: 'settings', label: 'Go to Settings', route: '/settings', shortcut: 'G S' },
+];
+
+function commandCatalog() {
+  const commands = COMMAND_ROUTES.map((command) => ({ ...command, run: () => navigate(command.route) }));
+  if (state.me?.access?.edit) commands.unshift({ id: 'new-episode', label: 'New episode', shortcut: 'N', run: openEpisodeDialog });
+  if (state.activeEpisode && state.route.startsWith(`/episodes/${encodeURIComponent(state.activeEpisode.id)}`)) {
+    for (const [tab, label] of [['overview', 'Episode overview'], ['snacks', 'Episode Snacks'], ['assets', 'Episode assets'], ['publication', 'Episode publication']]) {
+      commands.push({ id: `episode-${tab}`, label, shortcut: '', run: () => navigate(episodeTabUrl(tab)) });
+    }
+  }
+  return commands;
+}
+
+function commandMenu() {
+  let dialog = document.querySelector('.commandMenuDialog');
+  if (dialog) return dialog;
+  dialog = document.createElement('dialog'); dialog.className = 'commandMenuDialog'; dialog.setAttribute('aria-label', 'Command menu');
+  const shell = document.createElement('div'); shell.className = 'commandMenuShell';
+  const input = document.createElement('input'); input.type = 'search'; input.className = 'commandMenuInput'; input.placeholder = 'Type a command…'; input.setAttribute('aria-label', 'Search commands'); input.autocomplete = 'off';
+  const results = document.createElement('div'); results.className = 'commandMenuResults'; results.setAttribute('role', 'listbox');
+  const footer = document.createElement('div'); footer.className = 'commandMenuFooter'; footer.innerHTML = '<span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Run</span><span><kbd>Esc</kbd> Close</span>';
+  shell.append(input, results, footer); dialog.appendChild(shell); document.body.appendChild(dialog);
+  dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });
+  input.addEventListener('input', () => renderCommandMenu(dialog));
+  input.addEventListener('keydown', (event) => {
+    const options = [...results.querySelectorAll('[role="option"]')];
+    let index = options.findIndex((option) => option.getAttribute('aria-selected') === 'true');
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault(); index = (index + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+      options.forEach((option, optionIndex) => option.setAttribute('aria-selected', String(optionIndex === index))); options[index]?.scrollIntoView({ block: 'nearest' });
+    } else if (event.key === 'Enter') { event.preventDefault(); options[Math.max(0, index)]?.click(); }
+  });
+  dialog.addEventListener('close', () => dialog.returnFocus?.focus());
+  return dialog;
+}
+
+function renderCommandMenu(dialog) {
+  const input = dialog.querySelector('.commandMenuInput'); const results = dialog.querySelector('.commandMenuResults');
+  const query = input.value.trim().toLowerCase(); const commands = commandCatalog().filter((command) => `${command.label} ${command.shortcut}`.toLowerCase().includes(query));
+  results.replaceChildren();
+  if (!commands.length) { const empty = document.createElement('p'); empty.className = 'commandMenuEmpty'; empty.textContent = 'No matching commands'; results.appendChild(empty); return; }
+  commands.forEach((command, index) => {
+    const option = document.createElement('button'); option.type = 'button'; option.className = 'commandMenuOption'; option.setAttribute('role', 'option'); option.setAttribute('aria-selected', String(index === 0));
+    const label = document.createElement('span'); label.textContent = command.label; option.appendChild(label);
+    if (command.shortcut) { const shortcut = document.createElement('kbd'); shortcut.textContent = command.shortcut; option.appendChild(shortcut); }
+    option.addEventListener('click', () => { dialog.close(); command.run(); }); results.appendChild(option);
+  });
+}
+
+function openCommandMenu() {
+  if (!state.token || !state.me) return;
+  const dialog = commandMenu(); dialog.returnFocus = document.activeElement; dialog.querySelector('.commandMenuInput').value = ''; renderCommandMenu(dialog); dialog.showModal(); dialog.querySelector('.commandMenuInput').focus();
+}
+
+let pendingGoShortcut = 0;
+window.addEventListener('keydown', (event) => {
+  const target = event.target;
+  const editing = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target?.isContentEditable;
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); openCommandMenu(); return; }
+  if (editing || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
+  const key = event.key.toLowerCase();
+  if (performance.now() - pendingGoShortcut < 1000) {
+    pendingGoShortcut = 0;
+    const command = COMMAND_ROUTES.find((item) => item.shortcut.toLowerCase() === `g ${key}`);
+    if (command) { event.preventDefault(); navigate(command.route); return; }
+  }
+  if (key === 'g') { pendingGoShortcut = performance.now(); return; }
+  if (key === 'n' && state.me?.access?.edit) { event.preventDefault(); openEpisodeDialog(); }
+});
+
 function startPolling() {
   if (state.pollTimer) clearInterval(state.pollTimer);
   state.pollTimer = setInterval(async () => {
@@ -4179,6 +4258,8 @@ $("logoutButton").addEventListener("click", logout);
 $("newChatButton").addEventListener("click", newChat);
 $("studioLogoutButton").addEventListener("click", logout);
 $("newEpisodeButton").addEventListener("click", openEpisodeDialog);
+$("commandMenuButton").addEventListener("click", openCommandMenu);
+$("commandMenuButton").querySelector('kbd').textContent = navigator.platform.toLowerCase().includes('mac') ? '⌘K' : 'Ctrl K';
 $("closeEpisodeDialogButton").addEventListener("click", closeEpisodeDialog);
 $("cancelEpisodeButton").addEventListener("click", closeEpisodeDialog);
 $("episodeForm").addEventListener("submit", createEpisodeWorkspace);
