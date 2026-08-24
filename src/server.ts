@@ -1633,6 +1633,14 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       if (!run) return json({ error: "pipeline callback credential is invalid" }, 401);
       const pipelineRequest = getPipelineRequest(requestId);
       if (!pipelineRequest) return json({ error: "pipeline request not found" }, 404);
+      const publishPipelineUpdate = (status: string) => publishLiveEvent({
+        type: 'pipeline.updated',
+        episodeId: pipelineRequest.episodeId,
+        entityType: 'pipeline-request',
+        entityId: pipelineRequest.id,
+        status,
+        updatedAt: Date.now(),
+      });
       if (pipelineRequest.status === "completed" && pipelineRequest.resultAppliedAt) {
         const count = db.query("SELECT COUNT(*) AS count FROM snack_candidates WHERE pipeline_request_id = ?1").get(requestId) as { count: number };
         return json({ ok: true, requestId, status: "completed", replay: true, candidateCount: Number(count.count) });
@@ -1646,6 +1654,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
           percent: Number(body.percent || 0),
           label: String(body.label || "Autopilot is working"),
         });
+        publishPipelineUpdate('running');
         return json({ ok: true, requestId, status: "running", progressPercent: updated.progressPercent });
       }
 
@@ -1663,6 +1672,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
           detail: { requestId, runId: run.id, autopilotRunId: remoteRunId || run.autopilotRunId, summary: failure.slice(0, 500) },
         });
         if (pipelineRequest.operation === 'snack-regeneration' && pipelineRequest.targetCandidateId) publishLiveEvent({ type: 'regeneration.updated', episodeId: pipelineRequest.episodeId, entityType: 'snack-candidate', entityId: pipelineRequest.targetCandidateId, status: 'failed', updatedAt: Date.now() });
+        publishPipelineUpdate('failed');
         return json({ ok: true, requestId, status: "failed" });
       }
 
@@ -1682,6 +1692,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
           detail: { requestId, runId: run.id, reason: validation.error },
         });
         if (pipelineRequest.operation === 'snack-regeneration' && pipelineRequest.targetCandidateId) publishLiveEvent({ type: 'regeneration.updated', episodeId: pipelineRequest.episodeId, entityType: 'snack-candidate', entityId: pipelineRequest.targetCandidateId, status: 'needs-review', updatedAt: Date.now() });
+        publishPipelineUpdate('needs-review');
         return json({ error: validation.error, requestId, status: "needs-review" }, 422);
       }
       try {
@@ -1690,22 +1701,26 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
           const proposal = applySuccessfulRegenerationResult({ localRunId: run.id, result: validation.value as import("./regeneration-result-input.ts").SuccessfulRegenerationResult });
           recordAuditEvent({ action: "candidate.regeneration.proposed", entityType: "episode", entityId: pipelineRequest.episodeId, detail: { requestId, runId: run.id, candidateId: proposal.candidateId, proposalId: proposal.id } });
           publishLiveEvent({ type: 'regeneration.updated', episodeId: pipelineRequest.episodeId, entityType: 'snack-candidate', entityId: proposal.candidateId, status: 'completed', updatedAt: Date.now() });
+          publishPipelineUpdate('completed');
           return json({ ok: true, requestId, status: "completed", proposalId: proposal.id });
         }
         if (pipelineRequest.operation === 'transcript-normalization') {
           const applied = applySuccessfulPublicTranscriptResult({ localRunId: run.id, result: validation.value as import('./public-transcript-result-input.ts').SuccessfulPublicTranscriptResult });
           recordAuditEvent({ action: 'public-transcript.proposed', entityType: 'episode', entityId: pipelineRequest.episodeId, detail: { requestId, runId: run.id, publicTranscriptId: applied.publicTranscriptId } });
+          publishPipelineUpdate('completed');
           return json({ ok: true, requestId, status: 'completed', ...applied });
         }
         if (pipelineRequest.operation === "publication-metadata") {
           if (pipelineRequest.resultSchemaVersion === '3') {
             const applied = applySuccessfulGraphResult({ localRunId: run.id, result: validation.value as import('./graph-result-input.ts').SuccessfulGraphResult });
+            publishPipelineUpdate('completed');
             return json({ ok: true, requestId, status: 'completed', ...applied });
           }
           const applied = pipelineRequest.resultSchemaVersion === '2'
             ? applySuccessfulThemeResult({ localRunId: run.id, result: validation.value as import('./theme-result-input.ts').SuccessfulThemeResult })
             : applySuccessfulPublicationMetadataResult({ localRunId: run.id, result: validation.value as import("./publication-metadata-result-input.ts").SuccessfulPublicationMetadataResult });
           recordAuditEvent({ action: "publication.topics.assigned", entityType: "episode", entityId: pipelineRequest.episodeId, detail: { requestId, runId: run.id, assignmentCount: applied.assignmentCount } });
+          publishPipelineUpdate('completed');
           return json({ ok: true, requestId, status: "completed", replay: applied.replay, assignmentCount: applied.assignmentCount });
         }
         const successfulResult = validation.value as import("./pipeline-result-input.ts").SuccessfulPipelineResult;
@@ -1726,11 +1741,13 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
             },
           });
         }
+        publishPipelineUpdate('completed');
         return json({ ok: true, requestId, status: "completed", replay: applied.replay, candidateCount: applied.candidateCount });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         markPipelineResultRejected({ runId: run.id, summary: message });
         if (pipelineRequest.operation === 'snack-regeneration' && pipelineRequest.targetCandidateId) publishLiveEvent({ type: 'regeneration.updated', episodeId: pipelineRequest.episodeId, entityType: 'snack-candidate', entityId: pipelineRequest.targetCandidateId, status: 'needs-review', updatedAt: Date.now() });
+        publishPipelineUpdate('needs-review');
         return json({ error: message, requestId, status: "needs-review" }, 409);
       }
     }

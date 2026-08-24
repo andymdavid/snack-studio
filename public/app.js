@@ -81,6 +81,7 @@ const state = {
   liveEventAbortController: null,
   liveRefreshTimer: null,
   liveCacheRefreshTimer: null,
+  livePipelineRefreshTimer: null,
   liveReconnectTimer: null,
 };
 
@@ -402,6 +403,8 @@ function stopLiveEvents() {
   state.liveRefreshTimer = null;
   if (state.liveCacheRefreshTimer) clearTimeout(state.liveCacheRefreshTimer);
   state.liveCacheRefreshTimer = null;
+  if (state.livePipelineRefreshTimer) clearTimeout(state.livePipelineRefreshTimer);
+  state.livePipelineRefreshTimer = null;
   if (state.liveReconnectTimer) clearTimeout(state.liveReconnectTimer);
   state.liveReconnectTimer = null;
 }
@@ -525,6 +528,25 @@ function scheduleLiveRegenerationRefresh(event) {
   }, 80);
 }
 
+function scheduleLivePipelineRefresh(event) {
+  const episodeId = state.activeEpisode?.id;
+  const route = state.route;
+  if (!episodeId || event.episodeId !== episodeId || !route.startsWith(`/episodes/${encodeURIComponent(episodeId)}`)) return;
+  if (state.livePipelineRefreshTimer) clearTimeout(state.livePipelineRefreshTimer);
+  state.livePipelineRefreshTimer = setTimeout(async () => {
+    state.livePipelineRefreshTimer = null;
+    if (state.activeEpisode?.id !== episodeId || state.route !== route) return;
+    try {
+      await loadEpisode(episodeId, {
+        tab: state.activeEpisodeTab,
+        stage: state.episodeStage,
+      });
+    } catch {
+      // Route revalidation and durable polling remain the recovery path.
+    }
+  }, 120);
+}
+
 async function startLiveEvents() {
   stopLiveEvents();
   if (!state.token) return;
@@ -547,6 +569,7 @@ async function startLiveEvents() {
           if (event.type === 'thumbnail.updated') scheduleLiveEpisodeRefresh(event);
           else if (event.type === 'portrait.updated') scheduleLivePortraitRefresh(event);
           else if (event.type === 'regeneration.updated') scheduleLiveRegenerationRefresh(event);
+          else if (event.type === 'pipeline.updated') scheduleLivePipelineRefresh(event);
           scheduleLiveCacheRefresh();
         } catch { /* ignore malformed event */ }
       }
@@ -2922,8 +2945,16 @@ function renderPublicTranscriptWorkflow() {
   const header = document.createElement('div'); header.className = 'curationPanelHeader';
   const copy = document.createElement('div'); const title = document.createElement('h3'); title.textContent = 'Website transcript';
   const help = document.createElement('p'); help.textContent = 'A cleaned reading copy derived from the immutable source transcript.'; copy.append(title, help); header.appendChild(copy); panel.appendChild(header);
-  const running = state.pipelineRequests.find((request) => request.operation === 'transcript-normalization' && ['created','awaiting-authorization','queued','running','applying-result'].includes(request.status));
-  if (running) { const status = document.createElement('span'); status.className = 'statusPill statusInfo'; status.textContent = 'Preparing…'; header.appendChild(status); return panel; }
+  const transcriptRequest = state.pipelineRequests.find((request) => request.operation === 'transcript-normalization');
+  const running = transcriptRequest && ['created','awaiting-authorization','queued','running','applying-result'].includes(transcriptRequest.status);
+  if (running) { header.appendChild(renderCompactPipelineProgress('Preparing website transcript')); return panel; }
+  if (transcriptRequest && ['failed','timed-out','needs-review','cancelled'].includes(transcriptRequest.status) && !state.publicTranscript) {
+    const failure = document.createElement('div'); failure.className = 'publicationPreparationBlocker';
+    const message = document.createElement('p'); message.textContent = transcriptRequest.failureSummary || 'Website transcript preparation did not complete.';
+    const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'btn btnSecondary'; retry.textContent = 'Try again'; retry.disabled = !state.me?.access?.edit;
+    retry.addEventListener('click', () => retryPipelineRequest(transcriptRequest.id));
+    failure.append(message, retry); panel.appendChild(failure); return panel;
+  }
   if (!state.publicTranscript) { const pending = document.createElement('p'); pending.textContent = 'Cleanup will start automatically as the publication is prepared.'; panel.appendChild(pending); return panel; }
   const editor = document.createElement('textarea'); editor.className = 'transcriptEditor'; editor.rows = 14; editor.value = state.publicTranscript.transcriptText; editor.disabled = !state.me?.access?.edit || state.publicTranscript.status === 'approved';
   const summary = document.createElement('p'); summary.className = 'metadata'; summary.textContent = state.publicTranscript.cleanupSummary?.join(' · ') || 'Formatting and verbal debris cleaned without changing meaning.';
