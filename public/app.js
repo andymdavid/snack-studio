@@ -153,9 +153,16 @@ function candidateGenerations(candidates, suppliedGenerations) {
     .map((generation, index) => ({ ...generation, sequence: index + 1 }));
 }
 
+function updateStatusNode(node, text) {
+  if (!node || node.textContent === text) return;
+  node.textContent = text;
+  node.classList.add('isUpdating');
+  node.addEventListener('animationend', () => node.classList.remove('isUpdating'), { once: true });
+}
+
 function setStatus(text) {
-  $("status").textContent = text;
-  if ($("studioStatus")) $("studioStatus").textContent = text;
+  updateStatusNode($("status"), text);
+  updateStatusNode($("studioStatus"), text);
 }
 
 function loadProfileCache() {
@@ -620,7 +627,7 @@ async function resolveCurrentUserProfile() {
 }
 
 function setStudioStatus(message) {
-  $("studioStatus").textContent = message;
+  updateStatusNode($("studioStatus"), message);
 }
 
 function formatEpisodeStatus(status) {

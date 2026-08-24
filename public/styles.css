@@ -58,6 +58,9 @@
   --control-height: 36px;
   --focus-ring: 0 0 0 3px var(--coral-soft);
   --shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.06);
+  --shadow-interactive: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-press: cubic-bezier(0.3, 0, 0.2, 1);
 
   /* Compatibility aliases for existing screens. */
   --bg: var(--paper-raised);
@@ -125,7 +128,8 @@ button {
   padding: 6px 12px;
   cursor: pointer;
   font-weight: 500;
-  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+  transform: translateY(0) scale(1);
+  transition: transform 80ms var(--ease-press), border-color 120ms var(--ease-standard), background 120ms var(--ease-standard), color 120ms var(--ease-standard), box-shadow 120ms var(--ease-standard);
 }
 
 button:hover {
@@ -133,9 +137,24 @@ button:hover {
   background: var(--surface-2);
 }
 
+button:not(:disabled):active {
+  transform: translateY(1px) scale(0.985);
+  box-shadow: none;
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+#studioStatus.isUpdating,
+#status.isUpdating {
+  animation: status-feedback 180ms var(--ease-standard);
+}
+
+@keyframes status-feedback {
+  0% { opacity: .45; transform: translateY(1px); }
+  100% { opacity: 1; transform: translateY(0); }
 }
 
 .hidden {
@@ -706,8 +725,9 @@ textarea {
   outline: none;
 }
 .workflowQueue { display:grid; gap:10px; }
-.workflowQueueItem { width:100%; display:flex; align-items:center; justify-content:space-between; gap:24px; padding:18px 20px; border:1px solid var(--border); border-radius:var(--radius-card); background:var(--surface-1); color:var(--text); text-align:left; }
-.workflowQueueItem:hover { border-color:var(--border-strong); background:var(--surface-2); }
+.workflowQueueItem { width:100%; display:flex; align-items:center; justify-content:space-between; gap:24px; padding:18px 20px; border:1px solid var(--border); border-radius:var(--radius-card); background:var(--surface-1); color:var(--text); text-align:left; transition:transform 100ms var(--ease-standard), border-color 120ms var(--ease-standard), background 120ms var(--ease-standard), box-shadow 120ms var(--ease-standard); }
+.workflowQueueItem:hover { border-color:var(--border-strong); background:var(--surface-2); box-shadow:var(--shadow-interactive); transform:translateY(-1px); }
+.workflowQueueItem:active { transform:translateY(1px) scale(.995); }
 .workflowQueueItem > div { display:grid; gap:5px; }
 .workflowQueueItem > div:last-child { justify-items:end; }
 .workflowQueueItem strong { font-size:var(--text-lg); }
@@ -1169,6 +1189,7 @@ textarea {
 .episodeRow:hover {
   background: var(--surface-2);
 }
+.episodeRow:active { background:var(--surface-3); transform:none; }
 .episodeRow { cursor:pointer; }
 .episodeRow:has(.episodeRowMenu[open]) { position:relative; z-index:21; }
 .episodeRowMenu { position:relative; justify-self:end; }
@@ -2040,7 +2061,8 @@ textarea {
 .assetLibraryFilters .active { border-color:var(--text-primary); background:var(--text-primary); color:var(--surface-1); }
 .assetLibraryGrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
 .assetLibraryGrid > .workflowQueueEmpty { grid-column:1 / -1; }
-.assetLibraryCard { min-width:0; overflow:hidden; border:1px solid var(--border); border-radius:var(--radius-card); background:var(--surface-1); }
+.assetLibraryCard { min-width:0; overflow:hidden; border:1px solid var(--border); border-radius:var(--radius-card); background:var(--surface-1); transition:border-color 120ms var(--ease-standard), box-shadow 120ms var(--ease-standard); }
+.assetLibraryCard:has(.assetLibraryPreview:hover) { border-color:var(--border-strong); box-shadow:var(--shadow-interactive); }
 .assetLibraryPreview { display:block; width:100%; padding:0; border:0; background:var(--surface-2); cursor:pointer; overflow:hidden; }
 .assetLibraryPreview img { display:block; width:100%; height:100%; object-fit:cover; transition:transform 160ms ease; }
 .assetLibraryPreview:hover img { transform:scale(1.015); }
@@ -2198,8 +2220,9 @@ div.publicationPreparationBlocker { display: flex; align-items: center; justify-
 .episodeWorkspaceDestinations { margin:0; padding:0 24px; }
 .episodeWorkspaceDestinations button:disabled { cursor:not-allowed; opacity:.42; }
 .contributorLibrary { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
-.contributorLibraryCard { display:flex; align-items:center; gap:14px; min-height:112px; padding:16px; border:1px solid var(--border); border-radius:var(--radius-card); background:var(--surface-1); color:var(--text-primary); text-align:left; cursor:pointer; }
-.contributorLibraryCard:hover { border-color:var(--coral); transform:translateY(-1px); }
+.contributorLibraryCard { display:flex; align-items:center; gap:14px; min-height:112px; padding:16px; border:1px solid var(--border); border-radius:var(--radius-card); background:var(--surface-1); color:var(--text-primary); text-align:left; cursor:pointer; transition:transform 100ms var(--ease-standard), border-color 120ms var(--ease-standard), box-shadow 120ms var(--ease-standard); }
+.contributorLibraryCard:hover { border-color:var(--coral); box-shadow:var(--shadow-interactive); transform:translateY(-1px); }
+.contributorLibraryCard:active { transform:translateY(1px) scale(.995); }
 .contributorLibraryPortrait,.contributorWorkspacePortrait { display:grid; place-items:center; flex:0 0 auto; overflow:hidden; border-radius:var(--radius-card); background:var(--surface-2); color:var(--text-muted); font-weight:700; }
 .contributorLibraryPortrait { width:76px; height:76px; font-size:var(--text-xl); }
 .contributorLibraryPortrait img,.contributorWorkspacePortrait img,.contributorSourcePreview img { width:100%; height:100%; object-fit:cover; }
