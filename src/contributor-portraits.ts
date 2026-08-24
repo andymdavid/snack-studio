@@ -19,6 +19,11 @@ function tokenHash(value: string): string {
   return bytesToHex(sha256(new TextEncoder().encode(value)));
 }
 
+export function verifyPortraitCallbackToken(jobId: string, token: string) {
+  const row = db.query('SELECT callback_token_hash FROM contributor_portrait_jobs WHERE id=?1').get(jobId) as { callback_token_hash: string } | null;
+  return Boolean(row && token && tokenHash(token) === row.callback_token_hash);
+}
+
 export type ContributorPortraitCandidate = {
   id: string; jobId: string; candidateNumber: number; status: string; previewUrl: string;
   promptText: string; modelName: string | null; mimeType: string; width: number; height: number; sizeBytes: number; createdAt: number;
@@ -52,6 +57,11 @@ export function listPortraitJobs(contributorId: string): ContributorPortraitJob[
     modelName: row.model_name == null ? null : String(row.model_name), createdAt: Number(row.created_at), updatedAt: Number(row.updated_at),
     candidates: (db.query('SELECT * FROM contributor_portrait_candidates WHERE job_id = ?1 ORDER BY candidate_number').all(String(row.id)) as Record<string, unknown>[]).map(mapCandidate),
   }));
+}
+
+export function getPortraitJob(jobId: string): ContributorPortraitJob | null {
+  const row = db.query('SELECT contributor_id FROM contributor_portrait_jobs WHERE id = ?1').get(jobId) as { contributor_id: string } | null;
+  return row ? listPortraitJobs(row.contributor_id).find((job) => job.id === jobId) || null : null;
 }
 
 export function createPortraitJob(contributorId: string, actorPubkey: string, publicOrigin: string) {
@@ -97,6 +107,16 @@ export function markPortraitJobStarted(jobId: string, autopilotRunId: string) {
   db.query("UPDATE contributor_portrait_jobs SET status = 'running', autopilot_run_id = ?1, updated_at = ?2 WHERE id = ?3").run(autopilotRunId, now, jobId);
 }
 
+export function markPortraitJobFailed(jobId: string, summary: string) {
+  const row = db.query('SELECT contributor_id FROM contributor_portrait_jobs WHERE id = ?1').get(jobId) as { contributor_id: string } | null;
+  if (!row) return;
+  const now = Date.now();
+  db.transaction(() => {
+    db.query("UPDATE contributor_portrait_jobs SET status = 'failed', failure_summary = ?1, updated_at = ?2 WHERE id = ?3").run(summary.slice(0, 1000), now, jobId);
+    db.query("UPDATE contributors SET portrait_status = 'failed', updated_at = ?1 WHERE id = ?2").run(now, row.contributor_id);
+  })();
+}
+
 export function verifyPortraitTrigger(jobId: string, trigger: Record<string, unknown>) {
   const row = db.query('SELECT callback_token_hash FROM contributor_portrait_jobs WHERE id=?1').get(jobId) as { callback_token_hash: string } | null;
   const body = trigger.body && typeof trigger.body === 'object' ? trigger.body as Record<string, unknown> : {};
@@ -119,7 +139,7 @@ function safeCandidatePath(jobId: string, value: string): string {
 
 export function applyPortraitResult(jobId: string, token: string, body: Record<string, unknown>) {
   const job = db.query('SELECT * FROM contributor_portrait_jobs WHERE id = ?1').get(jobId) as Record<string, unknown> | null;
-  if (!job || String(job.callback_token_hash) !== tokenHash(token)) throw new Error('Invalid portrait callback');
+  if (!job || !verifyPortraitCallbackToken(jobId, token)) throw new Error('Invalid portrait callback');
   if (body.status !== 'ok') {
     const summary = String(body.error || 'Portrait generation failed').slice(0, 1000);
     db.transaction(() => {

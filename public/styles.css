@@ -2179,6 +2179,11 @@ div.publicationPreparationBlocker { display: flex; align-items: center; justify-
 .btn.isBusy::before { width: 12px; height: 12px; flex: 0 0 auto; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; content: ""; animation: button-spin .7s linear infinite; }
 @keyframes button-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .btn.isBusy::before { animation-duration: 1.5s; } }
+.compactPipelineProgress { position:relative; width:132px; height:var(--control-height); display:block; overflow:hidden; border:1px solid var(--border); border-radius:var(--radius-control); background:var(--surface-2); }
+.compactPipelineProgress > span { position:absolute; top:0; bottom:0; width:42%; border-radius:inherit; background:var(--accent); animation:compact-pipeline-progress 1.35s var(--ease-standard, ease-in-out) infinite; }
+@keyframes compact-pipeline-progress { from { transform:translateX(-110%); } to { transform:translateX(350%); } }
+@media (prefers-reduced-motion: reduce) { .compactPipelineProgress > span { width:65%; animation:compact-pipeline-pulse 1.5s ease-in-out infinite; } }
+@keyframes compact-pipeline-pulse { 0%,100% { opacity:.45; } 50% { opacity:1; } }
 
 .publicationThumbnailQueue {
   display: grid;

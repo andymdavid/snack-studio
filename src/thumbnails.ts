@@ -81,6 +81,11 @@ function mapThumbnailJob(row: Record<string, unknown>): ThumbnailJob {
 
 function hashToken(value: string) { return bytesToHex(sha256(new TextEncoder().encode(value))); }
 
+export function verifyThumbnailCallbackToken(jobId: string, token: string) {
+  const row = db.query('SELECT callback_token_hash FROM thumbnail_jobs WHERE id=?1').get(jobId) as { callback_token_hash: string | null } | null;
+  return Boolean(row?.callback_token_hash && token && hashToken(token) === row.callback_token_hash);
+}
+
 export function getThumbnailJobDetail(id: string) {
   const job = getThumbnailJob(id);
   if (!job) return null;
@@ -203,7 +208,7 @@ function thumbnailDimensions(path: string, assetKind: ThumbnailAssetKind = 'snac
 
 export function applyThumbnailResult(jobId: string, token: string, body: Record<string, unknown>) {
   const row = db.query('SELECT * FROM thumbnail_jobs WHERE id=?1').get(jobId) as Record<string, unknown> | null;
-  if (!row || String(row.callback_token_hash || '') !== hashToken(token)) throw new Error('Invalid thumbnail callback');
+  if (!row || !verifyThumbnailCallbackToken(jobId, token)) throw new Error('Invalid thumbnail callback');
   const response = body.response && typeof body.response === 'object' ? body.response as Record<string, unknown> : body;
   const evidence = Array.isArray(response.evidence) ? response.evidence : [];
   const candidates = Array.isArray(response.candidates) ? response.candidates : [];

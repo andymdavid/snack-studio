@@ -87,7 +87,8 @@ import { applySuccessfulPipelineResult } from "./pipeline-results.ts";
 import { applySuccessfulRegenerationResult, listRegenerationProposals, resolveRegenerationProposal } from "./regeneration-proposals.ts";
 import { validateSuccessfulRegenerationResult } from "./regeneration-result-input.ts";
 import { validateThumbnailBrief } from "./thumbnail-input.ts";
-import { approveThumbnailCandidate, applyThumbnailResult, createThumbnailGeneration, createThumbnailJob, getPublicationPreparation, getThumbnailAssetRow, getThumbnailCandidateRow, getThumbnailJobDetail, listFinishedThumbnailAssets, listThumbnailJobs, markThumbnailGenerationFailed, markThumbnailGenerationStarted, preparePublicationThumbnails, uploadEpisodeThumbnail, verifyThumbnailGenerationTrigger } from "./thumbnails.ts";
+import { approveThumbnailCandidate, applyThumbnailResult, createThumbnailGeneration, createThumbnailJob, getPublicationPreparation, getThumbnailAssetRow, getThumbnailCandidateRow, getThumbnailJobDetail, listFinishedThumbnailAssets, listThumbnailJobs, markThumbnailGenerationFailed, markThumbnailGenerationStarted, preparePublicationThumbnails, uploadEpisodeThumbnail, verifyThumbnailCallbackToken, verifyThumbnailGenerationTrigger } from "./thumbnails.ts";
+import { liveEventResponse, publishLiveEvent } from "./live-events.ts";
 import { THUMBNAIL_CANDIDATES_PER_ROUND, THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
 import { validateSuccessfulPublicationMetadataResult } from "./publication-metadata-result-input.ts";
 import { applySuccessfulPublicationMetadataResult } from "./publication-metadata-results.ts";
@@ -106,7 +107,7 @@ import { getEpisodeWorkflow, getEpisodeWorkProjection, listEpisodeWorkflows, lis
 import { createContributor, getContributor, listContributors, photoMediaType, publicContributor, removeContributorPortrait, updateContributor } from "./contributors.ts";
 import { listDiagnostics } from './diagnostics.ts';
 import { validateContributorPhoto, validateContributorProfile } from "./contributor-input.ts";
-import { approvePortraitCandidate, applyPortraitResult, createPortraitJob, getPortraitCandidate, listPortraitJobs, markPortraitJobStarted, verifyPortraitTrigger } from "./contributor-portraits.ts";
+import { approvePortraitCandidate, applyPortraitResult, createPortraitJob, getPortraitCandidate, getPortraitJob, listPortraitJobs, markPortraitJobFailed, markPortraitJobStarted, verifyPortraitCallbackToken, verifyPortraitTrigger } from "./contributor-portraits.ts";
 
 const PUBLIC_DIR = join(import.meta.dir, "..", "public");
 
@@ -273,6 +274,12 @@ function prepareEpisodePipelineRun(req: Request, pipelineRequest: NonNullable<Re
 
 async function handleApi(req: Request, url: URL): Promise<Response | null> {
   const { pathname } = url;
+
+  if (pathname === '/api/events' && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    return liveEventResponse(req.signal);
+  }
 
   if (pathname === '/api/workflow' && req.method === 'GET') {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
@@ -526,11 +533,21 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
     const body = await readJson(req); const trigger = body.triggerRequest && typeof body.triggerRequest === 'object' ? body.triggerRequest as Record<string, unknown> : {};
     const jobId = decodeURIComponent(portraitJobTriggerMatch[1]!);
-    if (!verifyPortraitTrigger(jobId, trigger)) return json({ error: 'portrait trigger does not match the prepared job' }, 400);
+    if (!verifyPortraitTrigger(jobId, trigger)) {
+      markPortraitJobFailed(jobId, 'Portrait trigger did not match the prepared job. Try again.');
+      const failed = getPortraitJob(jobId);
+      if (failed) publishLiveEvent({ type: 'portrait.updated', entityType: 'contributor', entityId: failed.contributorId, status: failed.status, updatedAt: failed.updatedAt });
+      return json({ error: 'portrait trigger does not match the prepared job' }, 400);
+    }
     try {
       const result = await startPreparedWappPipeline(trigger as { url: string; method: 'POST'; body: Record<string, unknown> }, String(body.autopilotAuthorization || ''));
       markPortraitJobStarted(jobId, result.runId); return json(result);
-    } catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 502); }
+    } catch (error) {
+      const summary = error instanceof Error ? error.message : String(error); markPortraitJobFailed(jobId, summary);
+      const failed = getPortraitJob(jobId);
+      if (failed) publishLiveEvent({ type: 'portrait.updated', entityType: 'contributor', entityId: failed.contributorId, status: failed.status, updatedAt: failed.updatedAt });
+      return json({ error: summary }, 502);
+    }
   }
 
   const portraitCandidateImageMatch = pathname.match(/^\/api\/contributor-portrait-candidates\/([^/]+)\/image$/);
@@ -556,11 +573,20 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
   const portraitWebhookMatch = pathname.match(/^\/api\/contributor-portrait-webhooks\/([^/]+)$/);
   if (portraitWebhookMatch && req.method === 'POST') {
     const token = req.headers.get('x-snack-studio-token') || '';
+    const jobId = decodeURIComponent(portraitWebhookMatch[1]!);
     try {
-      applyPortraitResult(decodeURIComponent(portraitWebhookMatch[1]!), token, await readJson(req));
+      applyPortraitResult(jobId, token, await readJson(req));
+      const job = getPortraitJob(jobId);
+      if (job) publishLiveEvent({ type: 'portrait.updated', entityType: 'contributor', entityId: job.contributorId, status: job.status, updatedAt: job.updatedAt });
       return json({ ok: true });
     } catch (error) {
-      return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+      const message = error instanceof Error ? error.message : String(error);
+      if (verifyPortraitCallbackToken(jobId, token)) {
+        markPortraitJobFailed(jobId, message);
+        const failed = getPortraitJob(jobId);
+        if (failed) publishLiveEvent({ type: 'portrait.updated', entityType: 'contributor', entityId: failed.contributorId, status: failed.status, updatedAt: failed.updatedAt });
+      }
+      return json({ error: message }, 400);
     }
   }
 
@@ -803,8 +829,31 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
   }
   const thumbnailWebhookMatch = pathname.match(/^\/api\/thumbnail-webhooks\/([^/]+)$/);
   if (thumbnailWebhookMatch && req.method === 'POST') {
-    try { applyThumbnailResult(decodeURIComponent(thumbnailWebhookMatch[1]!), req.headers.get('x-snack-studio-token') || '', await readJson(req)); return json({ ok: true }); }
-    catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 400); }
+    const jobId = decodeURIComponent(thumbnailWebhookMatch[1]!);
+    const body = await readJson(req);
+    try {
+      if (body.status === 'error' || body.status === 'failed') {
+        const summary = String(body.error || body.message || 'Thumbnail generation failed').trim().slice(0, 1000);
+        if (!verifyThumbnailCallbackToken(jobId, req.headers.get('x-snack-studio-token') || '')) return json({ error: 'Invalid thumbnail callback' }, 401);
+        markThumbnailGenerationFailed(jobId, summary);
+        const failed = getThumbnailJobDetail(jobId);
+        if (failed) publishLiveEvent({ type: 'thumbnail.updated', episodeId: failed.episodeId, entityType: 'thumbnail-job', entityId: jobId, status: failed.status, updatedAt: failed.updatedAt });
+        return json({ ok: true, status: 'failed' });
+      }
+      applyThumbnailResult(jobId, req.headers.get('x-snack-studio-token') || '', body);
+      const job = getThumbnailJobDetail(jobId);
+      if (job) publishLiveEvent({ type: 'thumbnail.updated', episodeId: job.episodeId, entityType: 'thumbnail-job', entityId: jobId, status: job.status, updatedAt: job.updatedAt });
+      return json({ ok: true });
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (verifyThumbnailCallbackToken(jobId, req.headers.get('x-snack-studio-token') || '')) {
+        markThumbnailGenerationFailed(jobId, message);
+        const failed = getThumbnailJobDetail(jobId);
+        if (failed) publishLiveEvent({ type: 'thumbnail.updated', episodeId: failed.episodeId, entityType: 'thumbnail-job', entityId: jobId, status: failed.status, updatedAt: failed.updatedAt });
+      }
+      return json({ error: message }, 400);
+    }
   }
 
   const publicationPreparationMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/publication-preparation$/);
@@ -1059,6 +1108,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
         entityId: pipelineRequest.episodeId,
         detail: { requestId: pipelineRequest.id, runId: run.id, category: "trigger-failed", summary: message.slice(0, 500) },
       });
+      if (pipelineRequest.operation === 'snack-regeneration' && pipelineRequest.targetCandidateId) publishLiveEvent({ type: 'regeneration.updated', episodeId: pipelineRequest.episodeId, entityType: 'snack-candidate', entityId: pipelineRequest.targetCandidateId, status: 'failed', updatedAt: Date.now() });
       return json({ error: message, pipelineRequest: { ...getPipelineRequest(pipelineRequest.id), runs: [failedRun] } }, 502);
     }
   }
@@ -1602,6 +1652,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
           entityId: pipelineRequest.episodeId,
           detail: { requestId, runId: run.id, autopilotRunId: remoteRunId || run.autopilotRunId, summary: failure.slice(0, 500) },
         });
+        if (pipelineRequest.operation === 'snack-regeneration' && pipelineRequest.targetCandidateId) publishLiveEvent({ type: 'regeneration.updated', episodeId: pipelineRequest.episodeId, entityType: 'snack-candidate', entityId: pipelineRequest.targetCandidateId, status: 'failed', updatedAt: Date.now() });
         return json({ ok: true, requestId, status: "failed" });
       }
 
@@ -1620,6 +1671,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
           entityId: pipelineRequest.episodeId,
           detail: { requestId, runId: run.id, reason: validation.error },
         });
+        if (pipelineRequest.operation === 'snack-regeneration' && pipelineRequest.targetCandidateId) publishLiveEvent({ type: 'regeneration.updated', episodeId: pipelineRequest.episodeId, entityType: 'snack-candidate', entityId: pipelineRequest.targetCandidateId, status: 'needs-review', updatedAt: Date.now() });
         return json({ error: validation.error, requestId, status: "needs-review" }, 422);
       }
       try {
@@ -1627,6 +1679,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
         if (pipelineRequest.operation === "snack-regeneration") {
           const proposal = applySuccessfulRegenerationResult({ localRunId: run.id, result: validation.value as import("./regeneration-result-input.ts").SuccessfulRegenerationResult });
           recordAuditEvent({ action: "candidate.regeneration.proposed", entityType: "episode", entityId: pipelineRequest.episodeId, detail: { requestId, runId: run.id, candidateId: proposal.candidateId, proposalId: proposal.id } });
+          publishLiveEvent({ type: 'regeneration.updated', episodeId: pipelineRequest.episodeId, entityType: 'snack-candidate', entityId: proposal.candidateId, status: 'completed', updatedAt: Date.now() });
           return json({ ok: true, requestId, status: "completed", proposalId: proposal.id });
         }
         if (pipelineRequest.operation === 'transcript-normalization') {
@@ -1667,6 +1720,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         markPipelineResultRejected({ runId: run.id, summary: message });
+        if (pipelineRequest.operation === 'snack-regeneration' && pipelineRequest.targetCandidateId) publishLiveEvent({ type: 'regeneration.updated', episodeId: pipelineRequest.episodeId, entityType: 'snack-candidate', entityId: pipelineRequest.targetCandidateId, status: 'needs-review', updatedAt: Date.now() });
         return json({ error: message, requestId, status: "needs-review" }, 409);
       }
     }

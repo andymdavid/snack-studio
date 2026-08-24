@@ -64,6 +64,7 @@ const state = {
   gitDeployment: null,
   contributorFormOpen: false,
   contributorPortraitJobs: {},
+  portraitPollers: {},
   contributors: [],
   activeContributor: null,
   contributorReturnTo: '/contributors',
@@ -72,6 +73,9 @@ const state = {
   diagnostics: [],
   diagnosticFilter: 'attention',
   thumbnailPollTimers: {},
+  liveEventAbortController: null,
+  liveRefreshTimer: null,
+  liveReconnectTimer: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -360,9 +364,122 @@ async function bootApp() {
     $("npub").textContent = state.me.npub;
     renderStudioUser(cachedProfile(state.me.pubkey));
     void resolveCurrentUserProfile();
+    startLiveEvents();
     await renderRoute();
   } catch {
     logout();
+  }
+}
+
+function stopLiveEvents() {
+  state.liveEventAbortController?.abort();
+  state.liveEventAbortController = null;
+  if (state.liveRefreshTimer) clearTimeout(state.liveRefreshTimer);
+  state.liveRefreshTimer = null;
+  if (state.liveReconnectTimer) clearTimeout(state.liveReconnectTimer);
+  state.liveReconnectTimer = null;
+}
+
+function scheduleLiveEpisodeRefresh(event) {
+  if (!state.activeEpisode || event.episodeId !== state.activeEpisode.id || !['assets', 'publication'].includes(state.activeEpisodeTab)) return;
+  if (state.liveRefreshTimer) clearTimeout(state.liveRefreshTimer);
+  state.liveRefreshTimer = setTimeout(async () => {
+    state.liveRefreshTimer = null;
+    const episodeId = state.activeEpisode?.id;
+    if (!episodeId || event.episodeId !== episodeId) return;
+    try {
+      const payload = await api(`/api/episodes/${encodeURIComponent(episodeId)}/publication-preparation`);
+      if (state.activeEpisode?.id !== episodeId) return;
+      state.publicationPreparation = payload.preparation;
+      renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+      const job = payload.preparation?.jobs?.find((item) => item.id === event.entityId);
+      setStudioStatus(job?.status === 'failed' ? `Thumbnail failed: ${job.failureSummary || 'Generation did not complete'}` : ['in-review','approved'].includes(job?.status) ? 'Thumbnail ready to review' : 'Thumbnail updated');
+    } catch {
+      // Focused polling and route revalidation remain the recovery path.
+    }
+  }, 80);
+}
+
+function scheduleLivePortraitRefresh(event) {
+  const onContributor = state.route === `/contributors/${encodeURIComponent(event.entityId)}`;
+  const visibleInEpisode = ['assets', 'publication'].includes(state.activeEpisodeTab)
+    && (state.publicationPreparation?.participants?.resolved || []).some((item) => item.contributorId === event.entityId);
+  if (!onContributor && !visibleInEpisode) return;
+  if (state.liveRefreshTimer) clearTimeout(state.liveRefreshTimer);
+  state.liveRefreshTimer = setTimeout(async () => {
+    state.liveRefreshTimer = null;
+    try {
+      if (onContributor) await refreshContributorDetail(event.entityId);
+      else if (state.activeEpisode) {
+        state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
+        renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+      }
+      setStudioStatus(event.status === 'failed' ? 'Portrait generation failed' : event.status === 'in-review' ? 'Contributor portraits ready to review' : 'Contributor portrait updated');
+    } catch { /* polling remains the recovery path */ }
+  }, 80);
+}
+
+function refreshCandidateEditorDialog(candidateId) {
+  const dialog = document.querySelector(`.candidateEditorDialog .candidateEditor[data-candidate-id="${CSS.escape(candidateId)}"]`);
+  const candidate = state.candidates.find((item) => item.id === candidateId);
+  if (dialog && candidate) dialog.replaceWith(renderCandidateEditor(candidate));
+}
+
+function scheduleLiveRegenerationRefresh(event) {
+  if (state.activeEpisode?.id !== event.episodeId) return;
+  if (state.liveRefreshTimer) clearTimeout(state.liveRefreshTimer);
+  state.liveRefreshTimer = setTimeout(async () => {
+    state.liveRefreshTimer = null;
+    const episodeId = state.activeEpisode?.id;
+    if (!episodeId || episodeId !== event.episodeId) return;
+    try {
+      const [pipelinePayload, candidatePayload] = await Promise.all([
+        api(`/api/episodes/${encodeURIComponent(episodeId)}/pipeline-requests`),
+        api(`/api/episodes/${encodeURIComponent(episodeId)}/candidates`),
+      ]);
+      if (state.activeEpisode?.id !== episodeId) return;
+      state.pipelineRequests = pipelinePayload.pipelineRequests || [];
+      state.candidates = candidatePayload.candidates || [];
+      state.regenerationProposals = candidatePayload.regenerationProposals || {};
+      renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+      refreshCandidateEditorDialog(event.entityId);
+      setStudioStatus(event.status === 'completed' ? 'Snack alternative ready' : event.status === 'failed' ? 'Snack alternative failed' : 'Snack alternative needs attention');
+    } catch { /* pipeline polling remains the recovery path */ }
+  }, 80);
+}
+
+async function startLiveEvents() {
+  stopLiveEvents();
+  if (!state.token) return;
+  const controller = new AbortController();
+  state.liveEventAbortController = controller;
+  try {
+    const response = await fetch('/api/events', { headers: { authorization: `Bearer ${state.token}` }, signal: controller.signal });
+    if (!response.ok || !response.body) throw new Error('Live updates unavailable');
+    const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
+    while (!controller.signal.aborted) {
+      const { value, done } = await reader.read(); if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let boundary;
+      while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+        const frame = buffer.slice(0, boundary); buffer = buffer.slice(boundary + 2);
+        const data = frame.split('\n').find((line) => line.startsWith('data: '))?.slice(6);
+        if (!data) continue;
+        try {
+          const event = JSON.parse(data);
+          if (event.type === 'thumbnail.updated') scheduleLiveEpisodeRefresh(event);
+          else if (event.type === 'portrait.updated') scheduleLivePortraitRefresh(event);
+          else if (event.type === 'regeneration.updated') scheduleLiveRegenerationRefresh(event);
+        } catch { /* ignore malformed event */ }
+      }
+    }
+  } catch {
+    // Polling remains active for durable jobs when the stream is unavailable.
+  } finally {
+    if (state.liveEventAbortController === controller) {
+      state.liveEventAbortController = null;
+      if (!controller.signal.aborted && state.token) state.liveReconnectTimer = setTimeout(() => { state.liveReconnectTimer = null; void startLiveEvents(); }, 2000);
+    }
   }
 }
 
@@ -605,6 +722,10 @@ function renderContributorWorkspace(contributor) {
   contributorFormField(grid, 'name', 'Name', contributor.name); contributorFormField(grid, 'role', 'Role', contributor.role); contributorFormField(grid, 'shortBio', 'Short bio', contributor.shortBio);
   contributorFormField(grid, 'aliases', 'Transcript aliases', contributor.aliases.join(', ')); contributorFormField(grid, 'externalUrl', 'Website', contributor.externalUrl); contributorFormField(grid, 'xUrl', 'X profile', contributor.xUrl); contributorFormField(grid, 'linkedinUrl', 'LinkedIn profile', contributor.linkedinUrl); contributorFormField(grid, 'nostrUrl', 'Nostr profile', contributor.nostrUrl);
   contributorFormField(form, 'biographyMarkdown', 'Biography', contributor.biographyMarkdown, 'textarea');
+  const markEditing = () => { form.dataset.editing = 'true'; };
+  form.addEventListener('focusin', markEditing);
+  form.addEventListener('input', markEditing);
+  form.addEventListener('change', markEditing);
   const photoField = document.createElement('label'); photoField.className = 'contributorIdentitySource'; const photoCopy = document.createElement('div'); photoCopy.innerHTML = '<strong>Identity source photo</strong><span>Replace this photo before generating a new voxel portrait.</span>';
   const sourcePreview = document.createElement('div'); sourcePreview.className = 'contributorSourcePreview'; if (contributor.referencePhotoPath) loadPrivateImage(contributor.referencePhotoPath, sourcePreview, `${contributor.name} identity source`);
   const photo = document.createElement('input'); photo.type = 'file'; photo.name = 'photo'; photo.accept = 'image/jpeg,image/png,image/webp'; photo.disabled = !state.me?.access?.edit; photoField.append(photoCopy, sourcePreview, photo); form.appendChild(photoField);
@@ -618,7 +739,15 @@ function loadPrivateImage(url, container, alt) {
 }
 
 async function refreshContributorDetail(contributorId) {
-  state.activeContributor = (await api(`/api/contributors/${encodeURIComponent(contributorId)}`)).contributor;
+  const contributor = (await api(`/api/contributors/${encodeURIComponent(contributorId)}`)).contributor;
+  const activeForm = $('contributorWorkspace')?.querySelector('.contributorEditForm');
+  const preserveForm = activeForm?.dataset.editing === 'true' || activeForm?.contains(document.activeElement);
+  state.activeContributor = contributor;
+  if (preserveForm) {
+    const portraitPanel = $('contributorWorkspace')?.querySelector(`.contributorPortraitWorkflow[data-contributor-id="${CSS.escape(contributorId)}"]`);
+    if (portraitPanel) portraitPanel.replaceWith(renderContributorPortraitWorkflow({ contributorId: contributor.id, name: contributor.name, portraitStatus: contributor.portraitStatus }));
+    return;
+  }
   renderContributorWorkspace(state.activeContributor);
 }
 
@@ -1245,14 +1374,17 @@ function renderPublicationPreparation(episode, candidates, options = {}) {
     if (topic) { const swatch = document.createElement('i'); swatch.className = 'topicSwatch'; swatch.style.backgroundColor = topic.colour; detail.prepend(swatch); }
     identity.append(name, detail);
     const actionable = job.topicColour && resolved.length && !portraitsNeeded.length && ['draft','failed','in-review','approved'].includes(job.status);
-    const status = document.createElement(actionable ? 'button' : 'span');
-    if (status instanceof HTMLButtonElement) {
-      status.type = 'button'; status.className = 'btn btnSecondary'; status.textContent = job.status === 'failed' ? 'Retry thumbnail' : ['in-review','approved'].includes(job.status) ? 'Review thumbnail' : 'Generate thumbnail';
+    const active = ['extracting','grounding','generating'].includes(job.status);
+    const status = active ? renderCompactPipelineProgress('Generating thumbnail') : document.createElement(actionable ? 'button' : 'span');
+    if (active) {
+      // The compact progress component intentionally replaces the action button.
+    } else if (status instanceof HTMLButtonElement) {
+      status.type = 'button'; status.className = 'btn btnSecondary'; status.textContent = job.status === 'failed' ? 'Failed · Try again' : ['in-review','approved'].includes(job.status) ? 'Review thumbnail' : 'Generate thumbnail';
       status.disabled = !state.me?.access?.edit;
       status.addEventListener('click', () => ['in-review','approved'].includes(job.status) ? openThumbnailReview(job.id, name.textContent, status) : generateSnackThumbnail(job.id, '', status));
     } else {
       status.className = `statusPill ${job.status === 'in-review' || job.status === 'approved' ? 'statusSuccess' : 'statusWarning'}`;
-      status.textContent = job.status === 'in-review' ? 'Ready to review' : job.status === 'approved' ? 'Approved' : ['extracting','grounding','generating'].includes(job.status) ? 'Generating…' : unresolved.length ? 'Waiting for contributor' : portraitsNeeded.length ? 'Waiting for portrait' : !job.topicColour && topicsRunning ? 'Resolving theme' : !job.topicColour ? 'Theme needed' : 'Ready';
+      status.textContent = job.status === 'in-review' ? 'Ready to review' : job.status === 'approved' ? 'Approved' : unresolved.length ? 'Waiting for contributor' : portraitsNeeded.length ? 'Waiting for portrait' : !job.topicColour && topicsRunning ? 'Resolving theme' : !job.topicColour ? 'Theme needed' : 'Ready';
     }
     row.append(identity, status); queue.appendChild(row);
     if (['extracting','grounding','generating'].includes(job.status)) startThumbnailStatusPolling(job.id);
@@ -1422,10 +1554,13 @@ function renderEpisodeThumbnailWorkflow(episode, job, resolved, portraitsNeeded)
   copy.append(eyebrow, title, detail);
   const actions = document.createElement('div'); actions.className = 'episodeThumbnailActions';
   const active = ['extracting','grounding','generating'].includes(job.status);
-  const generate = document.createElement('button'); generate.type = 'button'; generate.className = 'btn btnPrimary';
-  generate.textContent = active ? 'Generating…' : ['in-review','approved'].includes(job.status) ? 'Review thumbnail' : job.status === 'failed' ? 'Retry generation' : 'Generate thumbnail';
-  generate.disabled = active || portraitsNeeded.length > 0 || !state.me?.access?.edit;
-  generate.addEventListener('click', () => ['in-review','approved'].includes(job.status) ? openThumbnailReview(job.id, title.textContent, generate, true) : generateSnackThumbnail(job.id, '', generate));
+  const generate = active ? renderCompactPipelineProgress('Generating thumbnail') : document.createElement('button');
+  if (generate instanceof HTMLButtonElement) {
+    generate.type = 'button'; generate.className = `btn ${job.status === 'failed' ? 'btnSecondary' : 'btnPrimary'}`;
+    generate.textContent = ['in-review','approved'].includes(job.status) ? 'Review thumbnail' : job.status === 'failed' ? 'Failed · Try again' : 'Generate thumbnail';
+    generate.disabled = portraitsNeeded.length > 0 || !state.me?.access?.edit;
+    generate.addEventListener('click', () => ['in-review','approved'].includes(job.status) ? openThumbnailReview(job.id, title.textContent, generate, true) : generateSnackThumbnail(job.id, '', generate));
+  }
   const uploadInput = document.createElement('input'); uploadInput.type = 'file'; uploadInput.accept = 'image/png,image/jpeg,image/webp'; uploadInput.hidden = true;
   const upload = document.createElement('button'); upload.type = 'button'; upload.className = 'btn btnSecondary'; upload.textContent = 'Upload finished thumbnail'; upload.disabled = active || !state.me?.access?.edit;
   const uploadStatus = document.createElement('span'); uploadStatus.className = 'episodeThumbnailUploadStatus'; uploadStatus.setAttribute('role', 'status');
@@ -1456,6 +1591,12 @@ function renderEpisodeThumbnailWorkflow(episode, job, resolved, portraitsNeeded)
   actions.append(generate, upload, uploadInput, uploadStatus); panel.append(copy, actions);
   if (active) startThumbnailStatusPolling(job.id);
   return panel;
+}
+
+function renderCompactPipelineProgress(label = 'Working') {
+  const progress = document.createElement('span'); progress.className = 'compactPipelineProgress'; progress.setAttribute('role', 'progressbar'); progress.setAttribute('aria-label', label); progress.setAttribute('aria-valuetext', 'In progress');
+  const bar = document.createElement('span'); progress.appendChild(bar);
+  return progress;
 }
 
 function startThumbnailStatusPolling(jobId) {
@@ -1502,7 +1643,14 @@ async function generateSnackThumbnail(jobId, reviewNote = '', triggerButton = nu
     state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
     renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
     setStudioStatus('Generating thumbnail…');
-  } catch (error) { clearBusy(); setStudioStatus(error.message); }
+  } catch (error) {
+    clearBusy();
+    try {
+      state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
+      renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+    } catch { /* preserve the initiating view when recovery refresh also fails */ }
+    setStudioStatus(error.message);
+  }
 }
 
 async function openThumbnailReview(jobId, snackTitle, triggerButton = null, isEpisode = false) {
@@ -1590,11 +1738,14 @@ function renderContributorPortraitWorkflow(item) {
   const title = document.createElement('h3'); title.textContent = item.name;
   const detail = document.createElement('p'); detail.textContent = 'Real photo for identity · Pete and Andy jointly define the coarse voxel style.';
   copy.append(eyebrow, title, detail);
-  const generate = document.createElement('button');
-  generate.type = 'button'; generate.className = 'btn btnPrimary';
-  generate.textContent = ['generating', 'in-review'].includes(item.portraitStatus) ? 'Generate another' : 'Generate portrait';
-  generate.disabled = !state.me?.access?.edit || item.portraitStatus === 'generating';
-  generate.addEventListener('click', () => generateContributorPortraits(item.contributorId, generate));
+  const active = item.portraitStatus === 'generating';
+  const generate = active ? renderCompactPipelineProgress('Generating portrait') : document.createElement('button');
+  if (generate instanceof HTMLButtonElement) {
+    generate.type = 'button'; generate.className = `btn ${item.portraitStatus === 'failed' ? 'btnSecondary' : 'btnPrimary'}`;
+    generate.textContent = item.portraitStatus === 'failed' ? 'Failed · Try again' : item.portraitStatus === 'in-review' ? 'Generate another' : 'Generate portrait';
+    generate.disabled = !state.me?.access?.edit;
+    generate.addEventListener('click', () => generateContributorPortraits(item.contributorId, generate));
+  }
   const actions = document.createElement('div'); actions.className = 'contributorPortraitActions';
   const profile = document.createElement('button'); profile.type = 'button'; profile.className = 'btn btnSecondary'; profile.textContent = 'Open profile'; profile.addEventListener('click', () => navigate(`/contributors/${encodeURIComponent(item.contributorId)}?returnTo=${encodeURIComponent(`/episodes/${state.activeEpisode.id}/assets`)}`));
   actions.append(profile, generate); heading.append(copy, actions); panel.appendChild(heading);
@@ -1613,7 +1764,7 @@ async function loadContributorPortraitJobs(contributorId, gallery, portraitStatu
     gallery.replaceChildren();
     if (!job) { gallery.textContent = 'No portrait candidates generated yet.'; return; }
     if (job.status === 'failed') { gallery.textContent = job.failureSummary || 'Portrait generation failed.'; return; }
-    if (!job.candidates?.length) { gallery.textContent = job.status === 'running' ? 'Generating portrait candidates…' : 'Portrait generation is prepared…'; return; }
+    if (!job.candidates?.length) { gallery.textContent = ''; if (['prepared','running'].includes(job.status)) pollContributorPortrait(contributorId); return; }
     for (const candidate of job.candidates) {
       const card = document.createElement('article');
       const image = document.createElement('img'); image.alt = `${contributorId} portrait candidate ${candidate.candidateNumber}`;
@@ -1645,13 +1796,25 @@ async function generateContributorPortraits(contributorId, triggerButton = null)
     }
     setStudioStatus('Generating contributor portraits…');
     pollContributorPortrait(contributorId);
-  } catch (error) { clearBusy(); setStudioStatus(error.message); }
+  } catch (error) {
+    clearBusy();
+    try {
+      if (state.route.startsWith('/contributors/')) await refreshContributorDetail(contributorId);
+      else if (state.activeEpisode) {
+        state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
+        renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+      }
+    } catch { /* preserve current view */ }
+    setStudioStatus(error.message);
+  }
 }
 
 async function pollContributorPortrait(contributorId) {
+  if (state.portraitPollers[contributorId]) return;
+  state.portraitPollers[contributorId] = true;
   const startedAt = Date.now();
   const check = async () => {
-    if ((!state.activeEpisode && !state.activeContributor) || Date.now() - startedAt > 20 * 60 * 1000) return;
+    if ((!state.activeEpisode && !state.activeContributor) || Date.now() - startedAt > 20 * 60 * 1000) { delete state.portraitPollers[contributorId]; return; }
     try {
       const payload = await api(`/api/contributors/${encodeURIComponent(contributorId)}/portrait-jobs`);
       const job = payload.jobs?.[0];
@@ -1662,6 +1825,7 @@ async function pollContributorPortrait(contributorId) {
           renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
         }
         setStudioStatus(job.status === 'in-review' ? 'Contributor portraits ready to review' : job.status === 'failed' ? (job.failureSummary || 'Portrait generation failed') : 'Contributor portrait approved');
+        delete state.portraitPollers[contributorId];
         return;
       }
     } catch {}
@@ -2425,6 +2589,7 @@ async function startSnackRegeneration(candidate, instruction) {
     method: "POST", body: JSON.stringify({ autopilotAuthorization, triggerRequest }),
   });
   await loadEpisode(state.activeEpisode.id);
+  refreshCandidateEditorDialog(candidate.id);
   setStudioStatus("Generating Snack alternative…");
 }
 
@@ -2460,12 +2625,18 @@ function renderCandidateEditor(candidate) {
     button.addEventListener("click", () => updateCandidateDecision(candidate.id, decision));
     decisions.appendChild(button);
   }
-  const regenerate = document.createElement("button");
-  regenerate.type = "button";
-  regenerate.className = "btn btnSecondary";
-  regenerate.textContent = "Generate alternative";
-  regenerate.disabled = !state.me?.access?.edit || state.pipelineRequests.some((request) => request.operation === "snack-regeneration" && request.targetCandidateId === candidate.id && ["created", "awaiting-authorization", "queued", "running", "applying-result"].includes(request.status));
-  regenerate.addEventListener("click", () => openRegenerationDialog(candidate));
+  const regenerationRequest = state.pipelineRequests.find((request) => request.operation === "snack-regeneration" && request.targetCandidateId === candidate.id);
+  const regenerationActive = regenerationRequest && ["created", "awaiting-authorization", "queued", "running", "applying-result"].includes(regenerationRequest.status);
+  const regenerationFailed = regenerationRequest && ["failed", "timed-out", "needs-review", "cancelled"].includes(regenerationRequest.status);
+  const regenerate = regenerationActive ? renderCompactPipelineProgress('Generating Snack alternative') : document.createElement("button");
+  if (regenerate instanceof HTMLButtonElement) {
+    regenerate.type = "button";
+    regenerate.className = "btn btnSecondary";
+    regenerate.textContent = regenerationFailed ? "Failed · Try again" : "Generate alternative";
+    regenerate.title = regenerationFailed ? regenerationRequest.failureSummary || 'Snack alternative generation failed' : '';
+    regenerate.disabled = !state.me?.access?.edit;
+    regenerate.addEventListener("click", () => openRegenerationDialog(candidate));
+  }
   decisions.appendChild(regenerate);
   header.append(meta, decisions);
   const revisionNav = document.createElement("div");
@@ -3074,6 +3245,7 @@ async function createEpisodeWorkspace(event) {
 }
 
 function logout() {
+  stopLiveEvents();
   state.token = "";
   state.me = null;
   state.activeChatId = "";
