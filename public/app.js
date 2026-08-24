@@ -914,28 +914,16 @@ async function loadEpisode(id, options = {}) {
   showStudioPage("episodePage", `Snack Studio / Episodes / ${state.activeEpisodeTab === 'overview' ? 'Overview' : state.activeEpisodeTab[0].toUpperCase() + state.activeEpisodeTab.slice(1)}`);
   setStudioStatus("Loading workspace…");
   try {
-    const [payload, candidatePayload, curationPayload, pipelinePayload, publicationPayload, packagePayload, validationPayload, gitPublicationPayload, gitDeploymentPayload, workPayload, publicTranscriptPayload] = await Promise.all([
-      api(`/api/episodes/${encodeURIComponent(id)}`, requestOptions),
-      api(`/api/episodes/${encodeURIComponent(id)}/candidates`, requestOptions),
-      api(`/api/episodes/${encodeURIComponent(id)}/curation`, requestOptions),
-      api(`/api/episodes/${encodeURIComponent(id)}/pipeline-requests`, requestOptions),
-      api(`/api/episodes/${encodeURIComponent(id)}/publication-preparation`, requestOptions).catch((error) => ({ preparation: null, error: error.message })),
-      api(`/api/episodes/${encodeURIComponent(id)}/publication-package`, requestOptions).catch(() => ({ package: null })),
-      api(`/api/episodes/${encodeURIComponent(id)}/website-validation`, requestOptions).catch(() => ({ validation: null })),
-      api(`/api/episodes/${encodeURIComponent(id)}/git-publication`, requestOptions).catch(() => ({ publication: null })),
-      api(`/api/episodes/${encodeURIComponent(id)}/git-deployment`, requestOptions).catch(() => ({ deployment: null })),
-      api(`/api/episodes/${encodeURIComponent(id)}/work`, requestOptions).catch(() => ({ work: null })),
-      api(`/api/episodes/${encodeURIComponent(id)}/public-transcript`, requestOptions).catch(() => ({ publicTranscript: null })),
-    ]);
+    const { workspace } = await api(`/api/episodes/${encodeURIComponent(id)}/workspace`, requestOptions);
     if (routeContext && !routeIsCurrent(routeContext)) return;
-    state.activeEpisode = payload.episode;
-    state.activeTranscript = payload.transcript || null;
-    state.publicTranscript = publicTranscriptPayload.publicTranscript || null;
-    state.transcriptRevisions = payload.transcriptRevisions || [];
-    state.candidates = candidatePayload.candidates || [];
-    state.candidateGenerations = candidateGenerations(state.candidates, candidatePayload.generations);
-    state.approvedBatch = candidatePayload.approvedBatch || { ready: false, checks: [], candidateIds: [] };
-    state.regenerationProposals = candidatePayload.regenerationProposals || {};
+    state.activeEpisode = workspace.episode;
+    state.activeTranscript = workspace.transcript || null;
+    state.publicTranscript = workspace.publicTranscript || null;
+    state.transcriptRevisions = workspace.transcriptRevisions || [];
+    state.candidates = workspace.candidates || [];
+    state.candidateGenerations = candidateGenerations(state.candidates, workspace.generations);
+    state.approvedBatch = workspace.approvedBatch || { ready: false, checks: [], candidateIds: [] };
+    state.regenerationProposals = workspace.regenerationProposals || {};
     if (state.activeEpisodeTab === 'snacks') {
       const query = new URLSearchParams(window.location.search);
       const requestedRun = query.get('run'); const requestedSnack = query.get('snack');
@@ -946,16 +934,17 @@ async function loadEpisode(id, options = {}) {
       state.activeGenerationId = state.candidateGenerations.at(-1)?.id || "";
       state.activeCandidateId = "";
     }
-    state.curation = curationPayload;
-    state.pipelineRequests = pipelinePayload.pipelineRequests || [];
-    state.pipelineTimeoutMs = Number(pipelinePayload.timeoutMs || 0);
-    state.episodeAuditEvents = payload.auditEvents || [];
-    state.publicationPreparation = publicationPayload.preparation || null;
-    state.publicationPackage = packagePayload.package || null;
-    state.websiteValidation = validationPayload.validation || null;
-    state.gitPublication = gitPublicationPayload.publication || null;
-    state.gitDeployment = gitDeploymentPayload.deployment || null;
-    state.activeWork = workPayload.work || null;
+    state.curation = workspace.curation;
+    state.pipelineRequests = workspace.pipelineRequests || [];
+    state.pipelineTimeoutMs = Number(workspace.pipelineTimeoutMs || 0);
+    state.episodeAuditEvents = workspace.auditEvents || [];
+    state.publicationPreparation = workspace.publicationPreparation || null;
+    state.publicationPreparationError = workspace.publicationPreparationError || "";
+    state.publicationPackage = workspace.publicationPackage || null;
+    state.websiteValidation = workspace.websiteValidation || null;
+    state.gitPublication = workspace.gitPublication || null;
+    state.gitDeployment = workspace.gitDeployment || null;
+    state.activeWork = workspace.work || null;
     state.activeWorkflow = null;
     if (!state.episodeStage || state.episodeStageId !== id) {
       state.episodeStage = episodeWorkspaceStage();
@@ -963,7 +952,7 @@ async function loadEpisode(id, options = {}) {
     }
     if (options.stage) state.episodeStage = options.stage;
     if (state.candidates.length && state.episodeStage === "processing") state.episodeStage = "output";
-    renderEpisodeWorkspace(payload.episode, payload.transcript, payload.transcriptRevisions || [], payload.auditEvents || [], state.candidates);
+    renderEpisodeWorkspace(workspace.episode, workspace.transcript, workspace.transcriptRevisions || [], workspace.auditEvents || [], state.candidates);
     if (['assets','publication'].includes(state.activeEpisodeTab) && ['approved','published'].includes(state.activeEpisode.status) && !state.publicationPreparation?.jobs?.length) await preparePublication();
     startEpisodePipelinePolling();
     setStudioStatus("Ready");

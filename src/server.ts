@@ -108,6 +108,7 @@ import { createContributor, getContributor, listContributors, photoMediaType, pu
 import { listDiagnostics } from './diagnostics.ts';
 import { validateContributorPhoto, validateContributorProfile } from "./contributor-input.ts";
 import { approvePortraitCandidate, applyPortraitResult, createPortraitJob, getPortraitCandidate, getPortraitJob, listPortraitJobs, markPortraitJobFailed, markPortraitJobStarted, verifyPortraitCallbackToken, verifyPortraitTrigger } from "./contributor-portraits.ts";
+import { buildEpisodeWorkspace } from './episode-workspace.ts';
 
 const PUBLIC_DIR = join(import.meta.dir, "..", "public");
 
@@ -616,6 +617,15 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       transcriptRevisions: listTranscriptRevisions(episode.id),
       auditEvents: listEpisodeAuditEvents(episode.id),
     });
+  }
+
+  const episodeWorkspaceMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/workspace$/);
+  if (episodeWorkspaceMatch && req.method === 'GET') {
+    const session = requireSession(req);
+    if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    const workspace = buildEpisodeWorkspace(decodeURIComponent(episodeWorkspaceMatch[1]!));
+    return workspace ? json({ workspace }) : json({ error: 'episode not found' }, 404);
   }
 
   if (episodeMatch && req.method === "PATCH") {
