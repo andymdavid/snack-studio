@@ -76,6 +76,8 @@ const state = {
   loadedRoutes: new Set(),
   routeRequestController: null,
   routeGeneration: 0,
+  navigationStartedAt: 0,
+  performanceEntries: [],
   diagnosticFilter: 'attention',
   thumbnailPollTimers: {},
   liveEventAbortController: null,
@@ -225,10 +227,50 @@ function appRoute() {
 }
 
 function navigate(path) {
+  state.navigationStartedAt = performance.now();
   const target = new URL(path, window.location.origin);
   if (`${window.location.pathname}${window.location.search}` !== `${target.pathname}${target.search}`) history.pushState({}, "", path);
   state.route = appRoute();
   void renderRoute();
+}
+
+function performanceRouteName(route) {
+  if (/^\/episodes\/[^/]+/.test(route)) return route.replace(/^\/episodes\/[^/]+/, '/episodes/:id');
+  if (/^\/contributors\/[^/]+/.test(route)) return '/contributors/:id';
+  return route;
+}
+
+function recordRoutePerformance(context, phase) {
+  if (!routeIsCurrent(context)) return;
+  const durationMs = Math.round((performance.now() - context.startedAt) * 10) / 10;
+  const budgetMs = phase === 'shell' ? 100 : context.cacheHit ? 150 : 500;
+  const entry = {
+    type: 'route',
+    route: performanceRouteName(context.route),
+    phase,
+    durationMs,
+    cacheHit: context.cacheHit,
+    budgetMs,
+    withinBudget: durationMs <= budgetMs,
+    recordedAt: Date.now(),
+  };
+  state.performanceEntries.push(entry);
+  if (state.performanceEntries.length > 100) state.performanceEntries.shift();
+  window.__snackStudioPerformance = state.performanceEntries;
+  performance.measure(`snack-studio:${entry.route}:${phase}`, { start: context.startedAt, end: performance.now(), detail: entry });
+}
+
+function routeHasCachedContent(route) {
+  if (route === '/') return state.loadedRoutes.has('episodes');
+  if (route === '/library') return state.loadedRoutes.has('assets');
+  if (route === '/diagnostics') return state.loadedRoutes.has('diagnostics');
+  if (route === '/settings') return state.loadedRoutes.has('settings');
+  if (route === '/graph') return state.loadedRoutes.has('graph');
+  if (route === '/contributors') return state.loadedRoutes.has('contributors');
+  if (route === '/review') return state.loadedRoutes.has('workflow:review');
+  if (route === '/assets') return state.loadedRoutes.has('workflow:assets');
+  if (route === '/publications') return state.loadedRoutes.has('workflow:publications');
+  return false;
 }
 
 function episodeTabUrl(tab = state.activeEpisodeTab, changes = {}) {
@@ -278,7 +320,10 @@ async function renderRoute() {
     route: appRoute(),
     generation: ++state.routeGeneration,
     signal: controller.signal,
+    startedAt: state.navigationStartedAt || performance.now(),
+    cacheHit: routeHasCachedContent(appRoute()),
   };
+  state.navigationStartedAt = 0;
   document.querySelector('.candidateEditorDialog')?.remove();
   document.querySelector('.thumbnailReviewDialog')?.remove();
   state.route = appRoute();
@@ -288,6 +333,12 @@ async function renderRoute() {
     return;
   }
 
+  queueMicrotask(() => recordRoutePerformance(routeContext, 'shell'));
+  await renderAuthenticatedRoute(routeContext);
+  recordRoutePerformance(routeContext, 'complete');
+}
+
+async function renderAuthenticatedRoute(routeContext) {
   if (state.route === "/chat") {
     showOnly("shell");
     await loadChatScreen(routeContext);
@@ -4169,6 +4220,7 @@ $("messageInput").addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("popstate", () => {
+  state.navigationStartedAt = performance.now();
   void renderRoute();
 });
 

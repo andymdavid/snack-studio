@@ -361,6 +361,14 @@ Initial product budgets:
 
 Use browser Performance traces and a repeatable Playwright navigation script with warm and cold cache profiles. Test an episode with the largest transcript/revision history, not just the median one.
 
+### Implemented local instrumentation
+
+Snack Studio now records passive navigation measurements in the browser without sending analytics or making additional requests. The latest 100 entries are available at `window.__snackStudioPerformance` and in the browser Performance timeline under `snack-studio:<route>:<phase>`.
+
+Each entry contains only a normalized route such as `/episodes/:id/assets`, the `shell` or `complete` phase, elapsed time, cache-hit state, its applicable budget, and whether it met that budget. Episode and contributor identifiers, titles, transcript content, and other business data are not recorded.
+
+API responses include a standard `Server-Timing: app;dur=<milliseconds>` header covering Snack Studio request-handler time. This makes server time visible in browser network and performance tooling without a telemetry service. Streaming responses measure time until the stream is established, not the lifetime of the connection.
+
 ## Delivery sequence
 
 ### Phase 1: instrument and remove the worst waits

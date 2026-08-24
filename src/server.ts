@@ -1877,9 +1877,12 @@ const server = Bun.serve({
   async fetch(req) {
     const url = new URL(req.url);
     if (url.pathname.startsWith("/api/")) {
+      const startedAt = performance.now();
       const response = await handleApi(req, url);
-      if (response) return response;
-      return json({ error: "not found" }, 404);
+      const resolved = response || json({ error: "not found" }, 404);
+      const headers = new Headers(resolved.headers);
+      headers.set('server-timing', `app;dur=${(performance.now() - startedAt).toFixed(1)}`);
+      return new Response(resolved.body, { status: resolved.status, statusText: resolved.statusText, headers });
     }
     return serveStatic(url.pathname);
   },
