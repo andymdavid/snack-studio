@@ -281,7 +281,7 @@ async function renderRoute() {
 
   if (state.route === "/chat") {
     showOnly("shell");
-    await loadChatScreen();
+    await loadChatScreen(routeContext);
     startPolling();
     return;
   }
@@ -290,7 +290,7 @@ async function renderRoute() {
   if (state.route === "/settings") {
     showOnly("home");
     showStudioPage("studioSettingsPage", "Snack Studio / Settings");
-    await loadSettings();
+    await loadSettings(routeContext);
     return;
   }
 
@@ -304,7 +304,7 @@ async function renderRoute() {
   }
   if (state.route.startsWith('/assets')) { showOnly('home'); await loadWorkflowRoute('assets', routeContext); return; }
   if (state.route === '/library') { showOnly('home'); await loadAssetLibrary(routeContext); return; }
-  if (state.route === '/diagnostics') { showOnly('home'); await loadDiagnostics(); return; }
+  if (state.route === '/diagnostics') { showOnly('home'); await loadDiagnostics(routeContext); return; }
   if (state.route.startsWith('/publications')) {
     showOnly('home'); await loadWorkflowRoute('publications', routeContext); return;
   }
@@ -666,13 +666,18 @@ async function loadAssetLibrary(routeContext) {
   } catch (error) { if (!routeErrorIsAbort(error, routeContext)) { $('assetLibraryGrid').textContent = error.message; setStudioStatus(error.message); } }
 }
 
-async function loadDiagnostics() {
-  showStudioPage('diagnosticsPage', 'Snack Studio / Diagnostics'); setStudioStatus('Loading diagnostics…');
+async function loadDiagnostics(routeContext) {
+  showStudioPage('diagnosticsPage', 'Snack Studio / Diagnostics');
+  if (state.loadedRoutes.has('diagnostics')) { renderDiagnostics(); setStudioStatus('Refreshing…'); }
+  else setStudioStatus('Loading diagnostics…');
   try {
-    state.diagnostics = (await api('/api/diagnostics')).items || [];
+    const diagnostics = (await api('/api/diagnostics', { signal: routeContext.signal })).items || [];
+    if (!routeIsCurrent(routeContext)) return;
+    state.diagnostics = diagnostics;
+    state.loadedRoutes.add('diagnostics');
     if (new URLSearchParams(window.location.search).has('episode')) state.diagnosticFilter = `episode:${new URLSearchParams(window.location.search).get('episode')}`;
     renderDiagnostics(); setStudioStatus('Ready');
-  } catch (error) { $('diagnosticList').textContent = error.message; setStudioStatus(error.message); }
+  } catch (error) { if (!routeErrorIsAbort(error, routeContext)) { $('diagnosticList').textContent = error.message; setStudioStatus(error.message); } }
 }
 
 function diagnosticNeedsAttention(item) { return ['failed','timed-out','needs-review','cancelled','error'].includes(item.status); }
@@ -3307,34 +3312,55 @@ function logout() {
   showOnly("login");
 }
 
-async function loadChatScreen() {
-  await loadRuntimeSettings();
-  await loadChats();
-  if (!state.activeChatId || !state.chats.find((chat) => chat.id === state.activeChatId)) {
-    if (state.chats[0]) state.activeChatId = state.chats[0].id;
-    else await newChat();
+async function loadChatScreen(routeContext) {
+  try {
+    await Promise.all([loadRuntimeSettings(routeContext), loadChats(routeContext)]);
+    if (!routeIsCurrent(routeContext)) return;
+    if (!state.activeChatId || !state.chats.find((chat) => chat.id === state.activeChatId)) {
+      if (state.chats[0]) state.activeChatId = state.chats[0].id;
+      else await newChat();
+    }
+    if (!routeIsCurrent(routeContext)) return;
+    await loadActiveChat(routeContext);
+  } catch (error) {
+    if (!routeErrorIsAbort(error, routeContext)) setStatus(error.message);
   }
-  await loadActiveChat();
 }
 
-async function loadChats() {
-  const payload = await api("/api/chats");
+async function loadChats(routeContext) {
+  const requestOptions = routeContext ? { signal: routeContext.signal } : {};
+  const payload = await api("/api/chats", requestOptions);
+  if (routeContext && !routeIsCurrent(routeContext)) return;
   state.chats = payload.chats || [];
   renderChats();
 }
 
-async function loadSettings() {
-  await loadRuntimeSettings();
-  if (state.me?.access?.edit) await loadDbStatus().catch((error) => setStatus(error.message));
-  renderSettings();
-  renderAutopilotTargets();
-  renderPipelineOptions();
-  renderAccessRules();
-  renderDbStatus();
+async function loadSettings(routeContext) {
+  if (state.loadedRoutes.has('settings')) {
+    renderSettings(); renderAutopilotTargets(); renderPipelineOptions(); renderAccessRules(); renderDbStatus();
+    setStudioStatus('Refreshing…');
+  }
+  try {
+    const loads = [loadRuntimeSettings(routeContext)];
+    if (state.me?.access?.edit) loads.push(loadDbStatus(routeContext).catch((error) => { if (!routeErrorIsAbort(error, routeContext)) setStatus(error.message); }));
+    await Promise.all(loads);
+    if (!routeIsCurrent(routeContext)) return;
+    state.loadedRoutes.add('settings');
+    renderSettings();
+    renderAutopilotTargets();
+    renderPipelineOptions();
+    renderAccessRules();
+    renderDbStatus();
+    setStudioStatus('Ready');
+  } catch (error) {
+    if (!routeErrorIsAbort(error, routeContext)) setStudioStatus(error.message);
+  }
 }
 
-async function loadRuntimeSettings() {
-  const payload = await api("/api/settings");
+async function loadRuntimeSettings(routeContext) {
+  const requestOptions = routeContext ? { signal: routeContext.signal } : {};
+  const payload = await api("/api/settings", requestOptions);
+  if (routeContext && !routeIsCurrent(routeContext)) return;
   state.settings = payload.settings;
   state.accessRules = payload.accessRules || [];
   if (!state.activeAutopilotTargetId) {
@@ -3686,8 +3712,11 @@ async function selectAutopilotTarget(targetId) {
   renderChatRunControls();
 }
 
-async function loadDbStatus() {
-  state.dbStatus = await api("/api/db/status");
+async function loadDbStatus(routeContext) {
+  const requestOptions = routeContext ? { signal: routeContext.signal } : {};
+  const dbStatus = await api("/api/db/status", requestOptions);
+  if (routeContext && !routeIsCurrent(routeContext)) return;
+  state.dbStatus = dbStatus;
   renderDbStatus();
 }
 
@@ -3885,9 +3914,12 @@ async function newChat() {
   await loadActiveChat();
 }
 
-async function loadActiveChat() {
+async function loadActiveChat(routeContext) {
   if (!state.activeChatId) return;
-  const payload = await api(`/api/chats/${encodeURIComponent(state.activeChatId)}/messages`);
+  const chatId = state.activeChatId;
+  const requestOptions = routeContext ? { signal: routeContext.signal } : {};
+  const payload = await api(`/api/chats/${encodeURIComponent(chatId)}/messages`, requestOptions);
+  if ((routeContext && !routeIsCurrent(routeContext)) || state.activeChatId !== chatId) return;
   $("chatTitle").textContent = payload.chat.title;
   renderMessages(payload.messages || []);
   renderChats();
