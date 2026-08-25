@@ -871,8 +871,8 @@ function renderAssetLibrary() {
   for (const asset of assets) {
     const card = document.createElement('article'); card.className = `assetLibraryCard assetKind-${asset.assetKind}`;
     const preview = document.createElement('button'); preview.type = 'button'; preview.className = 'assetLibraryPreview'; preview.setAttribute('aria-label', `Open ${asset.title}`);
-    if (asset.assetKind === 'portrait') { const image = document.createElement('img'); image.src = asset.imageUrl; image.alt = ''; preview.appendChild(image); }
-    else loadPrivateImage(asset.imageUrl, preview, asset.title);
+    if (asset.assetKind === 'portrait') { const image = document.createElement('img'); image.src = asset.imageUrl; image.alt = ''; image.loading = 'lazy'; image.decoding = 'async'; preview.appendChild(image); }
+    else loadPrivateImageLazy(asset.libraryImageUrl || asset.imageUrl, preview, asset.title, asset.width, asset.height);
     preview.addEventListener('click', () => navigate(asset.assetKind === 'portrait' ? `/contributors/${encodeURIComponent(asset.contributorId)}` : `/episodes/${encodeURIComponent(asset.episodeId)}/assets`));
     const copy = document.createElement('div'); copy.className = 'assetLibraryCopy'; const kind = document.createElement('span'); kind.className = 'metadata'; kind.textContent = asset.assetKind === 'portrait' ? 'Contributor portrait' : asset.assetKind === 'episode' ? `Episode ${asset.episodeNumber || ''} thumbnail` : `Episode ${asset.episodeNumber || ''} · Snack thumbnail`;
     const title = document.createElement('strong'); title.textContent = asset.title; const subtitle = document.createElement('span'); subtitle.textContent = asset.subtitle || (asset.assetKind === 'snack' ? asset.episodeTitle : `${asset.width} × ${asset.height} · Version ${asset.versionNumber}`);
@@ -940,7 +940,28 @@ function renderContributorWorkspace(contributor) {
 }
 
 function loadPrivateImage(url, container, alt) {
-  fetch(url, { headers: state.token ? { authorization: `Bearer ${state.token}` } : {} }).then((response) => response.ok ? response.blob() : Promise.reject(new Error('Image unavailable'))).then((blob) => { const image = document.createElement('img'); image.src = URL.createObjectURL(blob); image.alt = alt; container.replaceChildren(image); }).catch(() => { container.textContent = 'Source photo unavailable'; });
+  fetch(url, { headers: state.token ? { authorization: `Bearer ${state.token}` } : {} }).then((response) => response.ok ? response.blob() : Promise.reject(new Error('Image unavailable'))).then((blob) => { const image = document.createElement('img'); const objectUrl = URL.createObjectURL(blob); image.src = objectUrl; image.alt = alt; image.decoding = 'async'; image.addEventListener('load', () => URL.revokeObjectURL(objectUrl), { once: true }); container.replaceChildren(image); }).catch(() => { container.textContent = 'Image unavailable'; });
+}
+
+function loadPrivateImageLazy(url, container, alt, width, height) {
+  container.setAttribute('aria-busy', 'true');
+  const load = () => {
+    fetch(url, { headers: state.token ? { authorization: `Bearer ${state.token}` } : {} })
+      .then((response) => response.ok ? response.blob() : Promise.reject(new Error('Image unavailable')))
+      .then((blob) => {
+        const image = document.createElement('img'); const objectUrl = URL.createObjectURL(blob);
+        image.src = objectUrl; image.alt = alt; image.width = Number(width) || 640; image.height = Number(height) || 427; image.decoding = 'async';
+        image.addEventListener('load', () => URL.revokeObjectURL(objectUrl), { once: true });
+        container.replaceChildren(image); container.removeAttribute('aria-busy');
+      })
+      .catch(() => { container.textContent = 'Preview unavailable'; container.removeAttribute('aria-busy'); });
+  };
+  if (!('IntersectionObserver' in window)) return load();
+  const observer = new IntersectionObserver((entries) => {
+    if (!entries.some((entry) => entry.isIntersecting)) return;
+    observer.disconnect(); load();
+  }, { rootMargin: '320px 0px' });
+  observer.observe(container);
 }
 
 async function refreshContributorDetail(contributorId) {

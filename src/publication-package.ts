@@ -11,6 +11,7 @@ import { resolveTranscriptParticipants } from './publication-metadata.ts';
 import { getTheme } from './themes.ts';
 import { getApprovedPublicTranscript } from './public-transcripts.ts';
 import { listNewsletterItems, listRelationships } from './curation.ts';
+import { ensureThumbnailAssetVariants } from './thumbnails.ts';
 
 export type PublicationPackageFile = {
   kind: 'episode' | 'snack' | 'person' | 'theme' | 'newsletter' | 'transcript' | 'episode-thumbnail' | 'snack-thumbnail' | 'person-portrait';
@@ -48,10 +49,11 @@ export function websiteThemeNeedsPublication(themeId: string, websiteRepo = INTE
 }
 
 function selectedFinishedAsset(jobId: string) {
-  return db.query(`SELECT a.* FROM thumbnail_assets a
+  const asset = db.query(`SELECT a.* FROM thumbnail_assets a
     JOIN thumbnail_jobs j ON j.id=a.job_id
     WHERE a.job_id=?1 AND a.asset_stage='finished' AND a.candidate_id=j.selected_candidate_id
     ORDER BY a.version_number DESC LIMIT 1`).get(jobId) as Record<string, unknown> | null;
+  return asset ? ensureThumbnailAssetVariants(String(asset.id)) : null;
 }
 
 export function buildPublicationPackage(episodeId: string) {
@@ -106,7 +108,7 @@ export function buildPublicationPackage(episodeId: string) {
     const asset = job && String(job.status) === 'approved' ? selectedFinishedAsset(String(job.id)) : null;
     if (!asset) blockers.push({ code: 'snack-thumbnail-missing', message: `${revision.publicTitle} needs an approved finished thumbnail.`, sourceId: candidate!.id });
     files.push({ kind: 'snack', destination: `src/content/snacks/${slug || candidate!.id}.md`, sourceId: candidate!.id, sourceRevisionId: revision.id });
-    if (asset) files.push({ kind: 'snack-thumbnail', destination: `public/images/snacks/${slug}.webp`, sourceId: candidate!.id, sourceRevisionId: revision.id, sourcePath: String(asset.storage_path), sizeBytes: Number(asset.size_bytes) });
+    if (asset) files.push({ kind: 'snack-thumbnail', destination: `public/images/snacks/${slug}.webp`, sourceId: candidate!.id, sourceRevisionId: revision.id, sourcePath: String(asset.website_storage_path), sizeBytes: Number(asset.website_size_bytes) });
     return {
       candidateId: candidate!.id, revisionId: revision.id, position: candidate!.approvedPosition,
       slug, title: revision.publicTitle, editorialTitle: revision.editorialTitle, standfirst: revision.standfirst,
@@ -131,7 +133,7 @@ export function buildPublicationPackage(episodeId: string) {
   const episodeJob = db.query("SELECT * FROM thumbnail_jobs WHERE episode_id=?1 AND asset_kind='episode' ORDER BY created_at DESC LIMIT 1").get(episodeId) as Record<string, unknown> | null;
   const episodeAsset = episodeJob && String(episodeJob.status) === 'approved' ? selectedFinishedAsset(String(episodeJob.id)) : null;
   if (!episodeAsset) blockers.push({ code: 'episode-thumbnail-missing', message: 'The episode needs an approved finished thumbnail.' });
-  if (episodeAsset && episodeNumber) files.push({ kind: 'episode-thumbnail', destination: `public/images/episodes/${episodeSlug}-thumbnail.webp`, sourceId: episode.id, sourcePath: String(episodeAsset.storage_path), sizeBytes: Number(episodeAsset.size_bytes) });
+  if (episodeAsset && episodeNumber) files.push({ kind: 'episode-thumbnail', destination: `public/images/episodes/${episodeSlug}-thumbnail.webp`, sourceId: episode.id, sourcePath: String(episodeAsset.website_storage_path), sizeBytes: Number(episodeAsset.website_size_bytes) });
 
   const summary = episode.publicSummary?.trim() || snacks.slice(0, 2).map((snack) => snack.standfirst.trim()).filter(Boolean).join(' ').slice(0, 500);
   const duplicateDestinations = files.map((file) => file.destination).filter((path, index, all) => all.indexOf(path) !== index);
