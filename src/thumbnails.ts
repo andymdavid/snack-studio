@@ -277,6 +277,15 @@ function createWebpDerivative(sourcePath: string, destination: string, maxWidth:
 export function ensureThumbnailAssetVariants(assetId: string) {
   let asset = getThumbnailAssetRow(assetId);
   if (!asset) return null;
+  if (
+    String(asset.mime_type) === 'image/png'
+    && extname(String(asset.storage_path)).toLowerCase() === '.png'
+    && asset.library_storage_path
+    && asset.website_storage_path
+    && existsSync(String(asset.storage_path))
+    && existsSync(String(asset.library_storage_path))
+    && existsSync(String(asset.website_storage_path))
+  ) return asset;
   const version = Number(asset.version_number);
   const directory = dirname(String(asset.storage_path));
   let masterPath = String(asset.storage_path);

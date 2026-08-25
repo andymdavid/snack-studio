@@ -113,7 +113,10 @@ export function getEpisodeWorkflow(episodeId: string) {
   };
 }
 
-export function getEpisodeWorkProjection(episodeId: string): EpisodeWorkProjection {
+export function getEpisodeWorkProjection(episodeId: string, options: {
+  publicationPackage?: ReturnType<typeof buildPublicationPackage> | null;
+  publicationPreparation?: ReturnType<typeof getPublicationPreparation> | null;
+} = {}): EpisodeWorkProjection {
   const episode = getEpisode(episodeId); if (!episode) throw new Error('Episode not found');
   const transcript = getActiveTranscriptRevision(episodeId); const candidates = listCandidates(episodeId);
   const approved = validateApprovedCandidateBatch(episodeId); const requests = listEpisodePipelineRequests(episodeId);
@@ -124,9 +127,10 @@ export function getEpisodeWorkProjection(episodeId: string): EpisodeWorkProjecti
   const proposalCount = candidates.reduce((count, item) => count + listRegenerationProposals(item.id).filter((proposal) => proposal.status === 'proposed').length, 0);
   let assetReviewCount = 0; const assetReasons: string[] = []; let packageValue: ReturnType<typeof buildPublicationPackage> | null = null;
   if (finalSetApproved) {
-    packageValue = buildPublicationPackage(episodeId);
+    packageValue = options.publicationPackage === undefined ? buildPublicationPackage(episodeId) : options.publicationPackage;
     try {
-      const preparation = getPublicationPreparation(episodeId);
+      const preparation = options.publicationPreparation === undefined ? getPublicationPreparation(episodeId) : options.publicationPreparation;
+      if (!preparation) throw new Error('Publication preparation is unavailable');
       const unfinishedJobs = preparation.jobs.filter((job) => job.status !== 'approved').length;
       assetReviewCount = unfinishedJobs + preparation.participants.unresolved.length + preparation.contributorsNeedingPortraits.length;
       if (preparation.participants.unresolved.length) assetReasons.push(`${preparation.participants.unresolved.length} contributor profile${preparation.participants.unresolved.length === 1 ? '' : 's'} need resolution.`);

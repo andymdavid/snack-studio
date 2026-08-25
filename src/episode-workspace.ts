@@ -53,6 +53,9 @@ export function buildEpisodeWorkspace(episodeId: string) {
     websiteValidation: getLatestWebsiteValidation(episodeId),
     gitPublication: getLatestGitPublication(episodeId),
     gitDeployment: getLatestGitDeployment(episodeId),
-    work: getEpisodeWorkProjection(episodeId),
+    work: getEpisodeWorkProjection(episodeId, {
+      publicationPackage: publicationPackage.value,
+      publicationPreparation: preparation.value,
+    }),
   };
 }

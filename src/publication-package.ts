@@ -11,7 +11,6 @@ import { resolveTranscriptParticipants } from './publication-metadata.ts';
 import { getTheme } from './themes.ts';
 import { getApprovedPublicTranscript } from './public-transcripts.ts';
 import { listNewsletterItems, listRelationships } from './curation.ts';
-import { ensureThumbnailAssetVariants } from './thumbnails.ts';
 
 export type PublicationPackageFile = {
   kind: 'episode' | 'snack' | 'person' | 'theme' | 'newsletter' | 'transcript' | 'episode-thumbnail' | 'snack-thumbnail' | 'person-portrait';
@@ -53,7 +52,7 @@ function selectedFinishedAsset(jobId: string) {
     JOIN thumbnail_jobs j ON j.id=a.job_id
     WHERE a.job_id=?1 AND a.asset_stage='finished' AND a.candidate_id=j.selected_candidate_id
     ORDER BY a.version_number DESC LIMIT 1`).get(jobId) as Record<string, unknown> | null;
-  return asset ? ensureThumbnailAssetVariants(String(asset.id)) : null;
+  return asset?.website_storage_path && existsSync(String(asset.website_storage_path)) ? asset : null;
 }
 
 export function buildPublicationPackage(episodeId: string) {
