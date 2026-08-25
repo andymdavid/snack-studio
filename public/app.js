@@ -1742,6 +1742,19 @@ function renderWebsiteValidation(validation, packageValue, publication, deployme
   if (validation.failureSummary) { const failure = document.createElement('pre'); failure.textContent = validation.failureSummary; result.appendChild(failure); }
   if (validation.diffStat) { const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'File change summary'; const pre = document.createElement('pre'); pre.textContent = validation.diffStat; details.append(summary, pre); result.appendChild(details); }
   if (validation.textDiff) { const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Content diff'; const pre = document.createElement('pre'); pre.textContent = validation.textDiff; details.append(summary, pre); result.appendChild(details); }
+  if (validation.buildOutput) { const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Build output'; const pre = document.createElement('pre'); pre.textContent = validation.buildOutput; details.append(summary, pre); result.appendChild(details); }
+  else if (validation.detailsAvailable && !validation.detailsLoaded) {
+    const loadDetails = document.createElement('button'); loadDetails.type = 'button'; loadDetails.className = 'btn btnSecondary'; loadDetails.textContent = 'Load technical details';
+    loadDetails.addEventListener('click', async () => {
+      const clear = setButtonBusy(loadDetails, 'Loading details…');
+      try {
+        const payload = await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/website-validation`);
+        state.websiteValidation = payload.validation;
+        renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+      } catch (error) { setStudioStatus(error.message); } finally { clear(); }
+    });
+    result.appendChild(loadDetails);
+  }
   const matchingPublication = publication?.validationAttemptId === validation.id && publication.packageFingerprint === packageValue.fingerprint;
   const published = matchingPublication && publication.status === 'published' && publication.mainPushed;
   if (matchingPublication) {

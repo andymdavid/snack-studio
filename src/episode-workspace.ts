@@ -27,6 +27,18 @@ function publicationPackageForWorkspace(packageValue: ReturnType<typeof buildPub
   return { ...packageValue, transcript };
 }
 
+function websiteValidationForWorkspace(validation: ReturnType<typeof getLatestWebsiteValidation>) {
+  if (!validation) return null;
+  const { textDiff, buildOutput, ...summary } = validation;
+  return {
+    ...summary,
+    textDiff: null,
+    buildOutput: null,
+    detailsAvailable: Boolean(textDiff || buildOutput),
+    detailsLoaded: false,
+  };
+}
+
 export type EpisodeWorkspaceView = 'overview' | 'snacks' | 'assets' | 'publication';
 
 export function buildEpisodeWorkspace(episodeId: string, options: { view?: EpisodeWorkspaceView } = {}) {
@@ -64,7 +76,7 @@ export function buildEpisodeWorkspace(episodeId: string, options: { view?: Episo
     publicationPreparation: includeAssets ? preparation.value : null,
     publicationPreparationError: includeAssets ? preparation.error : null,
     publicationPackage: includePublication ? publicationPackageForWorkspace(publicationPackage.value) : null,
-    websiteValidation: includePublication ? getLatestWebsiteValidation(episodeId) : null,
+    websiteValidation: includePublication ? websiteValidationForWorkspace(getLatestWebsiteValidation(episodeId)) : null,
     gitPublication: includePublication ? getLatestGitPublication(episodeId) : null,
     gitDeployment: includePublication ? getLatestGitDeployment(episodeId) : null,
     work: getEpisodeWorkProjection(episodeId, {
