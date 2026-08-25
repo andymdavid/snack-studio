@@ -39,6 +39,12 @@ function websiteValidationForWorkspace(validation: ReturnType<typeof getLatestWe
   };
 }
 
+function transcriptForWorkspace(transcript: ReturnType<typeof getActiveTranscriptRevision>, includeText: boolean) {
+  if (!transcript || includeText) return transcript;
+  const { transcriptText: _transcriptText, ...metadata } = transcript;
+  return metadata;
+}
+
 export type EpisodeWorkspaceView = 'overview' | 'snacks' | 'assets' | 'publication';
 
 export function buildEpisodeWorkspace(episodeId: string, options: { view?: EpisodeWorkspaceView } = {}) {
@@ -46,6 +52,7 @@ export function buildEpisodeWorkspace(episodeId: string, options: { view?: Episo
   if (!episode) return null;
 
   const view = options.view || 'overview';
+  const includeOverview = view === 'overview';
   const includeAssets = view === 'assets' || view === 'publication';
   const includePublication = view === 'publication';
 
@@ -62,10 +69,10 @@ export function buildEpisodeWorkspace(episodeId: string, options: { view?: Episo
 
   return {
     episode,
-    transcript: getActiveTranscriptRevision(episodeId),
+    transcript: transcriptForWorkspace(getActiveTranscriptRevision(episodeId), includeOverview),
     publicTranscript: includePublication ? getLatestPublicTranscript(episodeId) : null,
     transcriptRevisions: listTranscriptRevisions(episodeId),
-    auditEvents: listEpisodeAuditEvents(episodeId),
+    auditEvents: includeOverview ? listEpisodeAuditEvents(episodeId) : [],
     candidates,
     generations: buildCandidateGenerations(candidates, pipelineRequests),
     approvedBatch: validateApprovedCandidateBatch(episodeId),
