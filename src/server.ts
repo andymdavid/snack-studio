@@ -635,7 +635,9 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const session = requireSession(req);
     if (!session) return json({ error: 'unauthorized' }, 401);
     if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
-    const workspace = buildEpisodeWorkspace(decodeURIComponent(episodeWorkspaceMatch[1]!));
+    const requestedView = url.searchParams.get('view');
+    const view = requestedView === 'snacks' || requestedView === 'assets' || requestedView === 'publication' ? requestedView : 'overview';
+    const workspace = buildEpisodeWorkspace(decodeURIComponent(episodeWorkspaceMatch[1]!), { view });
     return workspace ? json({ workspace }) : json({ error: 'episode not found' }, 404);
   }
 

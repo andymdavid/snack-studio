@@ -21,9 +21,21 @@ function optionalProjection<T>(read: () => T): { value: T | null; error: string 
   }
 }
 
-export function buildEpisodeWorkspace(episodeId: string) {
+function publicationPackageForWorkspace(packageValue: ReturnType<typeof buildPublicationPackage> | null) {
+  if (!packageValue?.transcript) return packageValue;
+  const { transcriptText: _transcriptText, ...transcript } = packageValue.transcript;
+  return { ...packageValue, transcript };
+}
+
+export type EpisodeWorkspaceView = 'overview' | 'snacks' | 'assets' | 'publication';
+
+export function buildEpisodeWorkspace(episodeId: string, options: { view?: EpisodeWorkspaceView } = {}) {
   const episode = getEpisode(episodeId);
   if (!episode) return null;
+
+  const view = options.view || 'overview';
+  const includeAssets = view === 'assets' || view === 'publication';
+  const includePublication = view === 'publication';
 
   markStalePipelineRunsTimedOut({ episodeId, timeoutMs: PIPELINE_TIMEOUT_MS });
   const pipelineRequests = listEpisodePipelineRequests(episodeId).map((request) => ({
@@ -31,13 +43,15 @@ export function buildEpisodeWorkspace(episodeId: string) {
     staleInput: request.inputTranscriptRevisionId !== episode.activeTranscriptRevisionId,
   }));
   const candidates = listCandidates(episodeId);
+  // Work-queue state needs these projections for approved episodes even when
+  // the current tab does not render their full payload.
   const preparation = optionalProjection(() => getPublicationPreparation(episodeId));
   const publicationPackage = optionalProjection(() => buildPublicationPackage(episodeId));
 
   return {
     episode,
     transcript: getActiveTranscriptRevision(episodeId),
-    publicTranscript: getLatestPublicTranscript(episodeId),
+    publicTranscript: includePublication ? getLatestPublicTranscript(episodeId) : null,
     transcriptRevisions: listTranscriptRevisions(episodeId),
     auditEvents: listEpisodeAuditEvents(episodeId),
     candidates,
@@ -47,12 +61,12 @@ export function buildEpisodeWorkspace(episodeId: string) {
     curation: getCuration(episodeId),
     pipelineRequests,
     pipelineTimeoutMs: PIPELINE_TIMEOUT_MS,
-    publicationPreparation: preparation.value,
-    publicationPreparationError: preparation.error,
-    publicationPackage: publicationPackage.value,
-    websiteValidation: getLatestWebsiteValidation(episodeId),
-    gitPublication: getLatestGitPublication(episodeId),
-    gitDeployment: getLatestGitDeployment(episodeId),
+    publicationPreparation: includeAssets ? preparation.value : null,
+    publicationPreparationError: includeAssets ? preparation.error : null,
+    publicationPackage: includePublication ? publicationPackageForWorkspace(publicationPackage.value) : null,
+    websiteValidation: includePublication ? getLatestWebsiteValidation(episodeId) : null,
+    gitPublication: includePublication ? getLatestGitPublication(episodeId) : null,
+    gitDeployment: includePublication ? getLatestGitDeployment(episodeId) : null,
     work: getEpisodeWorkProjection(episodeId, {
       publicationPackage: publicationPackage.value,
       publicationPreparation: preparation.value,

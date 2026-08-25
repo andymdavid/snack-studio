@@ -1101,7 +1101,8 @@ async function loadEpisode(id, options = {}) {
     setStudioStatus("Loading workspace…");
   }
   try {
-    const { workspace } = await api(`/api/episodes/${encodeURIComponent(id)}/workspace`, requestOptions);
+    const workspaceView = ['snacks', 'assets', 'publication'].includes(state.activeEpisodeTab) ? state.activeEpisodeTab : 'overview';
+    const { workspace } = await api(`/api/episodes/${encodeURIComponent(id)}/workspace?view=${encodeURIComponent(workspaceView)}`, requestOptions);
     if (routeContext && !routeIsCurrent(routeContext)) return;
     const workspaceSignature = episodeWorkspaceSignature(workspace);
     state.activeEpisode = workspace.episode;
