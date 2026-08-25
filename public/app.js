@@ -4200,24 +4200,25 @@ function base64Utf8(value) {
 }
 
 const COMMAND_ROUTES = [
-  { id: 'episodes', label: 'Go to Episodes', route: '/', shortcut: 'G E' },
-  { id: 'review', label: 'Go to Snack Review', route: '/review', shortcut: 'G R' },
-  { id: 'assets', label: 'Go to Asset Review', route: '/assets', shortcut: 'G A' },
-  { id: 'publications', label: 'Go to Publications', route: '/publications', shortcut: 'G P' },
-  { id: 'library', label: 'Go to Library', route: '/library', shortcut: 'G L' },
-  { id: 'graph', label: 'Go to Graph', route: '/graph', shortcut: 'G G' },
-  { id: 'diagnostics', label: 'Go to Diagnostics', route: '/diagnostics', shortcut: 'G D' },
-  { id: 'settings', label: 'Go to Settings', route: '/settings', shortcut: 'G S' },
+  { id: 'episodes', group: 'All episodes', label: 'Episodes', route: '/', shortcut: ['G', 'E'] },
+  { id: 'review', group: 'All episodes', label: 'Snack review', route: '/review', shortcut: ['G', 'R'] },
+  { id: 'assets', group: 'All episodes', label: 'Asset review', route: '/assets', shortcut: ['G', 'A'] },
+  { id: 'publications', group: 'All episodes', label: 'Publications', route: '/publications', shortcut: ['G', 'P'] },
+  { id: 'library', group: 'Workspace', label: 'Library', route: '/library', shortcut: ['G', 'L'] },
+  { id: 'graph', group: 'Workspace', label: 'Graph', route: '/graph', shortcut: ['G', 'G'] },
+  { id: 'diagnostics', group: 'Workspace', label: 'Diagnostics', route: '/diagnostics', shortcut: ['G', 'D'] },
+  { id: 'settings', group: 'Workspace', label: 'Settings', route: '/settings', shortcut: ['G', 'S'] },
 ];
 
 function commandCatalog() {
-  const commands = COMMAND_ROUTES.map((command) => ({ ...command, run: () => navigate(command.route) }));
-  if (state.me?.access?.edit) commands.unshift({ id: 'new-episode', label: 'New episode', shortcut: 'N', run: openEpisodeDialog });
+  const commands = [];
   if (state.activeEpisode && state.route.startsWith(`/episodes/${encodeURIComponent(state.activeEpisode.id)}`)) {
-    for (const [tab, label] of [['overview', 'Episode overview'], ['snacks', 'Episode Snacks'], ['assets', 'Episode assets'], ['publication', 'Episode publication']]) {
-      commands.push({ id: `episode-${tab}`, label, shortcut: '', run: () => navigate(episodeTabUrl(tab)) });
+    for (const [tab, label] of [['overview', 'Overview'], ['snacks', 'Snacks'], ['assets', 'Assets'], ['publication', 'Publication']]) {
+      commands.push({ id: `episode-${tab}`, group: `Current episode · ${state.activeEpisode.workingTitle}`, label, shortcut: [], run: () => navigate(episodeTabUrl(tab)) });
     }
   }
+  if (state.me?.access?.edit) commands.push({ id: 'new-episode', group: 'Create', label: 'New episode', shortcut: ['C', 'E'], run: openEpisodeDialog });
+  commands.push(...COMMAND_ROUTES.map((command) => ({ ...command, run: () => navigate(command.route) })));
   return commands;
 }
 
@@ -4246,13 +4247,22 @@ function commandMenu() {
 
 function renderCommandMenu(dialog) {
   const input = dialog.querySelector('.commandMenuInput'); const results = dialog.querySelector('.commandMenuResults');
-  const query = input.value.trim().toLowerCase(); const commands = commandCatalog().filter((command) => `${command.label} ${command.shortcut}`.toLowerCase().includes(query));
+  const query = input.value.trim().toLowerCase(); const commands = commandCatalog().filter((command) => `${command.group} ${command.label} ${command.shortcut.join(' ')}`.toLowerCase().includes(query));
   results.replaceChildren();
   if (!commands.length) { const empty = document.createElement('p'); empty.className = 'commandMenuEmpty'; empty.textContent = 'No matching commands'; results.appendChild(empty); return; }
+  let currentGroup = '';
   commands.forEach((command, index) => {
+    if (command.group !== currentGroup) {
+      currentGroup = command.group;
+      const heading = document.createElement('p'); heading.className = 'commandMenuGroup'; heading.textContent = currentGroup; results.appendChild(heading);
+    }
     const option = document.createElement('button'); option.type = 'button'; option.className = 'commandMenuOption'; option.setAttribute('role', 'option'); option.setAttribute('aria-selected', String(index === 0));
     const label = document.createElement('span'); label.textContent = command.label; option.appendChild(label);
-    if (command.shortcut) { const shortcut = document.createElement('kbd'); shortcut.textContent = command.shortcut; option.appendChild(shortcut); }
+    if (command.shortcut.length) {
+      const shortcut = document.createElement('span'); shortcut.className = 'commandMenuShortcut'; shortcut.setAttribute('aria-label', command.shortcut.join(' then '));
+      command.shortcut.forEach((key, keyIndex) => { if (keyIndex) { const then = document.createElement('span'); then.textContent = 'then'; shortcut.appendChild(then); } const keycap = document.createElement('kbd'); keycap.textContent = key; shortcut.appendChild(keycap); });
+      option.appendChild(shortcut);
+    }
     option.addEventListener('click', () => { dialog.close(); command.run(); }); results.appendChild(option);
   });
 }
@@ -4262,20 +4272,19 @@ function openCommandMenu() {
   const dialog = commandMenu(); dialog.returnFocus = document.activeElement; dialog.querySelector('.commandMenuInput').value = ''; renderCommandMenu(dialog); dialog.showModal(); dialog.querySelector('.commandMenuInput').focus();
 }
 
-let pendingGoShortcut = 0;
+let pendingShortcut = null;
 window.addEventListener('keydown', (event) => {
   const target = event.target;
   const editing = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target?.isContentEditable;
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); openCommandMenu(); return; }
   if (editing || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
   const key = event.key.toLowerCase();
-  if (performance.now() - pendingGoShortcut < 1000) {
-    pendingGoShortcut = 0;
-    const command = COMMAND_ROUTES.find((item) => item.shortcut.toLowerCase() === `g ${key}`);
-    if (command) { event.preventDefault(); navigate(command.route); return; }
+  if (pendingShortcut && performance.now() - pendingShortcut.startedAt < 1000) {
+    const sequence = [pendingShortcut.key, key]; pendingShortcut = null;
+    const command = commandCatalog().find((item) => item.shortcut.map((part) => part.toLowerCase()).join(' ') === sequence.join(' '));
+    if (command) { event.preventDefault(); command.run(); return; }
   }
-  if (key === 'g') { pendingGoShortcut = performance.now(); return; }
-  if (key === 'n' && state.me?.access?.edit) { event.preventDefault(); openEpisodeDialog(); }
+  if (key === 'g' || key === 'c') pendingShortcut = { key, startedAt: performance.now() };
 });
 
 function startPolling() {
