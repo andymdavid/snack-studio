@@ -7,8 +7,8 @@ import { getTheme } from './themes.ts';
 import { getContributor } from "./contributors.ts";
 import { bytesToHex } from '@noble/hashes/utils';
 import { sha256 } from '@noble/hashes/sha256';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { resolve, join, normalize, extname } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, resolve, join, normalize, extname } from 'node:path';
 import { CONTRIBUTOR_UPLOAD_DIR } from './config.ts';
 import { getCurrentAutopilotTarget } from './db.ts';
 
@@ -124,7 +124,9 @@ export function listFinishedThumbnailAssets() {
     episodeTitle: String(row.episode_title), episodeNumber: row.episode_number == null ? null : Number(row.episode_number),
     topicColour: row.topic_colour == null ? null : String(row.topic_colour), width: Number(row.width), height: Number(row.height),
     mimeType: String(row.mime_type), sizeBytes: Number(row.size_bytes), versionNumber: Number(row.version_number),
-    createdAt: Number(row.created_at), imageUrl: `/api/assets/thumbnails/${encodeURIComponent(String(row.id))}/image`,
+    createdAt: Number(row.created_at),
+    imageUrl: `/api/assets/thumbnails/${encodeURIComponent(String(row.id))}/image`,
+    libraryImageUrl: `/api/assets/thumbnails/${encodeURIComponent(String(row.id))}/library`,
   }));
 }
 
@@ -245,18 +247,57 @@ export function approveThumbnailCandidate(candidateId: string, actorPubkey: stri
   const directory = resolve(join(CONTRIBUTOR_UPLOAD_DIR, '..', 'thumbnails', jobId, 'finished'));
   mkdirSync(directory, { recursive: true });
   const isEpisode = String(row.asset_kind) === 'episode';
-  const destination = join(directory, `thumbnail-v${version}.webp`);
-  const conversion = isEpisode ? (copyFileSync(String(row.source_uri), destination), { exitCode: 0 }) : Bun.spawnSync(['magick', String(row.source_uri), '-resize', '1536x1024^', '-gravity', 'center', '-extent', '1536x1024', '-strip', '-quality', '84', destination]);
+  const width = isEpisode ? 1672 : 1536; const height = isEpisode ? 941 : 1024;
+  const destination = join(directory, `thumbnail-v${version}-master.png`);
+  const conversion = Bun.spawnSync(['magick', String(row.source_uri), '-resize', `${width}x${height}^`, '-gravity', 'center', '-extent', `${width}x${height}`, '-strip', destination]);
   if (conversion.exitCode !== 0) throw new Error('Thumbnail candidate could not be finished');
+  const libraryPath = join(directory, `thumbnail-v${version}-library.webp`);
+  const websitePath = join(directory, `thumbnail-v${version}-website.webp`);
+  createWebpDerivative(destination, libraryPath, 640, 76);
+  createWebpDerivative(destination, websitePath, width, 84);
   const digest = bytesToHex(sha256(readFileSync(destination))); const now = Date.now();
   db.transaction(() => {
     db.query("UPDATE thumbnail_candidates SET status=CASE WHEN id=?1 THEN 'approved' ELSE 'rejected' END WHERE job_id=?2 AND generation_round=?3").run(candidateId, jobId, Number(row.generation_round));
-    db.query(`INSERT INTO thumbnail_assets(id,job_id,candidate_id,asset_stage,storage_path,width,height,mime_type,size_bytes,sha256,version_number,created_at) VALUES(?1,?2,?3,'finished',?4,?5,?6,'image/webp',?7,?8,?9,?10)`)
-      .run(crypto.randomUUID(), jobId, candidateId, destination, isEpisode ? 1672 : 1536, isEpisode ? 941 : 1024, statSync(destination).size, digest, version, now);
+    db.query(`INSERT INTO thumbnail_assets(id,job_id,candidate_id,asset_stage,storage_path,width,height,mime_type,size_bytes,sha256,version_number,created_at,library_storage_path,library_size_bytes,website_storage_path,website_size_bytes) VALUES(?1,?2,?3,'finished',?4,?5,?6,'image/png',?7,?8,?9,?10,?11,?12,?13,?14)`)
+      .run(crypto.randomUUID(), jobId, candidateId, destination, width, height, statSync(destination).size, digest, version, now, libraryPath, statSync(libraryPath).size, websitePath, statSync(websitePath).size);
     db.query("UPDATE thumbnail_jobs SET status='approved', selected_candidate_id=?1, updated_at=?2 WHERE id=?3").run(candidateId, now, jobId);
     recordAuditEvent({ actorPubkey, action: 'thumbnail.candidate.approved', entityType: 'thumbnail-job', entityId: jobId, detail: { candidateId, version, sha256: digest } });
   })();
   return getThumbnailJobDetail(jobId)!;
+}
+
+function createWebpDerivative(sourcePath: string, destination: string, maxWidth: number, quality: number) {
+  const conversion = Bun.spawnSync([
+    'magick', sourcePath, '-resize', `${maxWidth}x>`, '-strip', '-quality', String(quality),
+    '-define', 'webp:method=6', destination,
+  ]);
+  if (conversion.exitCode !== 0) throw new Error('Thumbnail WebP derivative could not be created');
+}
+
+export function ensureThumbnailAssetVariants(assetId: string) {
+  let asset = getThumbnailAssetRow(assetId);
+  if (!asset) return null;
+  const version = Number(asset.version_number);
+  const directory = dirname(String(asset.storage_path));
+  let masterPath = String(asset.storage_path);
+  if (String(asset.mime_type) !== 'image/png' || extname(masterPath).toLowerCase() !== '.png') {
+    const normalizedMaster = join(directory, `thumbnail-v${version}-master.png`);
+    if (!existsSync(normalizedMaster)) {
+      const conversion = Bun.spawnSync(['magick', masterPath, '-strip', normalizedMaster]);
+      if (conversion.exitCode !== 0) throw new Error('Legacy thumbnail master could not be normalized');
+    }
+    masterPath = normalizedMaster;
+  }
+  const libraryPath = String(asset.library_storage_path || join(directory, `thumbnail-v${version}-library.webp`));
+  const websitePath = String(asset.website_storage_path || join(directory, `thumbnail-v${version}-website.webp`));
+  if (!existsSync(libraryPath)) createWebpDerivative(masterPath, libraryPath, 640, 76);
+  if (!existsSync(websitePath)) createWebpDerivative(masterPath, websitePath, Number(asset.width), 84);
+  const masterBytes = readFileSync(masterPath);
+  db.query(`UPDATE thumbnail_assets SET storage_path=?1,mime_type='image/png',size_bytes=?2,sha256=?3,
+    library_storage_path=?4,library_size_bytes=?5,website_storage_path=?6,website_size_bytes=?7 WHERE id=?8`)
+    .run(masterPath, masterBytes.byteLength, bytesToHex(sha256(masterBytes)), libraryPath, statSync(libraryPath).size, websitePath, statSync(websitePath).size, assetId);
+  asset = getThumbnailAssetRow(assetId);
+  return asset;
 }
 
 export function finishEpisodeThumbnail(row: Record<string, unknown>, destination: string) {

@@ -1236,6 +1236,21 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    id: '034_thumbnail_asset_derivatives',
+    description: 'Store library and website WebP derivatives beside lossless thumbnail masters',
+    up(db) {
+      const columns: Array<[string, string]> = [
+        ['library_storage_path', 'TEXT'],
+        ['library_size_bytes', 'INTEGER'],
+        ['website_storage_path', 'TEXT'],
+        ['website_size_bytes', 'INTEGER'],
+      ];
+      for (const [column, definition] of columns) {
+        if (!hasColumn(db, 'thumbnail_assets', column)) db.exec(`ALTER TABLE thumbnail_assets ADD COLUMN ${column} ${definition}`);
+      }
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

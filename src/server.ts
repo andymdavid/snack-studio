@@ -87,7 +87,7 @@ import { applySuccessfulPipelineResult } from "./pipeline-results.ts";
 import { applySuccessfulRegenerationResult, listRegenerationProposals, resolveRegenerationProposal } from "./regeneration-proposals.ts";
 import { validateSuccessfulRegenerationResult } from "./regeneration-result-input.ts";
 import { validateThumbnailBrief } from "./thumbnail-input.ts";
-import { approveThumbnailCandidate, applyThumbnailResult, createThumbnailGeneration, createThumbnailJob, getPublicationPreparation, getThumbnailAssetRow, getThumbnailCandidateRow, getThumbnailJobDetail, listFinishedThumbnailAssets, listThumbnailJobs, markThumbnailGenerationFailed, markThumbnailGenerationStarted, preparePublicationThumbnails, uploadEpisodeThumbnail, verifyThumbnailCallbackToken, verifyThumbnailGenerationTrigger } from "./thumbnails.ts";
+import { approveThumbnailCandidate, applyThumbnailResult, createThumbnailGeneration, createThumbnailJob, ensureThumbnailAssetVariants, getPublicationPreparation, getThumbnailAssetRow, getThumbnailCandidateRow, getThumbnailJobDetail, listFinishedThumbnailAssets, listThumbnailJobs, markThumbnailGenerationFailed, markThumbnailGenerationStarted, preparePublicationThumbnails, uploadEpisodeThumbnail, verifyThumbnailCallbackToken, verifyThumbnailGenerationTrigger } from "./thumbnails.ts";
 import { liveEventResponse, publishLiveEvent } from "./live-events.ts";
 import { THUMBNAIL_CANDIDATES_PER_ROUND, THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
 import { validateSuccessfulPublicationMetadataResult } from "./publication-metadata-result-input.ts";
@@ -435,11 +435,22 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     return json({ assets: [...listFinishedThumbnailAssets(), ...portraits].sort((a, b) => b.createdAt - a.createdAt) });
   }
 
+  const thumbnailDerivativeMatch = pathname.match(/^\/api\/assets\/thumbnails\/([^/]+)\/(library|website)$/);
+  if (thumbnailDerivativeMatch && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    const asset = ensureThumbnailAssetVariants(decodeURIComponent(thumbnailDerivativeMatch[1]!));
+    if (!asset) return json({ error: 'asset not found' }, 404);
+    const path = thumbnailDerivativeMatch[2] === 'library' ? asset.library_storage_path : asset.website_storage_path;
+    const file = Bun.file(String(path)); if (!await file.exists()) return json({ error: 'image not found' }, 404);
+    return new Response(file, { headers: { 'content-type': 'image/webp', 'cache-control': 'private, max-age=86400, immutable' } });
+  }
+
   const finishedThumbnailImageMatch = pathname.match(/^\/api\/assets\/thumbnails\/([^/]+)\/image$/);
   if (finishedThumbnailImageMatch && req.method === 'GET') {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
     if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
-    const asset = getThumbnailAssetRow(decodeURIComponent(finishedThumbnailImageMatch[1]!));
+    const asset = ensureThumbnailAssetVariants(decodeURIComponent(finishedThumbnailImageMatch[1]!));
     if (!asset) return json({ error: 'asset not found' }, 404);
     const file = Bun.file(String(asset.storage_path)); if (!await file.exists()) return json({ error: 'image not found' }, 404);
     return new Response(file, { headers: { 'content-type': String(asset.mime_type || 'image/webp'), 'cache-control': 'private, max-age=300' } });
