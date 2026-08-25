@@ -2406,15 +2406,23 @@ function startEpisodePipelinePolling() {
   state.pollTimer = setInterval(async () => {
     if (state.activeEpisode?.id !== episodeId || !/^\/(episodes|review|assets|publications)\//.test(window.location.pathname)) return stopPolling();
     try {
-      const [pipelinePayload, candidatePayload, curationPayload, publicationPayload, publicTranscriptPayload, packagePayload, workPayload] = await Promise.all([
-        api(`/api/episodes/${encodeURIComponent(episodeId)}/pipeline-requests`),
-        api(`/api/episodes/${encodeURIComponent(episodeId)}/candidates`),
-        api(`/api/episodes/${encodeURIComponent(episodeId)}/curation`),
-        api(`/api/episodes/${encodeURIComponent(episodeId)}/publication-preparation`).catch(() => ({ preparation: state.publicationPreparation })),
-        api(`/api/episodes/${encodeURIComponent(episodeId)}/public-transcript`).catch(() => ({ publicTranscript: state.publicTranscript })),
-        api(`/api/episodes/${encodeURIComponent(episodeId)}/publication-package`).catch(() => ({ package: state.publicationPackage })),
-        api(`/api/episodes/${encodeURIComponent(episodeId)}/work`).catch(() => ({ work: state.activeWork })),
-      ]);
+      const tab = state.activeEpisodeTab;
+      const encodedEpisodeId = encodeURIComponent(episodeId);
+      const requests = {
+        pipeline: api(`/api/episodes/${encodedEpisodeId}/pipeline-requests`),
+        candidates: api(`/api/episodes/${encodedEpisodeId}/candidates`),
+        work: api(`/api/episodes/${encodedEpisodeId}/work`).catch(() => ({ work: state.activeWork })),
+      };
+      if (tab === 'snacks' || tab === 'publication') requests.curation = api(`/api/episodes/${encodedEpisodeId}/curation`);
+      if (tab === 'assets' || tab === 'publication') requests.preparation = api(`/api/episodes/${encodedEpisodeId}/publication-preparation`).catch(() => ({ preparation: state.publicationPreparation }));
+      if (tab === 'publication') {
+        requests.publicTranscript = api(`/api/episodes/${encodedEpisodeId}/public-transcript`).catch(() => ({ publicTranscript: state.publicTranscript }));
+        requests.package = api(`/api/episodes/${encodedEpisodeId}/publication-package`).catch(() => ({ package: state.publicationPackage }));
+      }
+      const entries = await Promise.all(Object.entries(requests).map(async ([key, request]) => [key, await request]));
+      const payloads = Object.fromEntries(entries);
+      const pipelinePayload = payloads.pipeline;
+      const candidatePayload = payloads.candidates;
       state.pipelineRequests = pipelinePayload.pipelineRequests || [];
       state.pipelineTimeoutMs = Number(pipelinePayload.timeoutMs || 0);
       state.candidates = candidatePayload.candidates || [];
@@ -2425,11 +2433,11 @@ function startEpisodePipelinePolling() {
         state.activeGenerationId = state.candidateGenerations.at(-1)?.id || "";
         state.activeCandidateId = "";
       }
-      state.curation = curationPayload;
-      state.publicationPreparation = publicationPayload.preparation || state.publicationPreparation;
-      state.publicTranscript = publicTranscriptPayload.publicTranscript || state.publicTranscript;
-      state.publicationPackage = packagePayload.package || state.publicationPackage;
-      state.activeWork = workPayload.work || state.activeWork;
+      if (payloads.curation) state.curation = payloads.curation;
+      if (payloads.preparation) state.publicationPreparation = payloads.preparation.preparation || state.publicationPreparation;
+      if (payloads.publicTranscript) state.publicTranscript = payloads.publicTranscript.publicTranscript || state.publicTranscript;
+      if (payloads.package) state.publicationPackage = payloads.package.package || state.publicationPackage;
+      state.activeWork = payloads.work.work || state.activeWork;
       if (state.candidates.length && state.episodeStage === "processing") state.episodeStage = "output";
       renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
       if (!state.pipelineRequests.some((request) => ["queued", "running", "applying-result"].includes(request.status))) stopPolling();
