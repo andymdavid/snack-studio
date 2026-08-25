@@ -78,6 +78,7 @@ const state = {
   routeGeneration: 0,
   navigationStartedAt: 0,
   performanceEntries: [],
+  activeWorkspaceSignature: "",
   diagnosticFilter: 'attention',
   thumbnailPollTimers: {},
   liveEventAbortController: null,
@@ -260,7 +261,26 @@ function recordRoutePerformance(context, phase) {
   performance.measure(`snack-studio:${entry.route}:${phase}`, { start: context.startedAt, end: performance.now(), detail: entry });
 }
 
+function recordEpisodeRenderPerformance(startedAt) {
+  const durationMs = Math.round((performance.now() - startedAt) * 10) / 10;
+  const entry = {
+    type: 'render',
+    route: `/episodes/:id/${state.activeEpisodeTab}`,
+    phase: 'dom',
+    durationMs,
+    budgetMs: 50,
+    withinBudget: durationMs <= 50,
+    recordedAt: Date.now(),
+  };
+  state.performanceEntries.push(entry);
+  if (state.performanceEntries.length > 100) state.performanceEntries.shift();
+  window.__snackStudioPerformance = state.performanceEntries;
+  performance.measure(`snack-studio:${entry.route}:render`, { start: startedAt, end: performance.now(), detail: entry });
+}
+
 function routeHasCachedContent(route) {
+  const episodeMatch = route.match(/^\/episodes\/([^/]+)/);
+  if (episodeMatch) return state.activeEpisode?.id === decodeURIComponent(episodeMatch[1]);
   if (route === '/') return state.loadedRoutes.has('episodes');
   if (route === '/library') return state.loadedRoutes.has('assets');
   if (route === '/diagnostics') return state.loadedRoutes.has('diagnostics');
@@ -1053,10 +1073,16 @@ async function loadEpisode(id, options = {}) {
   state.workspaceOrigin = state.activeEpisodeTab === 'snacks' ? '/review' : state.activeEpisodeTab === 'assets' ? '/assets' : state.activeEpisodeTab === 'publication' ? '/publications' : '/';
   $('episodesBackButton').textContent = state.activeEpisodeTab === 'snacks' ? '← Snack Review' : state.activeEpisodeTab === 'assets' ? '← Asset Review' : state.activeEpisodeTab === 'publication' ? '← Publications' : '← All episodes';
   showStudioPage("episodePage", `Snack Studio / Episodes / ${state.activeEpisodeTab === 'overview' ? 'Overview' : state.activeEpisodeTab[0].toUpperCase() + state.activeEpisodeTab.slice(1)}`);
-  setStudioStatus("Loading workspace…");
+  const renderedFromCache = state.activeEpisode?.id === id;
+  if (renderedFromCache) {
+    renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+  } else {
+    setStudioStatus("Loading workspace…");
+  }
   try {
     const { workspace } = await api(`/api/episodes/${encodeURIComponent(id)}/workspace`, requestOptions);
     if (routeContext && !routeIsCurrent(routeContext)) return;
+    const workspaceSignature = episodeWorkspaceSignature(workspace);
     state.activeEpisode = workspace.episode;
     state.activeTranscript = workspace.transcript || null;
     state.publicTranscript = workspace.publicTranscript || null;
@@ -1093,7 +1119,10 @@ async function loadEpisode(id, options = {}) {
     }
     if (options.stage) state.episodeStage = options.stage;
     if (state.candidates.length && state.episodeStage === "processing") state.episodeStage = "output";
-    renderEpisodeWorkspace(workspace.episode, workspace.transcript, workspace.transcriptRevisions || [], workspace.auditEvents || [], state.candidates);
+    if (!renderedFromCache || workspaceSignature !== state.activeWorkspaceSignature) {
+      renderEpisodeWorkspace(workspace.episode, workspace.transcript, workspace.transcriptRevisions || [], workspace.auditEvents || [], state.candidates);
+    }
+    state.activeWorkspaceSignature = workspaceSignature;
     if (['assets','publication'].includes(state.activeEpisodeTab) && ['approved','published'].includes(state.activeEpisode.status) && !state.publicationPreparation?.jobs?.length) await preparePublication();
     startEpisodePipelinePolling();
     setStudioStatus("Ready");
@@ -1102,6 +1131,10 @@ async function loadEpisode(id, options = {}) {
     setStudioStatus(error.message);
     $("episodeWorkspace").textContent = error.message;
   }
+}
+
+function episodeWorkspaceSignature(workspace) {
+  return JSON.stringify(workspace, (key, value) => key === 'transcriptText' ? undefined : value);
 }
 
 function makeWorkspaceField(labelText, input) {
@@ -1124,6 +1157,15 @@ function workspaceInput(id, type, value, placeholder = "") {
 }
 
 function renderEpisodeWorkspace(episode, transcript, transcriptRevisions, auditEvents, candidates = state.candidates) {
+  const startedAt = performance.now();
+  try {
+    return renderEpisodeWorkspaceContent(episode, transcript, transcriptRevisions, auditEvents, candidates);
+  } finally {
+    recordEpisodeRenderPerformance(startedAt);
+  }
+}
+
+function renderEpisodeWorkspaceContent(episode, transcript, transcriptRevisions, auditEvents, candidates = state.candidates) {
   const workspace = $("episodeWorkspace");
   workspace.innerHTML = "";
   const header = document.createElement("header");
