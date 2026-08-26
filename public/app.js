@@ -538,6 +538,10 @@ function scheduleLiveCacheRefresh() {
   }, 120);
 }
 
+function episodeWorkspaceRefreshBlocked() {
+  return state.contributorFormOpen || Boolean(document.querySelector('.contributorProfileForm'));
+}
+
 function scheduleLiveEpisodeRefresh(event) {
   if (!state.activeEpisode || event.episodeId !== state.activeEpisode.id || !['assets', 'publication'].includes(state.activeEpisodeTab)) return;
   if (state.liveRefreshTimer) clearTimeout(state.liveRefreshTimer);
@@ -549,7 +553,7 @@ function scheduleLiveEpisodeRefresh(event) {
       const payload = await api(`/api/episodes/${encodeURIComponent(episodeId)}/publication-preparation`);
       if (state.activeEpisode?.id !== episodeId) return;
       state.publicationPreparation = payload.preparation;
-      renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+      if (!episodeWorkspaceRefreshBlocked()) renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
       const job = payload.preparation?.jobs?.find((item) => item.id === event.entityId);
       setStudioStatus(job?.status === 'failed' ? `Thumbnail failed: ${job.failureSummary || 'Generation did not complete'}` : ['in-review','approved'].includes(job?.status) ? 'Thumbnail ready to review' : 'Thumbnail updated');
     } catch {
@@ -570,7 +574,7 @@ function scheduleLivePortraitRefresh(event) {
       if (onContributor) await refreshContributorDetail(event.entityId);
       else if (state.activeEpisode) {
         state.publicationPreparation = (await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`)).preparation;
-        renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+        if (!episodeWorkspaceRefreshBlocked()) renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
       }
       setStudioStatus(event.status === 'failed' ? 'Portrait generation failed' : event.status === 'in-review' ? 'Contributor portraits ready to review' : 'Contributor portrait updated');
     } catch { /* polling remains the recovery path */ }
@@ -584,12 +588,12 @@ function refreshCandidateEditorDialog(candidateId) {
 }
 
 function scheduleLiveRegenerationRefresh(event) {
-  if (state.activeEpisode?.id !== event.episodeId) return;
+  if (state.activeEpisode?.id !== event.episodeId || episodeWorkspaceRefreshBlocked()) return;
   if (state.liveRefreshTimer) clearTimeout(state.liveRefreshTimer);
   state.liveRefreshTimer = setTimeout(async () => {
     state.liveRefreshTimer = null;
     const episodeId = state.activeEpisode?.id;
-    if (!episodeId || episodeId !== event.episodeId) return;
+    if (!episodeId || episodeId !== event.episodeId || episodeWorkspaceRefreshBlocked()) return;
     try {
       const [pipelinePayload, candidatePayload] = await Promise.all([
         api(`/api/episodes/${encodeURIComponent(episodeId)}/pipeline-requests`),
@@ -609,11 +613,11 @@ function scheduleLiveRegenerationRefresh(event) {
 function scheduleLivePipelineRefresh(event) {
   const episodeId = state.activeEpisode?.id;
   const route = state.route;
-  if (!episodeId || event.episodeId !== episodeId || !route.startsWith(`/episodes/${encodeURIComponent(episodeId)}`)) return;
+  if (!episodeId || event.episodeId !== episodeId || !route.startsWith(`/episodes/${encodeURIComponent(episodeId)}`) || episodeWorkspaceRefreshBlocked()) return;
   if (state.livePipelineRefreshTimer) clearTimeout(state.livePipelineRefreshTimer);
   state.livePipelineRefreshTimer = setTimeout(async () => {
     state.livePipelineRefreshTimer = null;
-    if (state.activeEpisode?.id !== episodeId || state.route !== route) return;
+    if (state.activeEpisode?.id !== episodeId || state.route !== route || episodeWorkspaceRefreshBlocked()) return;
     try {
       await loadEpisode(episodeId, {
         tab: state.activeEpisodeTab,
@@ -2150,7 +2154,11 @@ function renderContributorForm(speakerLabel) {
   form.appendChild(grid);
   const actions = document.createElement("div"); actions.className = "contributorProfileActions";
   const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "btn btnSecondary"; cancel.textContent = "Cancel";
-  cancel.addEventListener("click", () => { state.contributorFormOpen = false; renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates); });
+  cancel.addEventListener("click", () => {
+    state.contributorFormOpen = false;
+    renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
+    if (['approved','published'].includes(state.activeEpisode?.status)) void preparePublication();
+  });
   const submit = document.createElement("button"); submit.type = "submit"; submit.className = "btn btnPrimary"; submit.textContent = "Save profile";
   actions.append(cancel, submit); form.appendChild(actions);
   form.addEventListener("submit", async (event) => {
@@ -2164,6 +2172,7 @@ function renderContributorForm(speakerLabel) {
       state.publicationPreparation = payload.preparation;
       renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
       setStudioStatus("Contributor saved · portrait generation required");
+      if (['approved','published'].includes(state.activeEpisode?.status)) void preparePublication();
     } catch (error) {
       submit.disabled = false;
       setStudioStatus(error.message);
@@ -2452,7 +2461,7 @@ function startEpisodePipelinePolling() {
       if (payloads.package) state.publicationPackage = payloads.package.package || state.publicationPackage;
       state.activeWork = payloads.work.work || state.activeWork;
       if (state.candidates.length && state.episodeStage === "processing") state.episodeStage = "output";
-      renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
+      if (!episodeWorkspaceRefreshBlocked()) renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
       if (!state.pipelineRequests.some((request) => ["queued", "running", "applying-result"].includes(request.status))) stopPolling();
     } catch {
       // Preserve the last durable state and try again on the next interval.
@@ -3070,6 +3079,10 @@ async function preparePublication() {
       : await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`, { method: "POST", body: JSON.stringify({}) });
     state.publicationPreparation = payload.preparation;
     state.episodeStage = "publication";
+    if (episodeWorkspaceRefreshBlocked()) {
+      setStudioStatus("Publication preparation updated");
+      return;
+    }
     renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
     const metadataActive = state.pipelineRequests.some((request) => request.operation === "publication-metadata" && ["created", "awaiting-authorization", "queued", "running", "applying-result"].includes(request.status));
     const cleanupActive = state.pipelineRequests.some((request) => request.operation === 'transcript-normalization' && ['created','awaiting-authorization','queued','running','applying-result'].includes(request.status));
