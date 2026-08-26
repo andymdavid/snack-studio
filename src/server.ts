@@ -927,7 +927,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
   }
   if (gitDeploymentMatch && req.method === 'POST') {
     const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
-    try { return json({ deployment: deployPublishedCommit(decodeURIComponent(gitDeploymentMatch[1]!), session.pubkey) }, 201); }
+    try { return json({ deployment: await deployPublishedCommit(decodeURIComponent(gitDeploymentMatch[1]!), session.pubkey) }, 201); }
     catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 409); }
   }
 

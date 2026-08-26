@@ -1,5 +1,5 @@
 import { db } from './db.ts';
-import { INTELLIGENCE_SNACKS_REPO } from './config.ts';
+import { INTELLIGENCE_SNACKS_DEPLOY_WORKFLOW, INTELLIGENCE_SNACKS_GITHUB_REPO, INTELLIGENCE_SNACKS_REPO } from './config.ts';
 import { recordAuditEvent } from './episodes.ts';
 import { getLatestGitPublication } from './git-publication.ts';
 import { gitEnvironment } from './git-auth.ts';
@@ -35,7 +35,34 @@ export function publicationAuthorizesDeployment(publication: ReturnType<typeof g
   return Boolean(publication?.status === 'published' && publication.mainPushed && publication.commitSha);
 }
 
-export function deployPublishedCommit(episodeId: string, actorPubkey: string) {
+export function deploymentWorkflowRequest(token: string) {
+  return {
+    url: `https://api.github.com/repos/${INTELLIGENCE_SNACKS_GITHUB_REPO}/actions/workflows/${encodeURIComponent(INTELLIGENCE_SNACKS_DEPLOY_WORKFLOW)}/dispatches`,
+    init: {
+      method: 'POST',
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${token}`,
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'Snack-Studio',
+      },
+      body: JSON.stringify({ ref: 'deployed' }),
+    } satisfies RequestInit,
+  };
+}
+
+async function dispatchDeploymentWorkflow() {
+  const token = process.env.WINGMAN_GITHUB_TOKEN;
+  if (!token) throw new Error('GitHub access token is required to trigger the website deployment workflow.');
+  const request = deploymentWorkflowRequest(token);
+  const response = await fetch(request.url, request.init);
+  if (response.status !== 204) {
+    const detail = (await response.text()).trim();
+    throw new Error(`GitHub deployment workflow dispatch failed (${response.status})${detail ? `: ${detail}` : ''}`);
+  }
+}
+
+export async function deployPublishedCommit(episodeId: string, actorPubkey: string) {
   const publication = getLatestGitPublication(episodeId);
   if (!publicationAuthorizesDeployment(publication) || !publication?.commitSha) throw new Error('A commit published by Snack Studio to main is required before deployment.');
   const active = db.query("SELECT id FROM git_deployment_attempts WHERE episode_id=?1 AND status IN ('validating','pushing-deployed') LIMIT 1").get(episodeId) as { id: string } | null;
@@ -54,8 +81,9 @@ export function deployPublishedCommit(episodeId: string, actorPubkey: string) {
     run(['git', 'push', 'origin', `${publication.commitSha}:deployed`]);
     const deployedAfterPush = run(['git', 'ls-remote', 'origin', 'refs/heads/deployed']).split(/\s+/)[0];
     if (deployedAfterPush !== publication.commitSha) throw new Error('The deployed push returned without the expected remote commit.');
+    await dispatchDeploymentWorkflow();
     db.query("UPDATE git_deployment_attempts SET status='deployed',deployed_pushed=1,updated_at=?1 WHERE id=?2").run(Date.now(), attemptId);
-    recordAuditEvent({ actorPubkey, action: 'publication.deployed.pushed', entityType: 'episode', entityId: episodeId, detail: { attemptId, publicationAttemptId: publication.id, commitSha: publication.commitSha, previousDeployedCommit: remoteDeployed } });
+    recordAuditEvent({ actorPubkey, action: 'publication.deployed.pushed', entityType: 'episode', entityId: episodeId, detail: { attemptId, publicationAttemptId: publication.id, commitSha: publication.commitSha, previousDeployedCommit: remoteDeployed, workflowDispatched: true } });
   } catch (error) {
     const summary = error instanceof Error ? error.message : String(error);
     db.query("UPDATE git_deployment_attempts SET status='failed',failure_summary=?1,updated_at=?2 WHERE id=?3").run(summary.slice(0, 4000), Date.now(), attemptId);
