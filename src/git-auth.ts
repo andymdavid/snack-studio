@@ -10,8 +10,10 @@ export function gitEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.
   const env = { ...source };
   const count = Number.parseInt(source.GIT_CONFIG_COUNT || '0', 10);
   const next = Number.isFinite(count) && count >= 0 ? count : 0;
-  env.GIT_CONFIG_COUNT = String(next + 1);
+  env.GIT_CONFIG_COUNT = String(next + 2);
   env[`GIT_CONFIG_KEY_${next}`] = 'credential.https://github.com.helper';
-  env[`GIT_CONFIG_VALUE_${next}`] = GITHUB_CREDENTIAL_HELPER;
+  env[`GIT_CONFIG_VALUE_${next}`] = '';
+  env[`GIT_CONFIG_KEY_${next + 1}`] = 'credential.https://github.com.helper';
+  env[`GIT_CONFIG_VALUE_${next + 1}`] = GITHUB_CREDENTIAL_HELPER;
   return env;
 }

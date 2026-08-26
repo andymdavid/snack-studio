@@ -7,7 +7,7 @@ describe('gitEnvironment', () => {
     expect(gitEnvironment(source)).toBe(source);
   });
 
-  test('adds an explicit GitHub credential helper while preserving existing git config', () => {
+  test('resets inherited GitHub credentials before adding the current helper', () => {
     const result = gitEnvironment({
       WINGMAN_GITHUB_USERNAME: 'studio-user',
       WINGMAN_GITHUB_TOKEN: 'secret-token',
@@ -16,10 +16,12 @@ describe('gitEnvironment', () => {
       GIT_CONFIG_VALUE_0: '*',
     });
 
-    expect(result.GIT_CONFIG_COUNT).toBe('2');
+    expect(result.GIT_CONFIG_COUNT).toBe('3');
     expect(result.GIT_CONFIG_KEY_0).toBe('safe.directory');
     expect(result.GIT_CONFIG_KEY_1).toBe('credential.https://github.com.helper');
-    expect(result.GIT_CONFIG_VALUE_1).toContain('WINGMAN_GITHUB_TOKEN');
-    expect(result.GIT_CONFIG_VALUE_1).not.toContain('secret-token');
+    expect(result.GIT_CONFIG_VALUE_1).toBe('');
+    expect(result.GIT_CONFIG_KEY_2).toBe('credential.https://github.com.helper');
+    expect(result.GIT_CONFIG_VALUE_2).toContain('WINGMAN_GITHUB_TOKEN');
+    expect(result.GIT_CONFIG_VALUE_2).not.toContain('secret-token');
   });
 });
