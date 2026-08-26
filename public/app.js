@@ -2121,14 +2121,15 @@ async function approveContributorPortrait(candidateId, triggerButton = null) {
 function renderContributorForm(speakerLabel) {
   const form = document.createElement("form");
   form.className = "contributorProfileForm";
+  const speakerAlias = document.createElement('input'); speakerAlias.type = 'hidden'; speakerAlias.name = 'speakerAlias'; speakerAlias.value = speakerLabel; form.appendChild(speakerAlias);
   const heading = document.createElement("div");
   heading.innerHTML = "<p class=\"eyebrow\">New contributor</p><h3>Profile and portrait source</h3><p>This profile will publish with the episode after its voxel portrait is approved.</p>";
   form.appendChild(heading);
   const fields = [
     ["name", "Name", speakerLabel, true],
-    ["role", "Role", state.activeEpisode?.episodeNumber ? `Episode ${state.activeEpisode.episodeNumber} guest` : "Episode guest", true],
-    ["shortBio", "Short bio", "", true],
-    ["biographyMarkdown", "About", "", true, "textarea"],
+    ["role", "Role", state.activeEpisode?.episodeNumber ? `Episode ${state.activeEpisode.episodeNumber} guest` : "Episode guest", false],
+    ["shortBio", "Short bio", "", false],
+    ["biographyMarkdown", "About", "", false, "textarea"],
     ["aliases", "Transcript aliases", speakerLabel, false],
     ["externalUrl", "Website", "", false],
     ["xUrl", "X profile", "", false],
@@ -2148,8 +2149,8 @@ function renderContributorForm(speakerLabel) {
   }
   const photo = document.createElement("label");
   photo.className = "contributorPhotoField";
-  photo.innerHTML = "<span>Reference photo</span><small>JPEG, PNG or WebP up to 12 MB. This is used for identity only and stays private.</small>";
-  const photoInput = document.createElement("input"); photoInput.type = "file"; photoInput.name = "photo"; photoInput.accept = "image/jpeg,image/png,image/webp"; photoInput.required = true;
+  photo.innerHTML = "<span>Reference photo <small>(optional)</small></span><small>JPEG, PNG or WebP up to 12 MB. Add one later if a portrait is needed; the source stays private.</small>";
+  const photoInput = document.createElement("input"); photoInput.type = "file"; photoInput.name = "photo"; photoInput.accept = "image/jpeg,image/png,image/webp";
   photo.appendChild(photoInput); grid.appendChild(photo);
   form.appendChild(grid);
   const actions = document.createElement("div"); actions.className = "contributorProfileActions";

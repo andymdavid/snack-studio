@@ -14,6 +14,25 @@ describe('contributor profile input', () => {
     expect(value.aliases).toEqual(['José Example', 'José', 'J. Example']);
   });
 
+  test('retains the source transcript label when the public name is corrected', () => {
+    const form = new FormData();
+    form.set('name', 'Jarrad Grigg');
+    form.set('speakerAlias', 'Jarad');
+    form.set('role', 'Episode 53 guest');
+    form.set('shortBio', 'Builds software products.');
+    form.set('biographyMarkdown', 'Jarrad builds software products.');
+    form.set('aliases', 'Jarrad');
+    expect(validateContributorProfile(form).aliases).toEqual(['Jarrad Grigg', 'Jarad', 'Jarrad']);
+  });
+
+  test('allows a private placeholder profile with only a name', () => {
+    const form = new FormData();
+    form.set('name', 'Private Guest');
+    expect(validateContributorProfile(form)).toMatchObject({
+      id: 'private-guest', name: 'Private Guest', role: '', shortBio: '', biographyMarkdown: '',
+    });
+  });
+
   test('rejects unsafe social URLs', () => {
     const form = new FormData();
     form.set('name', 'Guest'); form.set('role', 'Guest'); form.set('shortBio', 'Bio'); form.set('biographyMarkdown', 'About');

@@ -44,23 +44,27 @@ export function getContributor(id: string): Contributor | null {
   return row ? mapContributor(row) : null;
 }
 
-export async function createContributor(input: ContributorProfileInput & { actorPubkey: string; photo: File }): Promise<Contributor> {
+export async function createContributor(input: ContributorProfileInput & { actorPubkey: string; photo?: File | null }): Promise<Contributor> {
   if (getContributor(input.id)) throw new Error(`Contributor ${input.id} already exists`);
-  const extension = input.photo.type === 'image/png' ? '.png' : input.photo.type === 'image/webp' ? '.webp' : '.jpg';
-  const directory = join(CONTRIBUTOR_UPLOAD_DIR, input.id);
-  const photoPath = join(directory, `identity-source${extension}`);
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(photoPath, new Uint8Array(await input.photo.arrayBuffer()), { flag: 'wx' });
+  let photoPath: string | null = null;
+  if (input.photo) {
+    const extension = input.photo.type === 'image/png' ? '.png' : input.photo.type === 'image/webp' ? '.webp' : '.jpg';
+    const directory = join(CONTRIBUTOR_UPLOAD_DIR, input.id);
+    photoPath = join(directory, `identity-source${extension}`);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(photoPath, new Uint8Array(await input.photo.arrayBuffer()), { flag: 'wx' });
+  }
+  const portraitStatus = photoPath ? 'ready-to-generate' : 'needed';
   const now = Date.now();
   db.transaction(() => {
     db.query(`INSERT INTO contributors(
       id, name, role, short_bio, biography_markdown, aliases_json, external_url, x_url,
       linkedin_url, nostr_url, reference_photo_path, portrait_status, source,
       created_by_pubkey, created_at, updated_at
-    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'ready-to-generate', 'studio', ?12, ?13, ?13)`)
+    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'studio', ?13, ?14, ?14)`)
       .run(input.id, input.name, input.role, input.shortBio, input.biographyMarkdown, JSON.stringify(input.aliases),
-        input.externalUrl, input.xUrl, input.linkedinUrl, input.nostrUrl, photoPath, input.actorPubkey, now);
-    recordAuditEvent({ actorPubkey: input.actorPubkey, action: 'contributor.created', entityType: 'contributor', entityId: input.id, detail: { portraitStatus: 'ready-to-generate' } });
+        input.externalUrl, input.xUrl, input.linkedinUrl, input.nostrUrl, photoPath, portraitStatus, input.actorPubkey, now);
+    recordAuditEvent({ actorPubkey: input.actorPubkey, action: 'contributor.created', entityType: 'contributor', entityId: input.id, detail: { portraitStatus } });
   })();
   return getContributor(input.id)!;
 }

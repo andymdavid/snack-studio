@@ -469,9 +469,9 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     try {
       const form = await req.formData();
       const input = validateContributorProfile(form);
-      const photo = form.get('photo');
-      if (!(photo instanceof File)) throw new Error('A reference photo is required');
-      validateContributorPhoto(photo);
+      const photoValue = form.get('photo');
+      const photo = photoValue instanceof File && photoValue.size ? photoValue : null;
+      if (photo) validateContributorPhoto(photo);
       return json({ contributor: publicContributor(await createContributor({ ...input, actorPubkey: session.pubkey, photo })) }, 201);
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 400);

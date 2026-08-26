@@ -36,10 +36,11 @@ export function validateContributorProfile(form: FormData): ContributorProfileIn
   const biographyMarkdown = text(form.get('biographyMarkdown'));
   if (!name) throw new Error('Contributor name is required');
   if (!id) throw new Error('Contributor ID could not be derived from the name');
-  if (!role) throw new Error('Contributor role is required');
-  if (!shortBio) throw new Error('Short bio is required');
-  if (!biographyMarkdown) throw new Error('Biography is required');
-  const aliases = [...new Set([name, ...text(form.get('aliases')).split(',')].map((item) => item.trim()).filter(Boolean))];
+  const aliases = [...new Set([
+    name,
+    text(form.get('speakerAlias')),
+    ...text(form.get('aliases')).split(','),
+  ].map((item) => item.trim()).filter(Boolean))];
   return {
     id, name, role, shortBio, biographyMarkdown, aliases,
     externalUrl: optionalUrl(text(form.get('externalUrl')), 'Website'),
