@@ -1651,6 +1651,8 @@ function renderPublicationPreparation(episode, candidates, options = {}) {
   if (requestedAsset) queueMicrotask(() => {
     const targetJob = [...snackJobs, ...(episodeJob ? [episodeJob] : [])].find((job) => job.id === requestedAsset);
     const target = section.querySelector(`[data-asset-job="${CSS.escape(requestedAsset)}"]`); target?.classList.add('assetRowFocused'); target?.scrollIntoView({ block:'center' });
+    const cleanUrl = new URL(window.location.href); cleanUrl.searchParams.delete('asset'); history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+    if (target) window.setTimeout(() => target.classList.remove('assetRowFocused'), 1800);
     if (targetJob && ['in-review','approved'].includes(targetJob.status) && !document.querySelector('.thumbnailReviewDialog')) {
       const candidate = candidates.find((item) => item.id === targetJob.snackCandidateId);
       void openThumbnailReview(targetJob.id, targetJob.assetKind === 'episode' ? episode.publicTitle || episode.workingTitle : candidate?.revision?.publicTitle || 'Approved Snack', null, targetJob.assetKind === 'episode');

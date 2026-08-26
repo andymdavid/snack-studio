@@ -2171,7 +2171,8 @@ kbd { min-width:20px; display:inline-flex; align-items:center; justify-content:c
 .gitPublicationResult p { margin-top:4px; }
 div.publicationPreparationBlocker { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .publicationPreparationBlocker p { margin: 0; }
-.assetRowFocused { outline:2px solid var(--coral); outline-offset:3px; }
+.assetRowFocused { outline:2px solid var(--coral); outline-offset:3px; animation:assetRowFocus 1.8s ease-out forwards; }
+@keyframes assetRowFocus { 0%, 55% { outline-color:var(--coral); } 100% { outline-color:transparent; } }
 
 .contributorProfileForm { display: grid; gap: 22px; border: 1px solid var(--border); border-radius: var(--radius-card); padding: 22px; background: var(--surface-1); }
 .contributorProfileForm h3, .contributorProfileForm p { margin: 0; }
