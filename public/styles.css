@@ -1941,6 +1941,22 @@ kbd { min-width:20px; display:inline-flex; align-items:center; justify-content:c
 .graphRelationshipType { align-self: center; border-radius: 999px; background: var(--surface-3); padding: 3px 7px; color: var(--text-muted); font-size: var(--text-xs); }
 .graphReviewRelationship > div:last-child { display: flex; align-items: center; gap: 6px; }
 .graphViewSwitch { display: flex; gap: 8px; }
+.graphOverview { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-card); background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 42%), var(--surface-2); }
+.graphOverview > header { display: flex; align-items: start; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--border); padding: 18px 20px; }
+.graphOverview h2, .graphOverview p { margin: 0; }
+.graphOverview h2 { margin-top: 3px; font-size: var(--text-lg); }
+.graphOverview p { margin-top: 5px; color: var(--text-muted); font-size: var(--text-sm); }
+.graphOverview svg { display: block; width: 100%; min-height: 420px; max-height: 620px; }
+.graphLegend { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
+.graphLegendItem { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: var(--text-xs); }
+.graphLegendItem::before { width: 8px; height: 8px; border-radius: 50%; background: var(--graph-kind); content: ''; }
+.graphMapEdge { stroke: color-mix(in srgb, var(--border) 76%, transparent); stroke-width: 1.2; }
+.graphMapEdge.isActive { stroke: var(--accent); stroke-width: 2.4; }
+.graphMapNode { cursor: pointer; outline: none; }
+.graphMapNode circle { fill: color-mix(in srgb, var(--graph-kind) 74%, var(--surface-1)); stroke: var(--surface-1); stroke-width: 3; transition: r 120ms ease, stroke 120ms ease; }
+.graphMapNode text { max-width: 120px; fill: var(--text-muted); font-size: 10px; text-anchor: middle; pointer-events: none; }
+.graphMapNode:hover circle, .graphMapNode:focus-visible circle, .graphMapNode.isActive circle { stroke: var(--text); stroke-width: 3; }
+.graphMapNode:hover text, .graphMapNode.isActive text { fill: var(--text); font-weight: 650; }
 .graphExplorerControls { display: grid; grid-template-columns: minmax(260px, 1fr) auto auto auto; align-items: end; gap: 16px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-1); padding: 14px 16px; }
 .graphExplorerControls > label:first-child { display: grid; gap: 5px; color: var(--text-muted); font-size: var(--text-xs); }
 .graphExplorerControls select { width: 100%; }

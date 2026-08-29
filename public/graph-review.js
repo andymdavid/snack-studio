@@ -62,5 +62,5 @@ export function deriveKnowledgeFocus(payload = {}, requestedId = '') {
   const focus = nodeById.get(selectedId) || null;
   const visible = usable.filter((connection) => connection.sourceId === selectedId || connection.targetId === selectedId).map((connection) => { const outgoing = connection.sourceId === selectedId; return { ...connection, direction: outgoing ? 'outgoing' : 'incoming', neighbour: nodeById.get(outgoing ? connection.targetId : connection.sourceId) }; }).sort((a, b) => String(a.neighbour?.title).localeCompare(String(b.neighbour?.title)));
   const kindOrder = { concept: 0, claim: 1, example: 2, question: 3, snack: 4 };
-  return { focus, connections: visible, nodes: [...nodes].sort((a, b) => (kindOrder[a.kind] ?? 9) - (kindOrder[b.kind] ?? 9) || String(a.title).localeCompare(String(b.title))), totals: { nodes: nodes.length, knowledge: knowledgeNodes.length, connections: usable.length } };
+  return { focus, connections: visible, allConnections: usable, nodes: [...nodes].sort((a, b) => (kindOrder[a.kind] ?? 9) - (kindOrder[b.kind] ?? 9) || String(a.title).localeCompare(String(b.title))), totals: { nodes: nodes.length, knowledge: knowledgeNodes.length, connections: usable.length } };
 }
