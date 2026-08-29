@@ -1337,6 +1337,13 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: '036_graph_exception_review',
+    description: 'Make generated graph connections usable by default instead of requiring individual approval',
+    up(db) {
+      db.query("UPDATE relationships SET review_state='approved', updated_at=?1 WHERE origin='pipeline' AND review_state='draft'").run(Date.now());
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {
