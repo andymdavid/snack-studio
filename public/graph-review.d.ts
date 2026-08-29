@@ -16,3 +16,9 @@ export function deriveGraphFocus(payload?: GraphReviewPayload, candidateId?: str
   draftCount: number;
   candidates: Array<Record<string, unknown>>;
 };
+export function deriveKnowledgeFocus(payload?: GraphReviewPayload & { knowledge?: { nodes?: Array<Record<string, unknown>>; edges?: Array<Record<string, unknown>>; snackLinks?: Array<Record<string, unknown>> } }, requestedId?: string): {
+  focus: (Record<string, unknown> & { id: string; kind: string; title: string }) | null;
+  connections: Array<{ id: string; relationshipType: string; direction: 'incoming' | 'outgoing'; neighbour: Record<string, unknown>; editable: boolean }>;
+  nodes: Array<Record<string, unknown> & { kind: string }>;
+  totals: { nodes: number; knowledge: number; connections: number };
+};

@@ -41,3 +41,26 @@ export function deriveGraphFocus(payload = {}, candidateId = '', options = {}) {
   }).sort((a, b) => String(a.neighbour.title).localeCompare(String(b.neighbour.title)));
   return { focus, connections, approvedCount: relationships.filter((relationship) => relationship.reviewState === 'approved').length, draftCount: relationships.filter((relationship) => relationship.reviewState === 'draft').length, candidates: [...candidates].sort((a, b) => String(a.title).localeCompare(String(b.title))) };
 }
+
+export function deriveKnowledgeFocus(payload = {}, requestedId = '') {
+  const candidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+  const knowledge = payload.knowledge && typeof payload.knowledge === 'object' ? payload.knowledge : {};
+  const knowledgeNodes = Array.isArray(knowledge.nodes) ? knowledge.nodes : [];
+  const episodeById = new Map(candidates.map((candidate) => [candidate.episodeId, { number: candidate.episodeNumber, title: candidate.episodeTitle }]));
+  const nodes = [
+    ...candidates.map((candidate) => ({ id: `snack:${candidate.candidateId}`, entityId: candidate.candidateId, kind: 'snack', title: candidate.title, summary: candidate.standfirst || '', episodeId: candidate.episodeId, episodeNumber: candidate.episodeNumber, episodeTitle: candidate.episodeTitle, evidence: [] })),
+    ...knowledgeNodes.map((node) => ({ id: `knowledge:${node.id}`, entityId: node.id, kind: node.kind, title: node.title, summary: node.summary, episodeId: node.episodeId, episodeNumber: episodeById.get(node.episodeId)?.number || null, episodeTitle: episodeById.get(node.episodeId)?.title || '', confidence: node.confidence, evidence: Array.isArray(node.evidence) ? node.evidence : [] })),
+  ];
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const connections = [];
+  for (const relationship of Array.isArray(payload.relationships) ? payload.relationships : []) if (relationship.reviewState !== 'rejected') connections.push({ id: `snack-relationship:${relationship.id}`, sourceId: `snack:${relationship.sourceCandidateId}`, targetId: `snack:${relationship.targetCandidateId}`, relationshipType: relationship.relationshipType, explanation: relationship.explanation || '', confidence: null, editable: true, relationship });
+  for (const edge of Array.isArray(knowledge.edges) ? knowledge.edges : []) if (edge.reviewState !== 'rejected') connections.push({ id: `knowledge-edge:${edge.id}`, sourceId: `knowledge:${edge.sourceNodeId}`, targetId: `knowledge:${edge.targetNodeId}`, relationshipType: edge.relationshipType, explanation: edge.explanation || '', confidence: edge.confidence, editable: false, relationship: edge });
+  for (const link of Array.isArray(knowledge.snackLinks) ? knowledge.snackLinks : []) if (link.reviewState !== 'rejected') connections.push({ id: `knowledge-snack:${link.id}`, sourceId: `knowledge:${link.knowledgeNodeId}`, targetId: `snack:${link.candidateId}`, relationshipType: link.relationshipType, explanation: '', confidence: link.confidence, editable: false, relationship: link });
+  const usable = connections.filter((connection) => nodeById.has(connection.sourceId) && nodeById.has(connection.targetId));
+  const degree = new Map(); for (const connection of usable) for (const id of [connection.sourceId, connection.targetId]) degree.set(id, (degree.get(id) || 0) + 1);
+  const selectedId = nodeById.has(requestedId) ? requestedId : [...degree.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || nodes[0]?.id || '';
+  const focus = nodeById.get(selectedId) || null;
+  const visible = usable.filter((connection) => connection.sourceId === selectedId || connection.targetId === selectedId).map((connection) => { const outgoing = connection.sourceId === selectedId; return { ...connection, direction: outgoing ? 'outgoing' : 'incoming', neighbour: nodeById.get(outgoing ? connection.targetId : connection.sourceId) }; }).sort((a, b) => String(a.neighbour?.title).localeCompare(String(b.neighbour?.title)));
+  const kindOrder = { concept: 0, claim: 1, example: 2, question: 3, snack: 4 };
+  return { focus, connections: visible, nodes: [...nodes].sort((a, b) => (kindOrder[a.kind] ?? 9) - (kindOrder[b.kind] ?? 9) || String(a.title).localeCompare(String(b.title))), totals: { nodes: nodes.length, knowledge: knowledgeNodes.length, connections: usable.length } };
+}
