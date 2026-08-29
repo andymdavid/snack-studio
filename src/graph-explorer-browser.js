@@ -1,7 +1,5 @@
 import { MultiDirectedGraph } from 'graphology';
-import circular from 'graphology-layout/circular';
-import FA2Layout from 'graphology-layout-forceatlas2/worker';
-import noverlap from 'graphology-layout-noverlap';
+import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY } from 'd3-force';
 import Sigma from 'sigma';
 
 const KIND_COLOURS = { concept: '#4aa8a5', claim: '#d96b45', example: '#d49a32', question: '#9674cf', snack: '#d65f87' };
@@ -16,10 +14,18 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   const usefulNodes = model.totals.knowledge ? model.nodes.filter((node) => connectedIds.has(node.id)) : model.nodes;
   const nodes = usefulNodes.slice(0, 500); const visible = new Set(nodes.map((node) => node.id));
   const degree = new Map(); for (const connection of model.allConnections) for (const id of [connection.sourceId, connection.targetId]) degree.set(id, (degree.get(id) || 0) + 1);
-  for (const node of nodes) { const connected = degree.has(node.id); graph.addNode(node.id, { label: node.title, kind: node.kind, episodeId: node.episodeId, connected, x: 0, y: 0, size: connected ? node.kind === 'snack' ? 7 : 9 : 4, color: connected ? KIND_COLOURS[node.kind] || '#9aa5a0' : MUTED_KIND_COLOURS[node.kind] || '#b8bfbb' }); }
-  for (const connection of model.allConnections) if (visible.has(connection.sourceId) && visible.has(connection.targetId)) graph.addEdgeWithKey(connection.id, connection.sourceId, connection.targetId, { label: connection.relationshipType, size: 1.2, color: '#38413d' });
+  const simulationNodes = nodes.map((node, index) => { const angle = index * Math.PI * (3 - Math.sqrt(5)); const radius = 12 * Math.sqrt(index); return { id: node.id, x: Math.cos(angle) * radius, y: Math.sin(angle) * radius, size: node.kind === 'snack' ? 7 : 9 }; });
+  const simulationLinks = [];
+  for (const node of nodes) { const connected = degree.has(node.id); const position = simulationNodes.find((item) => item.id === node.id); graph.addNode(node.id, { label: node.title, kind: node.kind, episodeId: node.episodeId, connected, x: position.x, y: position.y, size: connected ? node.kind === 'snack' ? 7 : 9 : 4, color: connected ? KIND_COLOURS[node.kind] || '#9aa5a0' : MUTED_KIND_COLOURS[node.kind] || '#b8bfbb' }); }
+  for (const connection of model.allConnections) if (visible.has(connection.sourceId) && visible.has(connection.targetId)) { graph.addEdgeWithKey(connection.id, connection.sourceId, connection.targetId, { label: connection.relationshipType, size: 1.2, color: '#38413d' }); simulationLinks.push({ source: connection.sourceId, target: connection.targetId, relationshipType: connection.relationshipType }); }
   if (!graph.order) return () => {};
-  circular.assign(graph, { scale: Math.max(10, graph.order / 3) });
+  forceSimulation(simulationNodes)
+    .force('link', forceLink(simulationLinks).id((node) => node.id).distance((link) => link.relationshipType === 'developed-into' ? 68 : 92).strength(0.16))
+    .force('charge', forceManyBody().strength(-190).distanceMin(20).distanceMax(520))
+    .force('collide', forceCollide().radius((node) => node.size + 13).strength(1).iterations(3))
+    .force('center', forceCenter(0, 0).strength(0.08)).force('x', forceX(0).strength(0.012)).force('y', forceY(0).strength(0.012))
+    .stop().tick(360);
+  for (const node of simulationNodes) graph.mergeNodeAttributes(node.id, { x: node.x, y: node.y });
   const canvas = document.createElement('div'); canvas.className = 'sigmaCanvas'; container.appendChild(canvas);
   let hovered = null; const focusId = model.explicitFocus && model.focus?.id && graph.hasNode(model.focus.id) ? model.focus.id : null; const neighbours = new Set(focusId ? graph.neighbors(focusId) : []);
   const renderer = new Sigma(graph, canvas, {
@@ -34,9 +40,7 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   const controls = document.createElement('div'); controls.className = 'sigmaControls';
   for (const [label, title, action] of [['+', 'Zoom in', () => renderer.getCamera().animatedZoom({ duration: 180 })], ['−', 'Zoom out', () => renderer.getCamera().animatedUnzoom({ duration: 180 })], ['⌂', 'Fit graph', () => renderer.getCamera().animatedReset({ duration: 260 })]]) { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.title = title; button.setAttribute('aria-label', title); button.addEventListener('click', action); controls.appendChild(button); }
   container.appendChild(controls);
-  const layout = graph.order > 1 ? new FA2Layout(graph, { settings: { barnesHutOptimize: graph.order > 80, gravity: 1.2, scalingRatio: 6, slowDown: 4, linLogMode: true, adjustSizes: true } }) : null;
-  layout?.start();
-  const settleTimer = setTimeout(() => { layout?.stop(); noverlap.assign(graph, { maxIterations: 120, settings: { margin: 4, ratio: 1.6, expansion: 1.08, speed: 2 } }); renderer.refresh(); renderer.getCamera().animatedReset({ duration: 420 }); }, Math.min(3500, 900 + graph.order * 18));
-  active = { kill() { clearTimeout(settleTimer); layout?.kill(); renderer.kill(); container.replaceChildren(); } };
+  renderer.getCamera().animatedReset({ duration: 420 });
+  active = { kill() { renderer.kill(); container.replaceChildren(); } };
   return () => { if (active) { active.kill(); active = null; } };
 }
