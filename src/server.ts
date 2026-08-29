@@ -37,7 +37,7 @@ import { validateEpisodeInput } from "./episode-input.ts";
 import { validateCandidateRevision, validateReviewDecision } from "./candidate-input.ts";
 import { activateCandidateRevision, approveCandidateBatch, createCandidateRevision, generateFixtureCandidates, getCandidate, listCandidates, setApprovedCandidateOrder, updateCandidateDecision, validateApprovedCandidateBatch } from "./candidates.ts";
 import { buildCandidateGenerations } from "./candidate-generations.ts";
-import { createFixtureRelationshipSuggestions, createRelationship, deleteRelationship, getCuration, listAllRelationships, listGraphCandidates, RELATIONSHIP_TYPES, setNewsletterItems, updateNewsletterDraft, updateRelationshipState } from "./curation.ts";
+import { createFixtureRelationshipSuggestions, createRelationship, deleteRelationship, getCuration, listAllRelationships, listGraphCandidates, RELATIONSHIP_TYPES, setNewsletterItems, updateNewsletterDraft, updateRelationship } from "./curation.ts";
 import { normalizeTranscriptText, validateEpisodeMetadata, validateTranscriptUpload } from "./transcript-input.ts";
 import {
   activateTranscriptRevision,
@@ -1278,9 +1278,12 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const session = requireEditSession(req);
     if (!session) return json({ error: "edit access required" }, 403);
     const body = await readJson(req);
-    const state = ["draft", "approved", "rejected"].includes(String(body.reviewState)) ? String(body.reviewState) as "draft" | "approved" | "rejected" : null;
-    if (!state) return json({ error: "invalid reviewState" }, 400);
-    const relationship = updateRelationshipState(decodeURIComponent(relationshipMatch[1]!), state, session.pubkey);
+    const reviewState = body.reviewState === undefined ? undefined : ["draft", "approved", "rejected"].includes(String(body.reviewState)) ? String(body.reviewState) as "draft" | "approved" | "rejected" : null;
+    const relationshipType = body.relationshipType === undefined ? undefined : typeof body.relationshipType === 'string' && RELATIONSHIP_TYPES.includes(body.relationshipType as never) ? body.relationshipType as typeof RELATIONSHIP_TYPES[number] : null;
+    if (reviewState === null) return json({ error: "invalid reviewState" }, 400);
+    if (relationshipType === null) return json({ error: "invalid relationshipType" }, 400);
+    if (body.explanation !== undefined && typeof body.explanation !== 'string' && body.explanation !== null) return json({ error: 'invalid explanation' }, 400);
+    const relationship = updateRelationship(decodeURIComponent(relationshipMatch[1]!), { reviewState, relationshipType, explanation: body.explanation }, session.pubkey);
     return relationship ? json({ relationship }) : json({ error: "relationship not found" }, 404);
   }
 

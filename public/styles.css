@@ -1954,6 +1954,8 @@ kbd { min-width:20px; display:inline-flex; align-items:center; justify-content:c
 .graphConnections { display: grid; gap: 12px; }
 .graphConnection { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 7px 12px; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-1); padding: 12px; }
 .graphConnection.isDraft { border-style: dashed; opacity: .78; }
+.graphConnection.isSelected { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent); opacity: 1; }
+.graphConnection[role="button"] { cursor: pointer; }
 .graphConnectionEdge { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 5px; color: var(--accent-strong); font-size: var(--text-xs); }
 .graphConnectionEdge > span { font-size: var(--text-xl); line-height: 1; }
 .graphNeighbourNode { display: grid; gap: 3px; border: 0; background: transparent; padding: 0; color: inherit; text-align: left; cursor: pointer; }
@@ -1961,6 +1963,14 @@ kbd { min-width:20px; display:inline-flex; align-items:center; justify-content:c
 .graphNeighbourNode span { color: var(--text-faint); font-size: var(--text-xs); }
 .graphNeighbourNode:hover strong, .graphNeighbourNode:focus-visible strong { color: var(--accent-strong); }
 .graphConnection > p { grid-column: 2; margin: 2px 0 0; color: var(--text-muted); font-size: var(--text-xs); line-height: 1.45; }
+.graphRelationshipInspector { display: grid; grid-template-columns: minmax(180px, .55fr) minmax(280px, 1fr); gap: 14px; border: 1px solid var(--accent); border-radius: var(--radius-card); background: var(--surface-1); padding: 18px; }
+.graphRelationshipInspector > header, .graphRelationshipInspector > blockquote, .graphRelationshipInspector > div { grid-column: 1 / -1; }
+.graphRelationshipInspector > header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.graphRelationshipInspector h2 { margin: 4px 0 0; font-size: var(--text-lg); }
+.graphRelationshipInspector label { display: grid; gap: 6px; color: var(--text-muted); font-size: var(--text-xs); }
+.graphRelationshipInspector textarea { resize: vertical; }
+.graphRelationshipInspector blockquote { margin: 0; border-left: 2px solid var(--accent); padding-left: 12px; color: var(--text-faint); font-size: var(--text-xs); line-height: 1.5; }
+.graphRelationshipInspector > div:last-child { display: flex; justify-content: flex-end; gap: 8px; }
 
 .packageValidation {
   display: grid;
@@ -2530,7 +2540,8 @@ div.publicationPreparationBlocker { display: flex; align-items: center; justify-
   }
 
   .graphExplorerControls,
-  .graphExplorerCanvas { grid-template-columns: 1fr; }
+  .graphExplorerCanvas,
+  .graphRelationshipInspector { grid-template-columns: 1fr; }
 
   .graphFocusNode { position: static; }
 

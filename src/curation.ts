@@ -163,12 +163,20 @@ export function listAllRelationships() {
 }
 
 export function updateRelationshipState(id: string, state: RelationshipState, actorPubkey: string): Relationship | null {
+  return updateRelationship(id, { reviewState: state }, actorPubkey);
+}
+
+export function updateRelationship(id: string, input: { reviewState?: RelationshipState; relationshipType?: RelationshipType; explanation?: string | null }, actorPubkey: string): Relationship | null {
   const row = db.query("SELECT episode_id FROM relationships WHERE id = ?1").get(id) as { episode_id: string } | null;
   if (!row) return null;
+  const current = listRelationships(row.episode_id).find((item) => item.id === id)!;
+  const reviewState = input.reviewState || current.reviewState;
+  const relationshipType = input.relationshipType || current.relationshipType;
+  const explanation = input.explanation === undefined ? current.explanation : input.explanation?.trim().slice(0, 1000) || null;
   const now = Date.now();
   db.transaction(() => {
-    db.query("UPDATE relationships SET review_state = ?1, updated_at = ?2 WHERE id = ?3").run(state, now, id);
-    recordAuditEvent({ actorPubkey, action: "relationship.review.updated", entityType: "episode", entityId: row.episode_id, detail: { relationshipId: id, state } });
+    db.query("UPDATE relationships SET review_state=?1,relationship_type=?2,explanation=?3,updated_at=?4 WHERE id=?5").run(reviewState, relationshipType, explanation, now, id);
+    recordAuditEvent({ actorPubkey, action: "relationship.updated", entityType: "episode", entityId: row.episode_id, detail: { relationshipId: id, reviewState, relationshipType } });
   })();
   return listRelationships(row.episode_id).find((item) => item.id === id)!;
 }

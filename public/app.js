@@ -75,9 +75,10 @@ const state = {
   diagnostics: [],
   graphPayload: null,
   graphFilters: { episodeId: 'all', reviewState: 'draft', relationshipType: 'all', query: '' },
-  graphMode: 'review',
+  graphMode: 'explore',
   graphFocusCandidateId: '',
-  graphIncludeDrafts: false,
+  graphIncludeDrafts: true,
+  graphSelectedRelationshipId: '',
   loadedRoutes: new Set(),
   routeRequestController: null,
   routeGeneration: 0,
@@ -1048,13 +1049,37 @@ function renderGraphExplorer(container, payload) {
   const focus = document.createElement('article'); focus.className = 'graphFocusNode'; const eyebrow = document.createElement('span'); eyebrow.className = 'eyebrow'; eyebrow.textContent = `Episode ${model.focus.episodeNumber || '—'} · Focus`; const focusTitle = document.createElement('h2'); focusTitle.textContent = model.focus.title; const standfirst = document.createElement('p'); standfirst.textContent = model.focus.standfirst || model.focus.episodeTitle || ''; focus.append(eyebrow, focusTitle, standfirst); canvas.appendChild(focus);
   const connections = document.createElement('div'); connections.className = 'graphConnections';
   for (const connection of model.connections) {
-    const edge = document.createElement('article'); edge.className = `graphConnection ${connection.relationship.reviewState === 'draft' ? 'isDraft' : ''}`;
+    const edge = document.createElement('article'); edge.className = `graphConnection ${connection.relationship.reviewState === 'draft' ? 'isDraft' : ''}${state.graphSelectedRelationshipId === connection.relationship.id ? ' isSelected' : ''}`; edge.tabIndex = 0; edge.setAttribute('role', 'button'); edge.setAttribute('aria-label', `Inspect ${connection.relationship.relationshipType} relationship with ${connection.neighbour.title}`); edge.addEventListener('click', (event) => { if (event.target.closest('.graphNeighbourNode')) return; state.graphSelectedRelationshipId = connection.relationship.id; renderGraph(state.graphPayload); }); edge.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); state.graphSelectedRelationshipId = connection.relationship.id; renderGraph(state.graphPayload); } });
     const direction = document.createElement('div'); direction.className = 'graphConnectionEdge'; const arrow = document.createElement('span'); arrow.textContent = connection.direction === 'outgoing' ? '→' : '←'; const type = document.createElement('strong'); type.textContent = formatEpisodeStatus(connection.relationship.relationshipType); direction.append(arrow, type);
     const node = document.createElement('button'); node.type = 'button'; node.className = 'graphNeighbourNode'; const title = document.createElement('strong'); title.textContent = connection.neighbour.title; const meta = document.createElement('span'); meta.textContent = `Episode ${connection.neighbour.episodeNumber || '—'}${connection.relationship.reviewState === 'draft' ? ' · Draft link' : ''}`; node.append(title, meta); node.addEventListener('click', () => { state.graphFocusCandidateId = connection.neighbour.candidateId; renderGraph(state.graphPayload); });
     const explanation = document.createElement('p'); explanation.textContent = connection.relationship.explanation || 'No explanation supplied'; edge.append(direction, node, explanation); connections.appendChild(edge);
   }
   if (!model.connections.length) { const empty = document.createElement('div'); empty.className = 'workflowQueueEmpty'; empty.innerHTML = state.graphIncludeDrafts ? '<strong>This Snack has no proposed connections</strong><span>Select another Snack to continue exploring.</span>' : '<strong>This Snack has no approved connections yet</strong><span>Include draft suggestions to preview relationships still under review.</span>'; connections.appendChild(empty); }
   canvas.appendChild(connections); container.appendChild(canvas);
+  const selected = model.connections.find((connection) => connection.relationship.id === state.graphSelectedRelationshipId);
+  if (selected) container.appendChild(renderGraphRelationshipInspector(selected.relationship));
+}
+
+function renderGraphRelationshipInspector(relationship) {
+  const panel = document.createElement('form'); panel.className = 'graphRelationshipInspector';
+  const header = document.createElement('header'); const copy = document.createElement('div'); const eyebrow = document.createElement('span'); eyebrow.className = 'eyebrow'; eyebrow.textContent = relationship.reviewState === 'draft' ? 'Proposed connection' : 'Canonical connection'; const title = document.createElement('h2'); title.textContent = `${relationship.sourceTitle} → ${relationship.targetTitle}`; copy.append(eyebrow, title); const close = document.createElement('button'); close.type = 'button'; close.className = 'btn btnSecondary'; close.textContent = 'Close'; close.addEventListener('click', () => { state.graphSelectedRelationshipId = ''; renderGraph(state.graphPayload); }); header.append(copy, close);
+  const typeLabel = document.createElement('label'); const typeText = document.createElement('span'); typeText.textContent = 'Relationship'; const type = document.createElement('select'); type.name = 'relationshipType'; for (const value of ['overlaps','develops','contradicts','revises','exemplifies','enables','caused-by']) { const option = document.createElement('option'); option.value = value; option.textContent = formatEpisodeStatus(value); option.selected = value === relationship.relationshipType; type.appendChild(option); } typeLabel.append(typeText, type);
+  const explanationLabel = document.createElement('label'); const explanationText = document.createElement('span'); explanationText.textContent = 'Editorial explanation'; const explanation = document.createElement('textarea'); explanation.name = 'explanation'; explanation.rows = 4; explanation.value = relationship.explanation || ''; explanationLabel.append(explanationText, explanation);
+  if (relationship.evidenceExcerpt) { const evidence = document.createElement('blockquote'); evidence.textContent = relationship.evidenceExcerpt; panel.append(header, typeLabel, explanationLabel, evidence); } else panel.append(header, typeLabel, explanationLabel);
+  const actions = document.createElement('div'); const save = document.createElement('button'); save.type = 'submit'; save.className = 'btn btnSecondary'; save.textContent = 'Save changes'; actions.appendChild(save);
+  if (relationship.reviewState === 'draft') { const accept = document.createElement('button'); accept.type = 'button'; accept.className = 'btn btnPrimary'; accept.textContent = 'Accept connection'; accept.addEventListener('click', () => saveGraphRelationship(relationship.id, { relationshipType: type.value, explanation: explanation.value, reviewState: 'approved' }, accept)); actions.appendChild(accept); }
+  const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btnDanger'; remove.textContent = 'Remove'; remove.addEventListener('click', () => removeGraphRelationshipFromExplorer(relationship.id, remove)); actions.appendChild(remove); panel.appendChild(actions);
+  panel.addEventListener('submit', (event) => { event.preventDefault(); void saveGraphRelationship(relationship.id, { relationshipType: type.value, explanation: explanation.value }, save); }); return panel;
+}
+
+async function saveGraphRelationship(id, changes, button) {
+  const clear = setButtonBusy(button, changes.reviewState === 'approved' ? 'Accepting…' : 'Saving…');
+  try { const updated = (await api(`/api/relationships/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(changes) })).relationship; state.graphPayload.relationships = state.graphPayload.relationships.map((item) => item.id === id ? updated : item); renderGraph(state.graphPayload); setStudioStatus(changes.reviewState === 'approved' ? 'Connection accepted' : 'Connection updated'); } catch (error) { setStudioStatus(error.message); clear(); }
+}
+
+async function removeGraphRelationshipFromExplorer(id, button) {
+  const clear = setButtonBusy(button, 'Removing…');
+  try { await api(`/api/relationships/${encodeURIComponent(id)}`, { method: 'DELETE' }); state.graphPayload.relationships = state.graphPayload.relationships.filter((item) => item.id !== id); state.graphSelectedRelationshipId = ''; renderGraph(state.graphPayload); setStudioStatus('Connection removed'); } catch (error) { setStudioStatus(error.message); clear(); }
 }
 
 async function loadEpisodes(routeContext) {
