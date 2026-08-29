@@ -100,6 +100,8 @@ import { applySuccessfulPublicTranscriptResult } from './public-transcript-resul
 import { getLatestPublicTranscript, reviewPublicTranscript } from './public-transcripts.ts';
 import { validateSuccessfulGraphResult } from './graph-result-input.ts';
 import { applySuccessfulGraphResult } from './graph-results.ts';
+import { validateSuccessfulKnowledgeResult } from './knowledge-result-input.ts';
+import { applySuccessfulKnowledgeResult } from './knowledge-results.ts';
 import { getApprovedGraphProjection } from './graph-projection.ts';
 import { buildPublicationPackage } from "./publication-package.ts";
 import { getLatestWebsiteValidation, stageAndValidateWebsitePackage } from './website-validation.ts';
@@ -1713,7 +1715,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
         : pipelineRequest.operation === 'transcript-normalization'
           ? validateSuccessfulPublicTranscriptResult(body)
         : pipelineRequest.operation === "publication-metadata"
-          ? pipelineRequest.resultSchemaVersion === '3' ? validateSuccessfulGraphResult(body) : pipelineRequest.resultSchemaVersion === '2' ? validateSuccessfulThemeResult(body) : validateSuccessfulPublicationMetadataResult(body)
+          ? pipelineRequest.resultSchemaVersion === '4' ? validateSuccessfulKnowledgeResult(body) : pipelineRequest.resultSchemaVersion === '3' ? validateSuccessfulGraphResult(body) : pipelineRequest.resultSchemaVersion === '2' ? validateSuccessfulThemeResult(body) : validateSuccessfulPublicationMetadataResult(body)
           : validateSuccessfulPipelineResult(body);
       if (!validation.ok) {
         markPipelineResultRejected({ runId: run.id, summary: validation.error });
@@ -1743,6 +1745,11 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
           return json({ ok: true, requestId, status: 'completed', ...applied });
         }
         if (pipelineRequest.operation === "publication-metadata") {
+          if (pipelineRequest.resultSchemaVersion === '4') {
+            const applied = applySuccessfulKnowledgeResult({ localRunId: run.id, result: validation.value as import('./knowledge-result-input.ts').SuccessfulKnowledgeResult });
+            publishPipelineUpdate('completed');
+            return json({ ok: true, requestId, status: 'completed', ...applied });
+          }
           if (pipelineRequest.resultSchemaVersion === '3') {
             const applied = applySuccessfulGraphResult({ localRunId: run.id, result: validation.value as import('./graph-result-input.ts').SuccessfulGraphResult });
             publishPipelineUpdate('completed');
