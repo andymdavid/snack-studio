@@ -1,4 +1,5 @@
 import { derivePubkeyFromNsec, signEventWithNsec, signLoginChallengeWithNsec } from "/nostr-login.js";
+import { deriveGraphReview } from "/graph-review.js";
 
 const PROFILE_CACHE_KEY = "snack_studio_profiles_v2";
 const PIPELINES_CACHE_KEY = "snack_studio_pipelines_v1";
@@ -73,6 +74,7 @@ const state = {
   assetFilter: 'all',
   diagnostics: [],
   graphPayload: null,
+  graphFilters: { episodeId: 'all', reviewState: 'draft', relationshipType: 'all', query: '' },
   loadedRoutes: new Set(),
   routeRequestController: null,
   routeGeneration: 0,
@@ -994,16 +996,35 @@ async function loadGraph(routeContext) {
 
 function renderGraph(payload) {
   const container = $('graphWorkspace'); container.innerHTML = '';
-  const relationships = payload.relationships || [];
-  if (!relationships.length) { const empty = document.createElement('div'); empty.className = 'workflowQueueEmpty'; empty.innerHTML = '<strong>No relationship suggestions yet</strong><span>Grounded suggestions are created automatically as approved episodes enter Publications.</span>'; container.appendChild(empty); return; }
-  for (const relationship of relationships) {
-    const row = document.createElement('article'); row.className = 'workflowQueueItem graphRelationship';
-    const copy = document.createElement('div'); const title = document.createElement('strong'); title.textContent = `${relationship.sourceTitle} → ${formatEpisodeStatus(relationship.relationshipType)} → ${relationship.targetTitle}`;
-    const note = document.createElement('span'); note.textContent = relationship.explanation || 'No explanation supplied'; copy.append(title, note);
-    if (relationship.evidenceExcerpt) { const evidence = document.createElement('span'); evidence.className = 'metadata'; evidence.textContent = `Evidence: ${relationship.evidenceExcerpt}`; copy.appendChild(evidence); }
-    const actions = document.createElement('div'); const pill = document.createElement('span'); pill.className = `statusPill ${relationship.reviewState === 'approved' ? 'statusSuccess' : relationship.reviewState === 'rejected' ? 'statusDanger' : 'statusPending'}`; pill.textContent = formatEpisodeStatus(relationship.reviewState); actions.appendChild(pill);
-    if (relationship.reviewState === 'draft') for (const [reviewState, label] of [['approved','Approve'],['rejected','Reject']]) { const button = document.createElement('button'); button.type = 'button'; button.className = reviewState === 'approved' ? 'btn btnPrimary' : 'btn btnSecondary'; button.textContent = label; button.addEventListener('click', async () => { await api(`/api/relationships/${encodeURIComponent(relationship.id)}`, { method: 'PATCH', body: JSON.stringify({ reviewState }) }); await renderRoute(); }); actions.appendChild(button); }
-    row.append(copy, actions); container.appendChild(row);
+  const review = deriveGraphReview(payload, state.graphFilters);
+  if (!review.total) { const empty = document.createElement('div'); empty.className = 'workflowQueueEmpty'; empty.innerHTML = '<strong>No relationship suggestions yet</strong><span>Grounded suggestions are created automatically as approved episodes enter Publications.</span>'; container.appendChild(empty); return; }
+  const summary = document.createElement('section'); summary.className = 'graphReviewSummary';
+  const progressCopy = document.createElement('div'); const progressTitle = document.createElement('strong'); progressTitle.textContent = `${review.reviewed} of ${review.total} reviewed`;
+  const progressMeta = document.createElement('span'); progressMeta.textContent = review.drafts ? `${review.drafts} suggestion${review.drafts === 1 ? '' : 's'} awaiting a decision` : 'All suggestions reviewed'; progressCopy.append(progressTitle, progressMeta);
+  const progress = document.createElement('progress'); progress.max = Math.max(1, review.total); progress.value = review.reviewed; progress.setAttribute('aria-label', 'Relationship review progress'); summary.append(progressCopy, progress); container.appendChild(summary);
+
+  const filters = document.createElement('form'); filters.className = 'graphReviewFilters'; filters.addEventListener('submit', (event) => event.preventDefault());
+  const addSelect = (labelText, key, options) => { const label = document.createElement('label'); const text = document.createElement('span'); text.textContent = labelText; const select = document.createElement('select'); for (const [value, optionLabel] of options) { const option = document.createElement('option'); option.value = value; option.textContent = optionLabel; option.selected = state.graphFilters[key] === value; select.appendChild(option); } select.addEventListener('change', () => { state.graphFilters[key] = select.value; renderGraph(state.graphPayload); }); label.append(text, select); filters.appendChild(label); };
+  addSelect('Episode', 'episodeId', [['all', 'All episodes'], ...review.episodes.map((episode) => [episode.id, `Episode ${episode.number || '—'} · ${episode.title}`])]);
+  addSelect('Review state', 'reviewState', [['draft','Awaiting review'],['all','All states'],['approved','Approved'],['rejected','Rejected']]);
+  addSelect('Relationship', 'relationshipType', [['all','All relationships'], ...['overlaps','develops','contradicts','revises','exemplifies','enables','caused-by'].map((type) => [type, formatEpisodeStatus(type)])]);
+  const searchLabel = document.createElement('label'); const searchText = document.createElement('span'); searchText.textContent = 'Search'; const search = document.createElement('input'); search.type = 'search'; search.placeholder = 'Titles, explanation or evidence'; search.value = state.graphFilters.query; search.addEventListener('input', () => { state.graphFilters.query = search.value; renderGraph(state.graphPayload); requestAnimationFrame(() => { const next = container.querySelector('input[type="search"]'); next?.focus(); next?.setSelectionRange(search.value.length, search.value.length); }); }); searchLabel.append(searchText, search); filters.appendChild(searchLabel); container.appendChild(filters);
+  const resultMeta = document.createElement('p'); resultMeta.className = 'graphResultMeta'; resultMeta.textContent = `${review.visibleCount} matching relationship${review.visibleCount === 1 ? '' : 's'}`; container.appendChild(resultMeta);
+  if (!review.visibleCount) { const empty = document.createElement('div'); empty.className = 'workflowQueueEmpty'; empty.innerHTML = '<strong>No relationships match these filters</strong><span>Adjust the filters to return to the review queue.</span>'; container.appendChild(empty); return; }
+
+  for (const group of review.groups) {
+    const section = document.createElement('section'); section.className = 'graphSourceGroup';
+    const heading = document.createElement('header'); const eyebrow = document.createElement('span'); eyebrow.className = 'eyebrow'; eyebrow.textContent = group.source.episodeNumber ? `Episode ${group.source.episodeNumber} · Source Snack` : 'Source Snack'; const title = document.createElement('h2'); title.textContent = group.source.title; heading.append(eyebrow, title); section.appendChild(heading);
+    for (const relationship of group.relationships) {
+      const row = document.createElement('article'); row.className = 'graphReviewRelationship';
+      const copy = document.createElement('div'); const relation = document.createElement('span'); relation.className = 'graphRelationshipType'; relation.textContent = formatEpisodeStatus(relationship.relationshipType); const target = document.createElement('strong'); target.textContent = relationship.targetTitle; const targetMeta = document.createElement('span'); targetMeta.className = 'metadata'; targetMeta.textContent = relationship.target?.episodeNumber ? `Episode ${relationship.target.episodeNumber} · ${relationship.target.episodeTitle}` : 'Related Snack';
+      const note = document.createElement('p'); note.textContent = relationship.explanation || 'No explanation supplied'; copy.append(relation, target, targetMeta, note);
+      if (relationship.evidenceExcerpt) { const evidence = document.createElement('blockquote'); evidence.textContent = relationship.evidenceExcerpt; copy.appendChild(evidence); }
+      const actions = document.createElement('div'); const pill = document.createElement('span'); pill.className = `statusPill ${relationship.reviewState === 'approved' ? 'statusSuccess' : relationship.reviewState === 'rejected' ? 'statusDanger' : 'statusPending'}`; pill.textContent = formatEpisodeStatus(relationship.reviewState); actions.appendChild(pill);
+      if (relationship.reviewState === 'draft') for (const [reviewState, label] of [['approved','Approve'],['rejected','Reject']]) { const button = document.createElement('button'); button.type = 'button'; button.className = reviewState === 'approved' ? 'btn btnPrimary' : 'btn btnSecondary'; button.textContent = label; button.disabled = !state.me?.access?.edit; button.addEventListener('click', async () => { const clear = setButtonBusy(button, reviewState === 'approved' ? 'Approving…' : 'Rejecting…'); try { const updated = (await api(`/api/relationships/${encodeURIComponent(relationship.id)}`, { method: 'PATCH', body: JSON.stringify({ reviewState }) })).relationship; state.graphPayload.relationships = state.graphPayload.relationships.map((item) => item.id === updated.id ? updated : item); renderGraph(state.graphPayload); setStudioStatus(`${updated.sourceTitle} relationship ${reviewState}`); } catch (error) { setStudioStatus(error.message); clear(); } }); actions.appendChild(button); }
+      row.append(copy, actions); section.appendChild(row);
+    }
+    container.appendChild(section);
   }
 }
 
