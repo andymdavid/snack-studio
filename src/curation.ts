@@ -224,7 +224,6 @@ export function validateEpisodePackage(episodeId: string) {
     { key: "accepted", ok: accepted.length > 0, message: `${accepted.length} accepted snack${accepted.length === 1 ? "" : "s"}` },
     { key: "review", ok: undecided.length === 0, message: `${undecided.length} candidate${undecided.length === 1 ? "" : "s"} still need decisions` },
     { key: "newsletter", ok: newsletter.length >= 3 && newsletter.length <= 4 && newsletter.every((item) => item.reviewDecision === "accepted"), message: `${newsletter.length} newsletter snack${newsletter.length === 1 ? "" : "s"} selected${newsletter.some((item) => item.reviewDecision !== "accepted") ? "; remove non-accepted items" : ""}` },
-    { key: "relationships", ok: approvedRelationships.length > 0, message: `${approvedRelationships.length} approved relationship${approvedRelationships.length === 1 ? "" : "s"}` },
   ];
   return { ready: checks.every((check) => check.ok), checks, counts: { candidates: candidates.length, accepted: accepted.length, newsletter: newsletter.length, relationships: relationships.length, approvedRelationships: approvedRelationships.length } };
 }

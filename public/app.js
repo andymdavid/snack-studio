@@ -2595,7 +2595,7 @@ function renderCurationSection(episode, candidates, curation) {
   section.className = "workspaceSection curationSection";
   const header = document.createElement("div");
   header.className = "workspaceSectionHeader";
-  header.innerHTML = `<div><h2>Package curation</h2><p>Order newsletter snacks, curate conceptual relationships, and resolve readiness checks.</p></div>`;
+  header.innerHTML = `<div><h2>Package curation</h2><p>Choose and order the Snacks used in the newsletter package.</p></div>`;
   const readiness = document.createElement("span");
   readiness.className = `statusPill ${curation.validation?.ready ? "statusSuccess" : "statusPending"}`;
   readiness.textContent = curation.validation?.ready ? "Package ready" : "Work in progress";
@@ -2654,67 +2654,7 @@ function renderCurationSection(episode, candidates, curation) {
     newsletter.appendChild(order);
   }
 
-  const relationships = document.createElement("div");
-  relationships.className = "curationPanel";
-  const relHeader = document.createElement("div");
-  relHeader.className = "curationPanelHeader";
-  const relTitle = document.createElement("h3");
-  relTitle.textContent = "Conceptual relationships";
-  relHeader.appendChild(relTitle);
-  if (!curation.relationships?.length && candidates.length >= 3) {
-    const suggest = document.createElement("button");
-    suggest.type = "button";
-    suggest.className = "btn btnSecondary";
-    suggest.textContent = "Add fixture suggestions";
-    suggest.disabled = !state.me?.access?.edit;
-    suggest.addEventListener("click", generateFixtureRelationships);
-    relHeader.appendChild(suggest);
-  }
-  relationships.appendChild(relHeader);
-  const relForm = document.createElement("form");
-  relForm.className = "relationshipForm";
-  for (const [id, label] of [["relationshipSource", "Source snack"], ["relationshipTarget", "Target snack"]]) {
-    const select = document.createElement("select");
-    select.id = id;
-    for (const candidate of candidates) {
-      const option = document.createElement("option"); option.value = candidate.id; option.textContent = candidate.revision.publicTitle; select.appendChild(option);
-    }
-    relForm.appendChild(makeWorkspaceField(label, select));
-  }
-  const type = document.createElement("select");
-  type.id = "relationshipType";
-  for (const value of ["overlaps", "develops", "contradicts", "revises", "exemplifies", "enables", "caused-by"]) {
-    const option = document.createElement("option"); option.value = value; option.textContent = formatEpisodeStatus(value); type.appendChild(option);
-  }
-  relForm.appendChild(makeWorkspaceField("Type", type));
-  const explanation = document.createElement("input"); explanation.id = "relationshipExplanation"; explanation.placeholder = "Why are these ideas related?";
-  relForm.appendChild(makeWorkspaceField("Explanation", explanation));
-  const add = document.createElement("button"); add.type = "submit"; add.className = "btn btnPrimary"; add.textContent = "Add relationship"; add.disabled = !state.me?.access?.edit || candidates.length < 2;
-  relForm.appendChild(add);
-  relForm.addEventListener("submit", createManualRelationship);
-  relationships.appendChild(relForm);
-  const relList = document.createElement("div"); relList.className = "relationshipList";
-  for (const relationship of curation.relationships || []) {
-    const row = document.createElement("div");
-    const copy = document.createElement("div");
-    const name = document.createElement("strong"); name.textContent = `${relationship.sourceTitle} → ${formatEpisodeStatus(relationship.relationshipType)} → ${relationship.targetTitle}`;
-    const note = document.createElement("span"); note.textContent = relationship.explanation || "No explanation";
-    copy.append(name, note);
-    const actions = document.createElement("div");
-    const statePill = document.createElement("span"); statePill.className = `statusPill ${relationship.reviewState === "approved" ? "statusSuccess" : relationship.reviewState === "rejected" ? "statusDanger" : "statusPending"}`; statePill.textContent = formatEpisodeStatus(relationship.reviewState);
-    actions.appendChild(statePill);
-    if (relationship.reviewState === "draft") {
-      for (const [reviewState, label] of [["approved", "Approve"], ["rejected", "Reject"]]) {
-        const button = document.createElement("button"); button.type = "button"; button.className = "btn btnSecondary"; button.textContent = label; button.disabled = !state.me?.access?.edit;
-        button.addEventListener("click", () => reviewRelationship(relationship.id, reviewState)); actions.appendChild(button);
-      }
-    }
-    const remove = document.createElement("button"); remove.type = "button"; remove.className = "btn btnTransparent"; remove.textContent = "Remove"; remove.disabled = !state.me?.access?.edit;
-    remove.addEventListener("click", () => removeRelationship(relationship.id)); actions.appendChild(remove);
-    row.append(copy, actions); relList.appendChild(row);
-  }
-  relationships.appendChild(relList);
-  grid.append(newsletter, relationships);
+  grid.append(newsletter);
 
   const validation = document.createElement("div"); validation.className = "packageValidation";
   for (const check of curation.validation?.checks || []) {

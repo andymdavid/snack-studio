@@ -30,8 +30,8 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   for (const [label, title, action] of [['+', 'Zoom in', () => renderer.getCamera().animatedZoom({ duration: 180 })], ['−', 'Zoom out', () => renderer.getCamera().animatedUnzoom({ duration: 180 })], ['⌂', 'Fit graph', () => renderer.getCamera().animatedReset({ duration: 260 })]]) { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.title = title; button.setAttribute('aria-label', title); button.addEventListener('click', action); controls.appendChild(button); }
   container.appendChild(controls);
   const layout = graph.order > 1 ? new FA2Layout(graph, { settings: { barnesHutOptimize: graph.order > 80, gravity: 1.2, scalingRatio: 6, slowDown: 4, linLogMode: true, adjustSizes: true } }) : null;
-  layout?.start(); const settleTimer = setTimeout(() => layout?.stop(), Math.min(3500, 900 + graph.order * 18));
-  if (focusId) setTimeout(() => { const position = renderer.getNodeDisplayData(focusId); if (position) renderer.getCamera().animate({ x: position.x, y: position.y, ratio: 0.45 }, { duration: 420 }); }, 80);
+  layout?.start();
+  const settleTimer = setTimeout(() => { layout?.stop(); renderer.getCamera().animatedReset({ duration: 420 }); }, Math.min(3500, 900 + graph.order * 18));
   active = { kill() { clearTimeout(settleTimer); layout?.kill(); renderer.kill(); container.replaceChildren(); } };
   return () => { if (active) { active.kill(); active = null; } };
 }
