@@ -99,6 +99,7 @@ import { applySuccessfulPublicTranscriptResult } from './public-transcript-resul
 import { getLatestPublicTranscript, reviewPublicTranscript } from './public-transcripts.ts';
 import { validateSuccessfulGraphResult } from './graph-result-input.ts';
 import { applySuccessfulGraphResult } from './graph-results.ts';
+import { getApprovedGraphProjection } from './graph-projection.ts';
 import { buildPublicationPackage } from "./publication-package.ts";
 import { getLatestWebsiteValidation, stageAndValidateWebsitePackage } from './website-validation.ts';
 import { getLatestGitPublication, publishValidatedPackageToMain } from './git-publication.ts';
@@ -307,6 +308,11 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
     if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
     return json({ candidates: listGraphCandidates(), relationships: listAllRelationships() });
+  }
+  if (pathname === '/api/graph/projection' && req.method === 'GET') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
+    return json({ projection: getApprovedGraphProjection() });
   }
   const episodeWorkflowMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/workflow$/);
   if (episodeWorkflowMatch && req.method === 'GET') {
