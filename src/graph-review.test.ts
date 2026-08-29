@@ -40,15 +40,17 @@ describe('deriveGraphFocus', () => {
   });
 });
 
-test('deriveKnowledgeFocus connects transcript ideas to one another and to Snacks', () => {
-  const result = deriveKnowledgeFocus({ ...payload, knowledge: { nodes: [
+test('deriveKnowledgeFocus connects the collection, episodes, contributors, transcript ideas and Snacks', () => {
+  const result = deriveKnowledgeFocus({ ...payload, contributors: [{ contributorId: 'pete', name: 'Pete', role: 'Host', shortBio: 'Host of Intelligence Snacks.', aliases: ['Pete'], episodeIds: ['episode-1'] }], knowledge: { nodes: [
     { id: 'claim-1', episodeId: 'episode-1', kind: 'claim', title: 'Memory compounds', summary: 'Connections increase value.', confidence: 0.9, reviewState: 'accepted', evidence: [{ id: 'ev-1', excerpt: 'the more connected it gets', speaker: 'Pete' }] },
     { id: 'example-1', episodeId: 'episode-1', kind: 'example', title: 'A working memory', summary: 'A concrete instance.', confidence: 0.8, reviewState: 'accepted', evidence: [] },
   ], edges: [{ id: 'edge-1', sourceNodeId: 'example-1', targetNodeId: 'claim-1', relationshipType: 'exemplifies', explanation: 'The case makes the claim concrete.', confidence: 0.85, reviewState: 'accepted' }], snackLinks: [{ id: 'link-1', knowledgeNodeId: 'claim-1', candidateId: 'a', relationshipType: 'developed-into', confidence: 0.9, reviewState: 'accepted' }] } }, 'knowledge:claim-1');
   expect(result.focus).toMatchObject({ kind: 'claim', title: 'Memory compounds' });
   expect(result.explicitFocus).toBeTrue();
-  expect(result.connections.map((item) => item.relationshipType).sort()).toEqual(['developed-into', 'exemplifies']);
-  expect(result.allConnections).toHaveLength(4);
-  expect(result.nodes.filter((node) => node.kind !== 'snack')).toHaveLength(2);
+  expect(result.connections.map((item) => item.relationshipType).sort()).toEqual(['contributed', 'developed-into', 'exemplifies']);
+  expect(result.allConnections).toHaveLength(12);
+  expect(result.nodes).toContainEqual(expect.objectContaining({ id: 'root:intelligence-snacks', kind: 'root' }));
+  expect(result.nodes).toContainEqual(expect.objectContaining({ id: 'contributor:pete', kind: 'contributor' }));
+  expect(result.nodes.filter((node) => ['claim','example'].includes(node.kind))).toHaveLength(2);
   expect(deriveKnowledgeFocus(payload).explicitFocus).toBeFalse();
 });

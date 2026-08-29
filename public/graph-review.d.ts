@@ -1,5 +1,5 @@
 export type GraphReviewFilters = { episodeId?: string; reviewState?: string; relationshipType?: string; query?: string };
-export type GraphReviewPayload = { candidates?: Array<Record<string, unknown>>; relationships?: Array<Record<string, unknown>> };
+export type GraphReviewPayload = { candidates?: Array<Record<string, unknown>>; contributors?: Array<Record<string, unknown>>; relationships?: Array<Record<string, unknown>> };
 export function deriveGraphReview(payload?: GraphReviewPayload, filters?: GraphReviewFilters): {
   filters: Required<GraphReviewFilters>;
   total: number;

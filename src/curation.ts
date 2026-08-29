@@ -154,6 +154,19 @@ export function listGraphCandidates() {
     }));
 }
 
+export function listGraphContributors() {
+  const episodeIdsByContributor = new Map<string, Set<string>>();
+  const jobs = db.query("SELECT episode_id,contributor_ids_json FROM thumbnail_jobs").all() as Record<string, unknown>[];
+  for (const job of jobs) {
+    let ids: string[] = []; try { const parsed = JSON.parse(String(job.contributor_ids_json || '[]')); if (Array.isArray(parsed)) ids = parsed.map(String); } catch {}
+    for (const id of ids) { const episodes = episodeIdsByContributor.get(id) || new Set<string>(); episodes.add(String(job.episode_id)); episodeIdsByContributor.set(id, episodes); }
+  }
+  return (db.query("SELECT id,name,role,short_bio,aliases_json FROM contributors ORDER BY name COLLATE NOCASE").all() as Record<string, unknown>[]).map((row) => {
+    let aliases: string[] = []; try { const parsed = JSON.parse(String(row.aliases_json || '[]')); if (Array.isArray(parsed)) aliases = parsed.map(String); } catch {}
+    return { contributorId: String(row.id), name: String(row.name), role: String(row.role || ''), shortBio: String(row.short_bio || ''), aliases, episodeIds: [...(episodeIdsByContributor.get(String(row.id)) || [])] };
+  });
+}
+
 export function listAllRelationships() {
   const rows = db.query(`SELECT rel.*,source_revision.public_title AS source_title,target_revision.public_title AS target_title
     FROM relationships rel JOIN snack_candidates source ON source.id=rel.source_candidate_id JOIN snack_revisions source_revision ON source_revision.id=source.current_revision_id

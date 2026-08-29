@@ -1951,6 +1951,11 @@ kbd { min-width:20px; display:inline-flex; align-items:center; justify-content:c
 .sigmaControls { position: absolute; right: 14px; bottom: 14px; display: grid; gap: 6px; }
 .sigmaControls button { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--surface-1) 92%, transparent); color: var(--text); font: inherit; font-weight: 700; box-shadow: 0 4px 14px color-mix(in srgb, #000 18%, transparent); cursor: pointer; }
 .sigmaControls button:hover, .sigmaControls button:focus-visible { border-color: var(--accent); background: var(--surface-2); }
+.graphSpotlight { position: absolute; z-index: 4; display: grid; width: min(360px, calc(100% - 32px)); gap: 7px; transform: translate(-50%, -50%); border: 1px solid color-mix(in srgb, var(--text) 18%, var(--border)); border-radius: 14px; background: color-mix(in srgb, var(--surface-1) 96%, transparent); padding: 18px; box-shadow: 0 18px 50px color-mix(in srgb, #000 24%, transparent); backdrop-filter: blur(14px); }
+.graphSpotlight h3, .graphSpotlight p { margin: 0; }
+.graphSpotlight h3 { font-size: var(--text-lg); line-height: 1.2; }
+.graphSpotlight p { color: var(--text-muted); font-size: var(--text-sm); line-height: 1.5; }
+.graphSpotlight .btn { width: max-content; margin-top: 5px; }
 .graphLegend { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
 .graphLegendItem { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: var(--text-xs); }
 .graphLegendItem::before { width: 8px; height: 8px; border-radius: 50%; background: var(--graph-kind); content: ''; }
@@ -1970,6 +1975,9 @@ kbd { min-width:20px; display:inline-flex; align-items:center; justify-content:c
 .graphKind-example { --graph-kind: #d49a32; }
 .graphKind-question { --graph-kind: #9674cf; }
 .graphKind-snack { --graph-kind: #d65f87; }
+.graphKind-root { --graph-kind: #343b37; }
+.graphKind-episode { --graph-kind: #72817a; }
+.graphKind-contributor { --graph-kind: #a26f49; }
 .graphFocusNode[class*="graphKind-"], .graphConnection[class*="graphKind-"] { border-color: color-mix(in srgb, var(--graph-kind) 72%, var(--border)); }
 .graphConnections { display: grid; gap: 12px; }
 .graphConnection { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 7px 12px; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-1); padding: 12px; }
