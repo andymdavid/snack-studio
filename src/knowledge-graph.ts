@@ -65,3 +65,18 @@ export function listKnowledgeGraph(episodeId?: string) {
   const links = db.query(`SELECT * FROM knowledge_snack_links${where} ORDER BY created_at ASC`).all(...args) as Record<string, unknown>[];
   return assembleKnowledgeGraph(nodes, evidence, edges, links);
 }
+
+export function listKnowledgeBackfill() {
+  const rows = db.query(`
+    SELECT e.id,e.episode_number,e.working_title,e.active_transcript_revision_id,
+      (SELECT pr.status FROM pipeline_requests pr
+       WHERE pr.episode_id=e.id AND pr.pipeline_name='snack-studio-graph-relationships' AND pr.result_schema_version='4'
+       ORDER BY pr.created_at DESC LIMIT 1) AS latest_status
+    FROM episodes e
+    WHERE e.active_transcript_revision_id IS NOT NULL
+      AND EXISTS (SELECT 1 FROM snack_candidates c WHERE c.episode_id=e.id AND c.review_decision='accepted')
+    ORDER BY e.episode_number ASC
+  `).all() as Record<string, unknown>[];
+  const active = new Set(['created','awaiting-authorization','queued','running','applying-result']);
+  return rows.map((row) => ({ episodeId: String(row.id), episodeNumber: row.episode_number == null ? null : Number(row.episode_number), title: String(row.working_title), transcriptRevisionId: String(row.active_transcript_revision_id), status: row.latest_status == null ? 'not-started' : active.has(String(row.latest_status)) ? 'processing' : String(row.latest_status) === 'completed' ? 'complete' : 'retryable' }));
+}

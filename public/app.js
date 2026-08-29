@@ -526,6 +526,13 @@ function scheduleLiveCacheRefresh() {
         if (state.route === '/library') renderAssetLibrary();
       }),
     );
+    if (state.loadedRoutes.has('graph')) refreshes.push(
+      api('/api/graph').then((payload) => {
+        if (token !== state.token) return;
+        state.graphPayload = payload;
+        if (state.route === '/graph') renderGraph(payload);
+      }),
+    );
     if (state.loadedRoutes.has('contributors')) refreshes.push(
       api('/api/contributors').then((payload) => {
         if (token !== state.token) return;
@@ -1040,6 +1047,9 @@ function renderGraphExplorer(container, payload) {
   for (const item of model.nodes) { const option = document.createElement('option'); option.value = item.id; option.textContent = `${formatEpisodeStatus(item.kind)} · ${item.title} · Episode ${item.episodeNumber || '—'}`; option.selected = item.id === model.focus?.id; picker.appendChild(option); }
   picker.addEventListener('change', () => { state.graphFocusCandidateId = picker.value; renderGraph(state.graphPayload); }); pickerLabel.append(pickerText, picker);
   const counts = document.createElement('span'); counts.className = 'metadata'; counts.textContent = `${model.totals.knowledge} transcript ideas · ${model.totals.connections} connections`; controls.append(pickerLabel, counts);
+  const backfill = Array.isArray(payload.backfill) ? payload.backfill : []; const pending = backfill.filter((episode) => ['not-started','retryable'].includes(episode.status)); const processing = backfill.filter((episode) => episode.status === 'processing');
+  if (pending.length && state.me?.access?.edit) { const build = document.createElement('button'); build.type = 'button'; build.className = 'btn btnPrimary'; build.textContent = `Build transcript graph · ${pending.length} episode${pending.length === 1 ? '' : 's'}`; build.addEventListener('click', () => startKnowledgeBackfill(pending, build)); controls.appendChild(build); }
+  else if (processing.length) { const status = document.createElement('span'); status.className = 'metadata'; status.textContent = `${processing.length} episode${processing.length === 1 ? '' : 's'} processing`; controls.appendChild(status); }
   container.appendChild(controls);
   if (!model.focus) { const empty = document.createElement('div'); empty.className = 'workflowQueueEmpty'; empty.innerHTML = '<strong>No graph knowledge is available yet</strong><span>Process an episode transcript to build its graph.</span>'; container.appendChild(empty); return; }
   const canvas = document.createElement('section'); canvas.className = 'graphExplorerCanvas';
@@ -1055,6 +1065,22 @@ function renderGraphExplorer(container, payload) {
   canvas.appendChild(connections); container.appendChild(canvas);
   const selected = model.connections.find((connection) => connection.id === state.graphSelectedRelationshipId);
   if (selected) container.appendChild(selected.editable ? renderGraphRelationshipInspector(selected.relationship) : renderKnowledgeConnectionInspector(selected));
+}
+
+async function startKnowledgeBackfill(episodes, button) {
+  button.disabled = true; let launched = 0;
+  try {
+    for (const episode of episodes) {
+      button.textContent = `Starting ${launched + 1} of ${episodes.length}…`;
+      const prepared = await api(`/api/episodes/${encodeURIComponent(episode.episodeId)}/pipeline-requests`, { method: 'POST', body: JSON.stringify({ operation: 'publication-metadata', pipelineName: 'snack-studio-graph-relationships', pipelineVersion: '2', promptSuiteVersion: 'v2-transcript-knowledge', resultSchemaVersion: '4', idempotencyKey: `graph-v2:${episode.episodeId}:${episode.transcriptRevisionId}`, autopilotTargetId: state.activeAutopilotTargetId || undefined }) });
+      const triggerRequest = structuredClone(prepared.triggerRequest);
+      for (const reference of triggerRequest.body?.input?.localContext?.references || []) reference.authorization = await signNip98Request({ url: reference.url, method: 'GET' });
+      const autopilotAuthorization = await signNip98Request(triggerRequest);
+      await api(`/api/episode-pipeline-runs/${encodeURIComponent(prepared.runId)}/start`, { method: 'POST', body: JSON.stringify({ autopilotAuthorization, triggerRequest }) });
+      launched++;
+    }
+    state.graphPayload = await api('/api/graph'); renderGraph(state.graphPayload); setStudioStatus(`${launched} transcript graph run${launched === 1 ? '' : 's'} started`);
+  } catch (error) { button.disabled = false; button.textContent = `Continue backfill · ${episodes.length - launched} remaining`; setStudioStatus(error.message); }
 }
 
 function renderKnowledgeConnectionInspector(connection) {
