@@ -11,8 +11,7 @@ let active = null;
 export function mountKnowledgeGraph(container, model, onSelect) {
   active?.kill(); active = null; container.replaceChildren();
   const graph = new MultiDirectedGraph(); const nodeById = new Map(model.nodes.map((node) => [node.id, node]));
-  const connected = new Set(model.allConnections.flatMap((connection) => [connection.sourceId, connection.targetId]));
-  const nodes = model.nodes.filter((node) => connected.has(node.id)).slice(0, 500); const visible = new Set(nodes.map((node) => node.id));
+  const nodes = model.nodes.slice(0, 500); const visible = new Set(nodes.map((node) => node.id));
   for (const node of nodes) graph.addNode(node.id, { label: node.title, kind: node.kind, episodeId: node.episodeId, x: 0, y: 0, size: node.kind === 'snack' ? 6 : 9, color: KIND_COLOURS[node.kind] || '#9aa5a0' });
   for (const connection of model.allConnections) if (visible.has(connection.sourceId) && visible.has(connection.targetId)) graph.addEdgeWithKey(connection.id, connection.sourceId, connection.targetId, { label: connection.relationshipType, size: 1.2, color: '#38413d' });
   if (!graph.order) return () => {};
