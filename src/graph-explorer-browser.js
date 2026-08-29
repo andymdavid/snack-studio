@@ -18,7 +18,7 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   if (!graph.order) return () => {};
   circular.assign(graph, { scale: Math.max(10, graph.order / 3) });
   const canvas = document.createElement('div'); canvas.className = 'sigmaCanvas'; container.appendChild(canvas);
-  let hovered = null; const focusId = model.focus?.id && graph.hasNode(model.focus.id) ? model.focus.id : null; const neighbours = new Set(focusId ? graph.neighbors(focusId) : []);
+  let hovered = null; const focusId = model.explicitFocus && model.focus?.id && graph.hasNode(model.focus.id) ? model.focus.id : null; const neighbours = new Set(focusId ? graph.neighbors(focusId) : []);
   const renderer = new Sigma(graph, canvas, {
     allowInvalidContainer: true, labelRenderedSizeThreshold: 7, labelDensity: 0.08, labelGridCellSize: 120,
     defaultNodeColor: '#9aa5a0', defaultEdgeColor: '#38413d', renderEdgeLabels: false, hideEdgesOnMove: true,
