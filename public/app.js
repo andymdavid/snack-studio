@@ -3171,7 +3171,7 @@ async function preparePublication() {
     const cleanupActive = state.pipelineRequests.some((request) => request.operation === 'transcript-normalization' && ['created','awaiting-authorization','queued','running','applying-result'].includes(request.status));
     if (!state.publicTranscript && !cleanupActive) await startPublicTranscriptCleanup();
     if (state.publicationPreparation.needsTopicClassification?.length && !metadataActive) await startPublicationMetadataClassification();
-    const graphRequested = state.pipelineRequests.some((request) => request.pipelineName === 'snack-studio-graph-relationships');
+    const graphRequested = state.pipelineRequests.some((request) => request.pipelineName === 'snack-studio-graph-relationships' && request.resultSchemaVersion === '4' && !['failed','timed-out','cancelled','needs-review'].includes(request.status));
     if (!graphRequested) await startGraphRelationshipSuggestions();
     else setStudioStatus("Ready");
   } catch (error) {
