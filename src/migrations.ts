@@ -1251,6 +1251,92 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    id: '035_private_transcript_knowledge_graph',
+    description: 'Store transcript-derived concepts, claims, examples, evidence and their private review state',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS knowledge_nodes (
+          id TEXT PRIMARY KEY,
+          episode_id TEXT NOT NULL,
+          source_transcript_revision_id TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK(kind IN ('concept','claim','example','question')),
+          title TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+          review_state TEXT NOT NULL DEFAULT 'proposed' CHECK(review_state IN ('proposed','accepted','rejected')),
+          origin TEXT NOT NULL CHECK(origin IN ('manual','pipeline')),
+          pipeline_request_id TEXT,
+          created_by_pubkey TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (source_transcript_revision_id) REFERENCES transcript_revisions(id),
+          FOREIGN KEY (pipeline_request_id) REFERENCES pipeline_requests(id)
+        );
+        CREATE INDEX IF NOT EXISTS knowledge_nodes_episode_index
+          ON knowledge_nodes(episode_id, review_state, kind, created_at);
+
+        CREATE TABLE IF NOT EXISTS knowledge_evidence (
+          id TEXT PRIMARY KEY,
+          knowledge_node_id TEXT NOT NULL,
+          excerpt TEXT NOT NULL,
+          speaker TEXT,
+          transcript_start INTEGER,
+          transcript_end INTEGER,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (knowledge_node_id) REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+          CHECK(transcript_start IS NULL OR transcript_start >= 0),
+          CHECK(transcript_end IS NULL OR transcript_end >= transcript_start)
+        );
+        CREATE INDEX IF NOT EXISTS knowledge_evidence_node_index
+          ON knowledge_evidence(knowledge_node_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS knowledge_edges (
+          id TEXT PRIMARY KEY,
+          episode_id TEXT NOT NULL,
+          source_node_id TEXT NOT NULL,
+          target_node_id TEXT NOT NULL,
+          relationship_type TEXT NOT NULL CHECK(relationship_type IN ('related-to','develops','supports','contradicts','exemplifies','enables','caused-by')),
+          explanation TEXT,
+          confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+          review_state TEXT NOT NULL DEFAULT 'proposed' CHECK(review_state IN ('proposed','accepted','rejected')),
+          origin TEXT NOT NULL CHECK(origin IN ('manual','pipeline')),
+          pipeline_request_id TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (source_node_id) REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (target_node_id) REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (pipeline_request_id) REFERENCES pipeline_requests(id),
+          CHECK(source_node_id <> target_node_id)
+        );
+        CREATE INDEX IF NOT EXISTS knowledge_edges_episode_index
+          ON knowledge_edges(episode_id, review_state, created_at);
+
+        CREATE TABLE IF NOT EXISTS knowledge_snack_links (
+          id TEXT PRIMARY KEY,
+          episode_id TEXT NOT NULL,
+          knowledge_node_id TEXT NOT NULL,
+          candidate_id TEXT NOT NULL,
+          relationship_type TEXT NOT NULL CHECK(relationship_type IN ('developed-into','supports','summarised-by','related-to')),
+          confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+          review_state TEXT NOT NULL DEFAULT 'proposed' CHECK(review_state IN ('proposed','accepted','rejected')),
+          origin TEXT NOT NULL CHECK(origin IN ('manual','pipeline')),
+          pipeline_request_id TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (knowledge_node_id) REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (candidate_id) REFERENCES snack_candidates(id) ON DELETE CASCADE,
+          FOREIGN KEY (pipeline_request_id) REFERENCES pipeline_requests(id),
+          UNIQUE (knowledge_node_id, candidate_id, relationship_type)
+        );
+        CREATE INDEX IF NOT EXISTS knowledge_snack_links_episode_index
+          ON knowledge_snack_links(episode_id, review_state, created_at);
+      `);
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

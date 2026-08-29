@@ -38,6 +38,7 @@ import { validateCandidateRevision, validateReviewDecision } from "./candidate-i
 import { activateCandidateRevision, approveCandidateBatch, createCandidateRevision, generateFixtureCandidates, getCandidate, listCandidates, setApprovedCandidateOrder, updateCandidateDecision, validateApprovedCandidateBatch } from "./candidates.ts";
 import { buildCandidateGenerations } from "./candidate-generations.ts";
 import { createFixtureRelationshipSuggestions, createRelationship, deleteRelationship, getCuration, listAllRelationships, listGraphCandidates, RELATIONSHIP_TYPES, reviewRelationshipCluster, setNewsletterItems, updateNewsletterDraft, updateRelationship } from "./curation.ts";
+import { listKnowledgeGraph } from './knowledge-graph.ts';
 import { normalizeTranscriptText, validateEpisodeMetadata, validateTranscriptUpload } from "./transcript-input.ts";
 import {
   activateTranscriptRevision,
@@ -307,7 +308,8 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
   if (pathname === '/api/graph' && req.method === 'GET') {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
     if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
-    return json({ candidates: listGraphCandidates(), relationships: listAllRelationships() });
+    const episodeId = url.searchParams.get('episodeId') || undefined;
+    return json({ candidates: listGraphCandidates(), relationships: listAllRelationships(), knowledge: listKnowledgeGraph(episodeId) });
   }
   if (pathname === '/api/graph/projection' && req.method === 'GET') {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
