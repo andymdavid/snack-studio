@@ -3,7 +3,9 @@ import circular from 'graphology-layout/circular';
 import FA2Layout from 'graphology-layout-forceatlas2/worker';
 import Sigma from 'sigma';
 
-const KIND_COLOURS = { concept: '#75c9c8', claim: '#fe7141', example: '#f4bf58', question: '#cdabfe', snack: '#ef8fb1' };
+const KIND_COLOURS = { concept: '#4aa8a5', claim: '#d96b45', example: '#d49a32', question: '#9674cf', snack: '#d65f87' };
+const MUTED_KIND_COLOURS = { concept: '#a9cecc', claim: '#d8b2a5', example: '#d8c49d', question: '#c5b8d9', snack: '#d8b2bf' };
+const ACTIVE_COLOUR = '#fe7141';
 let active = null;
 
 export function mountKnowledgeGraph(container, model, onSelect) {
@@ -20,8 +22,8 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   const renderer = new Sigma(graph, canvas, {
     allowInvalidContainer: true, labelRenderedSizeThreshold: 7, labelDensity: 0.08, labelGridCellSize: 120,
     defaultNodeColor: '#9aa5a0', defaultEdgeColor: '#38413d', renderEdgeLabels: false, hideEdgesOnMove: true,
-    nodeReducer(node, data) { const selected = node === focusId || node === hovered; const adjacent = !focusId || neighbours.has(node); return { ...data, highlighted: selected, forceLabel: selected, color: focusId && !selected && !adjacent ? '#303633' : data.color, size: selected ? data.size * 1.45 : data.size, zIndex: selected ? 2 : 0 }; },
-    edgeReducer(edge, data) { if (!focusId) return data; const [source, target] = graph.extremities(edge); const activeEdge = source === focusId || target === focusId; return { ...data, color: activeEdge ? '#fe7141' : '#2d332f', size: activeEdge ? 2.4 : 0.7, zIndex: activeEdge ? 1 : 0 }; },
+    nodeReducer(node, data) { const selected = node === focusId || node === hovered; const adjacent = !focusId || neighbours.has(node); return { ...data, highlighted: selected, forceLabel: selected, color: selected ? ACTIVE_COLOUR : focusId && !adjacent ? MUTED_KIND_COLOURS[data.kind] || '#b8bfbb' : data.color, size: selected ? data.size * 1.45 : data.size, zIndex: selected ? 2 : 0 }; },
+    edgeReducer(edge, data) { if (!focusId) return data; const [source, target] = graph.extremities(edge); const activeEdge = source === focusId || target === focusId; return { ...data, color: activeEdge ? ACTIVE_COLOUR : '#aeb5b1', size: activeEdge ? 2.4 : 0.7, zIndex: activeEdge ? 1 : 0 }; },
   });
   renderer.on('enterNode', ({ node }) => { hovered = node; renderer.getContainer().style.cursor = 'pointer'; renderer.refresh(); });
   renderer.on('leaveNode', () => { hovered = null; renderer.getContainer().style.cursor = 'grab'; renderer.refresh(); });

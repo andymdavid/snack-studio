@@ -1965,11 +1965,11 @@ kbd { min-width:20px; display:inline-flex; align-items:center; justify-content:c
 .graphFocusNode h2 { font-size: var(--text-xl); line-height: 1.15; }
 .graphFocusNode p { color: var(--text-muted); font-size: var(--text-sm); line-height: 1.5; }
 .graphFocusNode blockquote { margin: 6px 0 0; border-left: 2px solid var(--accent); padding-left: 10px; color: var(--text-faint); font-size: var(--text-xs); line-height: 1.45; }
-.graphKind-claim { --graph-kind: #fe7141; }
-.graphKind-concept { --graph-kind: #75c9c8; }
-.graphKind-example { --graph-kind: #f4bf58; }
-.graphKind-question { --graph-kind: #cdabfe; }
-.graphKind-snack { --graph-kind: var(--accent); }
+.graphKind-concept { --graph-kind: #4aa8a5; }
+.graphKind-claim { --graph-kind: #d96b45; }
+.graphKind-example { --graph-kind: #d49a32; }
+.graphKind-question { --graph-kind: #9674cf; }
+.graphKind-snack { --graph-kind: #d65f87; }
 .graphFocusNode[class*="graphKind-"], .graphConnection[class*="graphKind-"] { border-color: color-mix(in srgb, var(--graph-kind) 72%, var(--border)); }
 .graphConnections { display: grid; gap: 12px; }
 .graphConnection { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 7px 12px; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-1); padding: 12px; }
