@@ -181,6 +181,15 @@ export function updateRelationship(id: string, input: { reviewState?: Relationsh
   return listRelationships(row.episode_id).find((item) => item.id === id)!;
 }
 
+export function reviewRelationshipCluster(ids: string[], state: RelationshipState, actorPubkey: string): Relationship[] {
+  const uniqueIds = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
+  if (!uniqueIds.length) throw new Error('Select at least one relationship');
+  if (uniqueIds.length > 50) throw new Error('Review no more than 50 relationships at once');
+  const existing = uniqueIds.map((id) => db.query('SELECT id FROM relationships WHERE id=?1').get(id) as { id: string } | null);
+  if (existing.some((row) => !row)) throw new Error('One or more relationships were not found');
+  return uniqueIds.map((id) => updateRelationship(id, { reviewState: state }, actorPubkey)!);
+}
+
 export function deleteRelationship(id: string, actorPubkey: string): boolean {
   const row = db.query("SELECT episode_id FROM relationships WHERE id = ?1").get(id) as { episode_id: string } | null;
   if (!row) return false;

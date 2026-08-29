@@ -1941,7 +1941,7 @@ kbd { min-width:20px; display:inline-flex; align-items:center; justify-content:c
 .graphRelationshipType { align-self: center; border-radius: 999px; background: var(--surface-3); padding: 3px 7px; color: var(--text-muted); font-size: var(--text-xs); }
 .graphReviewRelationship > div:last-child { display: flex; align-items: center; gap: 6px; }
 .graphViewSwitch { display: flex; gap: 8px; }
-.graphExplorerControls { display: grid; grid-template-columns: minmax(260px, 1fr) auto auto; align-items: end; gap: 16px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-1); padding: 14px 16px; }
+.graphExplorerControls { display: grid; grid-template-columns: minmax(260px, 1fr) auto auto auto; align-items: end; gap: 16px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-1); padding: 14px 16px; }
 .graphExplorerControls > label:first-child { display: grid; gap: 5px; color: var(--text-muted); font-size: var(--text-xs); }
 .graphExplorerControls select { width: 100%; }
 .graphDraftToggle { display: flex; align-items: center; gap: 7px; min-height: 36px; color: var(--text-muted); font-size: var(--text-sm); }

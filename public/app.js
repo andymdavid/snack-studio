@@ -1043,7 +1043,10 @@ function renderGraphExplorer(container, payload) {
   for (const candidate of model.candidates) { const option = document.createElement('option'); option.value = candidate.candidateId; option.textContent = `${candidate.title} · Episode ${candidate.episodeNumber || '—'}`; option.selected = candidate.candidateId === model.focus?.candidateId; picker.appendChild(option); }
   picker.addEventListener('change', () => { state.graphFocusCandidateId = picker.value; renderGraph(state.graphPayload); }); pickerLabel.append(pickerText, picker);
   const draftsLabel = document.createElement('label'); draftsLabel.className = 'graphDraftToggle'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = state.graphIncludeDrafts; checkbox.addEventListener('change', () => { state.graphIncludeDrafts = checkbox.checked; renderGraph(state.graphPayload); }); const draftText = document.createElement('span'); draftText.textContent = `Include ${model.draftCount} draft suggestions`; draftsLabel.append(checkbox, draftText);
-  const counts = document.createElement('span'); counts.className = 'metadata'; counts.textContent = `${model.approvedCount} approved relationship${model.approvedCount === 1 ? '' : 's'}`; controls.append(pickerLabel, draftsLabel, counts); container.appendChild(controls);
+  const counts = document.createElement('span'); counts.className = 'metadata'; counts.textContent = `${model.approvedCount} approved relationship${model.approvedCount === 1 ? '' : 's'}`; controls.append(pickerLabel, draftsLabel, counts);
+  const proposedHere = model.connections.filter((connection) => connection.relationship.reviewState === 'draft');
+  if (proposedHere.length && state.me?.access?.edit) { const acceptCluster = document.createElement('button'); acceptCluster.type = 'button'; acceptCluster.className = 'btn btnPrimary'; acceptCluster.textContent = `Accept ${proposedHere.length} around this Snack`; acceptCluster.addEventListener('click', () => acceptGraphRelationshipCluster(proposedHere.map((connection) => connection.relationship.id), acceptCluster)); controls.appendChild(acceptCluster); }
+  container.appendChild(controls);
   if (!model.focus) { const empty = document.createElement('div'); empty.className = 'workflowQueueEmpty'; empty.innerHTML = '<strong>No Snacks are available to explore</strong><span>Approve Snacks before building their relationship graph.</span>'; container.appendChild(empty); return; }
   const canvas = document.createElement('section'); canvas.className = 'graphExplorerCanvas';
   const focus = document.createElement('article'); focus.className = 'graphFocusNode'; const eyebrow = document.createElement('span'); eyebrow.className = 'eyebrow'; eyebrow.textContent = `Episode ${model.focus.episodeNumber || '—'} · Focus`; const focusTitle = document.createElement('h2'); focusTitle.textContent = model.focus.title; const standfirst = document.createElement('p'); standfirst.textContent = model.focus.standfirst || model.focus.episodeTitle || ''; focus.append(eyebrow, focusTitle, standfirst); canvas.appendChild(focus);
@@ -1080,6 +1083,11 @@ async function saveGraphRelationship(id, changes, button) {
 async function removeGraphRelationshipFromExplorer(id, button) {
   const clear = setButtonBusy(button, 'Removing…');
   try { await api(`/api/relationships/${encodeURIComponent(id)}`, { method: 'DELETE' }); state.graphPayload.relationships = state.graphPayload.relationships.filter((item) => item.id !== id); state.graphSelectedRelationshipId = ''; renderGraph(state.graphPayload); setStudioStatus('Connection removed'); } catch (error) { setStudioStatus(error.message); clear(); }
+}
+
+async function acceptGraphRelationshipCluster(ids, button) {
+  const clear = setButtonBusy(button, 'Accepting cluster…');
+  try { const updated = (await api('/api/relationships/batch-review', { method: 'POST', body: JSON.stringify({ relationshipIds: ids, reviewState: 'approved' }) })).relationships; const byId = new Map(updated.map((item) => [item.id, item])); state.graphPayload.relationships = state.graphPayload.relationships.map((item) => byId.get(item.id) || item); renderGraph(state.graphPayload); setStudioStatus(`${updated.length} connections accepted around this Snack`); } catch (error) { setStudioStatus(error.message); clear(); }
 }
 
 async function loadEpisodes(routeContext) {

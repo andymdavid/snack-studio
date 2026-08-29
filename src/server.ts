@@ -37,7 +37,7 @@ import { validateEpisodeInput } from "./episode-input.ts";
 import { validateCandidateRevision, validateReviewDecision } from "./candidate-input.ts";
 import { activateCandidateRevision, approveCandidateBatch, createCandidateRevision, generateFixtureCandidates, getCandidate, listCandidates, setApprovedCandidateOrder, updateCandidateDecision, validateApprovedCandidateBatch } from "./candidates.ts";
 import { buildCandidateGenerations } from "./candidate-generations.ts";
-import { createFixtureRelationshipSuggestions, createRelationship, deleteRelationship, getCuration, listAllRelationships, listGraphCandidates, RELATIONSHIP_TYPES, setNewsletterItems, updateNewsletterDraft, updateRelationship } from "./curation.ts";
+import { createFixtureRelationshipSuggestions, createRelationship, deleteRelationship, getCuration, listAllRelationships, listGraphCandidates, RELATIONSHIP_TYPES, reviewRelationshipCluster, setNewsletterItems, updateNewsletterDraft, updateRelationship } from "./curation.ts";
 import { normalizeTranscriptText, validateEpisodeMetadata, validateTranscriptUpload } from "./transcript-input.ts";
 import {
   activateTranscriptRevision,
@@ -1271,6 +1271,14 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 400);
     }
+  }
+
+  if (pathname === '/api/relationships/batch-review' && req.method === 'POST') {
+    const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
+    const body = await readJson(req); const reviewState = ['approved','rejected'].includes(String(body.reviewState)) ? String(body.reviewState) as 'approved' | 'rejected' : null;
+    if (!reviewState || !Array.isArray(body.relationshipIds)) return json({ error: 'relationshipIds and a valid reviewState are required' }, 400);
+    try { return json({ relationships: reviewRelationshipCluster(body.relationshipIds.map(String), reviewState, session.pubkey) }); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 400); }
   }
 
   const relationshipMatch = pathname.match(/^\/api\/relationships\/([^/]+)$/);
