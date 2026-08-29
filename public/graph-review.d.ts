@@ -9,3 +9,10 @@ export function deriveGraphReview(payload?: GraphReviewPayload, filters?: GraphR
   groups: Array<{ source: Record<string, unknown>; relationships: Array<Record<string, unknown>> }>;
   episodes: Array<{ id: unknown; number: unknown; title: unknown }>;
 };
+export function deriveGraphFocus(payload?: GraphReviewPayload, candidateId?: string, options?: { includeDrafts?: boolean }): {
+  focus: Record<string, unknown> | null;
+  connections: Array<{ relationship: Record<string, unknown>; direction: 'incoming' | 'outgoing'; neighbour: Record<string, unknown> }>;
+  approvedCount: number;
+  draftCount: number;
+  candidates: Array<Record<string, unknown>>;
+};

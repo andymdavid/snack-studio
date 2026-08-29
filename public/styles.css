@@ -1940,6 +1940,27 @@ kbd { min-width:20px; display:inline-flex; align-items:center; justify-content:c
 .graphReviewRelationship blockquote { border-left: 2px solid var(--accent); padding-left: 12px; color: var(--text-faint); font-size: var(--text-xs); line-height: 1.5; }
 .graphRelationshipType { align-self: center; border-radius: 999px; background: var(--surface-3); padding: 3px 7px; color: var(--text-muted); font-size: var(--text-xs); }
 .graphReviewRelationship > div:last-child { display: flex; align-items: center; gap: 6px; }
+.graphViewSwitch { display: flex; gap: 8px; }
+.graphExplorerControls { display: grid; grid-template-columns: minmax(260px, 1fr) auto auto; align-items: end; gap: 16px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-1); padding: 14px 16px; }
+.graphExplorerControls > label:first-child { display: grid; gap: 5px; color: var(--text-muted); font-size: var(--text-xs); }
+.graphExplorerControls select { width: 100%; }
+.graphDraftToggle { display: flex; align-items: center; gap: 7px; min-height: 36px; color: var(--text-muted); font-size: var(--text-sm); }
+.graphDraftToggle input { width: auto; }
+.graphExplorerCanvas { display: grid; grid-template-columns: minmax(220px, .72fr) minmax(0, 1.5fr); gap: 30px; align-items: start; border: 1px solid var(--border); border-radius: var(--radius-card); background: radial-gradient(circle at 18% 22%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 28%), var(--surface-2); padding: 30px; }
+.graphFocusNode { position: sticky; top: 20px; display: grid; gap: 8px; border: 2px solid var(--accent); border-radius: var(--radius-card); background: var(--surface-1); padding: 20px; box-shadow: 0 14px 32px color-mix(in srgb, var(--text) 10%, transparent); }
+.graphFocusNode h2, .graphFocusNode p { margin: 0; }
+.graphFocusNode h2 { font-size: var(--text-xl); line-height: 1.15; }
+.graphFocusNode p { color: var(--text-muted); font-size: var(--text-sm); line-height: 1.5; }
+.graphConnections { display: grid; gap: 12px; }
+.graphConnection { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 7px 12px; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-1); padding: 12px; }
+.graphConnection.isDraft { border-style: dashed; opacity: .78; }
+.graphConnectionEdge { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 5px; color: var(--accent-strong); font-size: var(--text-xs); }
+.graphConnectionEdge > span { font-size: var(--text-xl); line-height: 1; }
+.graphNeighbourNode { display: grid; gap: 3px; border: 0; background: transparent; padding: 0; color: inherit; text-align: left; cursor: pointer; }
+.graphNeighbourNode strong { font-size: var(--text-md); }
+.graphNeighbourNode span { color: var(--text-faint); font-size: var(--text-xs); }
+.graphNeighbourNode:hover strong, .graphNeighbourNode:focus-visible strong { color: var(--accent-strong); }
+.graphConnection > p { grid-column: 2; margin: 2px 0 0; color: var(--text-muted); font-size: var(--text-xs); line-height: 1.45; }
 
 .packageValidation {
   display: grid;
@@ -2507,6 +2528,11 @@ div.publicationPreparationBlocker { display: flex; align-items: center; justify-
   .graphReviewRelationship {
     grid-template-columns: 1fr;
   }
+
+  .graphExplorerControls,
+  .graphExplorerCanvas { grid-template-columns: 1fr; }
+
+  .graphFocusNode { position: static; }
 
   .graphReviewRelationship > div:last-child { align-items: stretch; flex-wrap: wrap; }
 

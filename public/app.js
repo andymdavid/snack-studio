@@ -1,5 +1,5 @@
 import { derivePubkeyFromNsec, signEventWithNsec, signLoginChallengeWithNsec } from "/nostr-login.js";
-import { deriveGraphReview } from "/graph-review.js";
+import { deriveGraphFocus, deriveGraphReview } from "/graph-review.js";
 
 const PROFILE_CACHE_KEY = "snack_studio_profiles_v2";
 const PIPELINES_CACHE_KEY = "snack_studio_pipelines_v1";
@@ -75,6 +75,9 @@ const state = {
   diagnostics: [],
   graphPayload: null,
   graphFilters: { episodeId: 'all', reviewState: 'draft', relationshipType: 'all', query: '' },
+  graphMode: 'review',
+  graphFocusCandidateId: '',
+  graphIncludeDrafts: false,
   loadedRoutes: new Set(),
   routeRequestController: null,
   routeGeneration: 0,
@@ -996,6 +999,10 @@ async function loadGraph(routeContext) {
 
 function renderGraph(payload) {
   const container = $('graphWorkspace'); container.innerHTML = '';
+  const viewSwitch = document.createElement('nav'); viewSwitch.className = 'graphViewSwitch'; viewSwitch.setAttribute('aria-label', 'Graph view');
+  for (const [mode, label] of [['review','Review relationships'],['explore','Explore graph']]) { const button = document.createElement('button'); button.type = 'button'; button.className = `btn ${state.graphMode === mode ? 'btnPrimary' : 'btnSecondary'}`; button.textContent = label; button.addEventListener('click', () => { state.graphMode = mode; renderGraph(state.graphPayload); }); viewSwitch.appendChild(button); }
+  container.appendChild(viewSwitch);
+  if (state.graphMode === 'explore') { renderGraphExplorer(container, payload); return; }
   const review = deriveGraphReview(payload, state.graphFilters);
   if (!review.total) { const empty = document.createElement('div'); empty.className = 'workflowQueueEmpty'; empty.innerHTML = '<strong>No relationship suggestions yet</strong><span>Grounded suggestions are created automatically as approved episodes enter Publications.</span>'; container.appendChild(empty); return; }
   const summary = document.createElement('section'); summary.className = 'graphReviewSummary';
@@ -1026,6 +1033,28 @@ function renderGraph(payload) {
     }
     container.appendChild(section);
   }
+}
+
+function renderGraphExplorer(container, payload) {
+  const model = deriveGraphFocus(payload, state.graphFocusCandidateId, { includeDrafts: state.graphIncludeDrafts });
+  const controls = document.createElement('section'); controls.className = 'graphExplorerControls';
+  const pickerLabel = document.createElement('label'); const pickerText = document.createElement('span'); pickerText.textContent = 'Focus Snack'; const picker = document.createElement('select');
+  for (const candidate of model.candidates) { const option = document.createElement('option'); option.value = candidate.candidateId; option.textContent = `${candidate.title} · Episode ${candidate.episodeNumber || '—'}`; option.selected = candidate.candidateId === model.focus?.candidateId; picker.appendChild(option); }
+  picker.addEventListener('change', () => { state.graphFocusCandidateId = picker.value; renderGraph(state.graphPayload); }); pickerLabel.append(pickerText, picker);
+  const draftsLabel = document.createElement('label'); draftsLabel.className = 'graphDraftToggle'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = state.graphIncludeDrafts; checkbox.addEventListener('change', () => { state.graphIncludeDrafts = checkbox.checked; renderGraph(state.graphPayload); }); const draftText = document.createElement('span'); draftText.textContent = `Include ${model.draftCount} draft suggestions`; draftsLabel.append(checkbox, draftText);
+  const counts = document.createElement('span'); counts.className = 'metadata'; counts.textContent = `${model.approvedCount} approved relationship${model.approvedCount === 1 ? '' : 's'}`; controls.append(pickerLabel, draftsLabel, counts); container.appendChild(controls);
+  if (!model.focus) { const empty = document.createElement('div'); empty.className = 'workflowQueueEmpty'; empty.innerHTML = '<strong>No Snacks are available to explore</strong><span>Approve Snacks before building their relationship graph.</span>'; container.appendChild(empty); return; }
+  const canvas = document.createElement('section'); canvas.className = 'graphExplorerCanvas';
+  const focus = document.createElement('article'); focus.className = 'graphFocusNode'; const eyebrow = document.createElement('span'); eyebrow.className = 'eyebrow'; eyebrow.textContent = `Episode ${model.focus.episodeNumber || '—'} · Focus`; const focusTitle = document.createElement('h2'); focusTitle.textContent = model.focus.title; const standfirst = document.createElement('p'); standfirst.textContent = model.focus.standfirst || model.focus.episodeTitle || ''; focus.append(eyebrow, focusTitle, standfirst); canvas.appendChild(focus);
+  const connections = document.createElement('div'); connections.className = 'graphConnections';
+  for (const connection of model.connections) {
+    const edge = document.createElement('article'); edge.className = `graphConnection ${connection.relationship.reviewState === 'draft' ? 'isDraft' : ''}`;
+    const direction = document.createElement('div'); direction.className = 'graphConnectionEdge'; const arrow = document.createElement('span'); arrow.textContent = connection.direction === 'outgoing' ? '→' : '←'; const type = document.createElement('strong'); type.textContent = formatEpisodeStatus(connection.relationship.relationshipType); direction.append(arrow, type);
+    const node = document.createElement('button'); node.type = 'button'; node.className = 'graphNeighbourNode'; const title = document.createElement('strong'); title.textContent = connection.neighbour.title; const meta = document.createElement('span'); meta.textContent = `Episode ${connection.neighbour.episodeNumber || '—'}${connection.relationship.reviewState === 'draft' ? ' · Draft link' : ''}`; node.append(title, meta); node.addEventListener('click', () => { state.graphFocusCandidateId = connection.neighbour.candidateId; renderGraph(state.graphPayload); });
+    const explanation = document.createElement('p'); explanation.textContent = connection.relationship.explanation || 'No explanation supplied'; edge.append(direction, node, explanation); connections.appendChild(edge);
+  }
+  if (!model.connections.length) { const empty = document.createElement('div'); empty.className = 'workflowQueueEmpty'; empty.innerHTML = state.graphIncludeDrafts ? '<strong>This Snack has no proposed connections</strong><span>Select another Snack to continue exploring.</span>' : '<strong>This Snack has no approved connections yet</strong><span>Include draft suggestions to preview relationships still under review.</span>'; connections.appendChild(empty); }
+  canvas.appendChild(connections); container.appendChild(canvas);
 }
 
 async function loadEpisodes(routeContext) {

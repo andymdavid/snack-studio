@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { deriveGraphReview } from '../public/graph-review.js';
+import { deriveGraphFocus, deriveGraphReview } from '../public/graph-review.js';
 
 const payload = {
   candidates: [
@@ -23,5 +23,19 @@ describe('deriveGraphReview', () => {
     expect(deriveGraphReview(payload, { episodeId: 'episode-2' }).visibleCount).toBe(0);
     expect(deriveGraphReview(payload, { reviewState: 'draft', relationshipType: 'develops' }).visibleCount).toBe(1);
     expect(deriveGraphReview(payload, { query: 'tension' }).groups[0].relationships[0].id).toBe('two');
+  });
+});
+
+describe('deriveGraphFocus', () => {
+  test('defaults to the most connected approved node and exposes edge direction', () => {
+    const result = deriveGraphFocus(payload, '', { includeDrafts: false });
+    expect(result.focus?.candidateId).toBe('a');
+    expect(result.connections).toHaveLength(1);
+    expect(result.connections[0].direction).toBe('outgoing');
+  });
+  test('can include draft knowledge while it is being curated', () => {
+    const result = deriveGraphFocus(payload, 'b', { includeDrafts: true });
+    expect(result.connections).toHaveLength(1);
+    expect(result.connections[0].direction).toBe('incoming');
   });
 });
