@@ -19,12 +19,13 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   for (const node of nodes) { const connected = degree.has(node.id); const position = simulationNodes.find((item) => item.id === node.id); graph.addNode(node.id, { label: node.title, kind: node.kind, episodeId: node.episodeId, connected, x: position.x, y: position.y, size: connected ? node.kind === 'snack' ? 7 : 9 : 4, color: connected ? KIND_COLOURS[node.kind] || '#9aa5a0' : MUTED_KIND_COLOURS[node.kind] || '#b8bfbb' }); }
   for (const connection of model.allConnections) if (visible.has(connection.sourceId) && visible.has(connection.targetId)) { graph.addEdgeWithKey(connection.id, connection.sourceId, connection.targetId, { label: connection.relationshipType, size: 1.2, color: '#38413d' }); simulationLinks.push({ source: connection.sourceId, target: connection.targetId, relationshipType: connection.relationshipType }); }
   if (!graph.order) return () => {};
-  forceSimulation(simulationNodes)
+  const simulation = forceSimulation(simulationNodes)
     .force('link', forceLink(simulationLinks).id((node) => node.id).distance((link) => link.relationshipType === 'developed-into' ? 68 : 92).strength(0.16))
     .force('charge', forceManyBody().strength(-190).distanceMin(20).distanceMax(520))
     .force('collide', forceCollide().radius((node) => node.size + 13).strength(1).iterations(3))
     .force('center', forceCenter(0, 0).strength(0.08)).force('x', forceX(0).strength(0.012)).force('y', forceY(0).strength(0.012))
-    .stop().tick(360);
+    .alphaDecay(0.022).alphaMin(0.002).velocityDecay(0.35).stop();
+  simulation.tick(60);
   for (const node of simulationNodes) graph.mergeNodeAttributes(node.id, { x: node.x, y: node.y });
   const canvas = document.createElement('div'); canvas.className = 'sigmaCanvas'; container.appendChild(canvas);
   let hovered = null; const focusId = model.explicitFocus && model.focus?.id && graph.hasNode(model.focus.id) ? model.focus.id : null; const neighbours = new Set(focusId ? graph.neighbors(focusId) : []);
@@ -34,6 +35,14 @@ export function mountKnowledgeGraph(container, model, onSelect) {
     nodeReducer(node, data) { const selected = node === focusId; const underPointer = node === hovered; const adjacent = !focusId || neighbours.has(node); return { ...data, highlighted: selected, forceLabel: selected || underPointer, color: selected ? ACTIVE_COLOUR : focusId && !adjacent ? MUTED_KIND_COLOURS[data.kind] || '#b8bfbb' : data.color, size: selected ? data.size * 1.4 : underPointer ? data.size * 1.12 : data.size, zIndex: selected ? 2 : underPointer ? 1 : 0 }; },
     edgeReducer(edge, data) { if (!focusId) return { ...data, color: '#7f8984', size: 1.8 }; const [source, target] = graph.extremities(edge); const activeEdge = source === focusId || target === focusId; return { ...data, color: activeEdge ? ACTIVE_COLOUR : '#9ca5a0', size: activeEdge ? 3 : 1.4, zIndex: activeEdge ? 1 : 0 }; },
   });
+  let frame = null;
+  const animateLayout = () => {
+    simulation.tick();
+    for (const node of simulationNodes) graph.mergeNodeAttributes(node.id, { x: node.x, y: node.y });
+    renderer.refresh();
+    if (simulation.alpha() > simulation.alphaMin()) frame = requestAnimationFrame(animateLayout);
+  };
+  frame = requestAnimationFrame(animateLayout);
   renderer.on('enterNode', ({ node }) => { hovered = node; renderer.getContainer().style.cursor = 'pointer'; renderer.refresh(); });
   renderer.on('leaveNode', () => { hovered = null; renderer.getContainer().style.cursor = 'grab'; renderer.refresh(); });
   renderer.on('clickNode', ({ node }) => onSelect(node, nodeById.get(node)));
@@ -41,6 +50,6 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   for (const [label, title, action] of [['+', 'Zoom in', () => renderer.getCamera().animatedZoom({ duration: 180 })], ['−', 'Zoom out', () => renderer.getCamera().animatedUnzoom({ duration: 180 })], ['⌂', 'Fit graph', () => renderer.getCamera().animatedReset({ duration: 260 })]]) { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.title = title; button.setAttribute('aria-label', title); button.addEventListener('click', action); controls.appendChild(button); }
   container.appendChild(controls);
   renderer.getCamera().animatedReset({ duration: 420 });
-  active = { kill() { renderer.kill(); container.replaceChildren(); } };
+  active = { kill() { if (frame) cancelAnimationFrame(frame); simulation.stop(); renderer.kill(); container.replaceChildren(); } };
   return () => { if (active) { active.kill(); active = null; } };
 }
