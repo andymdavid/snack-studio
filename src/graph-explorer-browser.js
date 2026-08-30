@@ -39,12 +39,12 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   simulation.tick(60);
   for (const node of simulationNodes) graph.mergeNodeAttributes(node.id, { x: node.x, y: node.y });
   const canvas = document.createElement('div'); canvas.className = 'sigmaCanvas'; container.appendChild(canvas);
-  let hovered = null; let selectedId = model.explicitFocus && model.focus?.id && graph.hasNode(model.focus.id) ? model.focus.id : null; let neighbours = new Set(selectedId ? graph.neighbors(selectedId) : []);
+  let hovered = null; let hoveredNeighbours = new Set(); let selectedId = model.explicitFocus && model.focus?.id && graph.hasNode(model.focus.id) ? model.focus.id : null; let selectedNeighbours = new Set(selectedId ? graph.neighbors(selectedId) : []);
   const renderer = new Sigma(graph, canvas, {
     allowInvalidContainer: true, labelRenderedSizeThreshold: 14, labelDensity: 0.03, labelGridCellSize: 150,
     defaultNodeColor: '#9aa5a0', defaultEdgeColor: '#bac1bd', defaultEdgeType: 'line', renderEdgeLabels: false, hideEdgesOnMove: false,
-    nodeReducer(node, data) { const selected = node === selectedId; const underPointer = node === hovered; const adjacent = !selectedId || neighbours.has(node); return { ...data, highlighted: selected, forceLabel: selected || underPointer || data.kind === 'root', color: selected ? ACTIVE_COLOUR : selectedId && !adjacent ? MUTED_KIND_COLOURS[data.kind] || '#b8bfbb' : data.color, size: selected ? data.size * 1.4 : underPointer ? data.size * 1.12 : data.size, zIndex: selected ? 2 : underPointer ? 1 : 0 }; },
-    edgeReducer(edge, data) { if (!selectedId) return { ...data, color: '#bac1bd', size: 0.75 }; const [source, target] = graph.extremities(edge); const activeEdge = source === selectedId || target === selectedId; return { ...data, color: activeEdge ? ACTIVE_COLOUR : '#d4d8d5', size: activeEdge ? 2.6 : 0.45, zIndex: activeEdge ? 1 : 0 }; },
+    nodeReducer(node, data) { const focusId = hovered || selectedId; const focusNeighbours = hovered ? hoveredNeighbours : selectedNeighbours; const selected = node === selectedId; const underPointer = node === hovered; const related = !focusId || node === focusId || focusNeighbours.has(node); return { ...data, highlighted: selected, forceLabel: selected || underPointer || (Boolean(focusId) && related) || data.kind === 'root', color: selected ? ACTIVE_COLOUR : focusId && !related ? MUTED_KIND_COLOURS[data.kind] || '#d2d6d3' : data.color, size: selected ? data.size * 1.4 : underPointer ? data.size * 1.18 : data.size, zIndex: selected ? 3 : underPointer ? 2 : related && focusId ? 1 : 0 }; },
+    edgeReducer(edge, data) { const focusId = hovered || selectedId; if (!focusId) return { ...data, color: '#bac1bd', size: 0.75 }; const [source, target] = graph.extremities(edge); const activeEdge = source === focusId || target === focusId; return { ...data, color: activeEdge ? hovered ? '#7b8982' : ACTIVE_COLOUR : '#e1e4e2', size: activeEdge ? hovered ? 2.1 : 2.6 : 0.35, zIndex: activeEdge ? 1 : 0 }; },
   });
   let frame = null;
   const animateLayout = () => {
@@ -54,11 +54,11 @@ export function mountKnowledgeGraph(container, model, onSelect) {
     if (simulation.alpha() > simulation.alphaMin()) frame = requestAnimationFrame(animateLayout);
   };
   frame = requestAnimationFrame(animateLayout);
-  renderer.on('enterNode', ({ node }) => { hovered = node; renderer.getContainer().style.cursor = 'pointer'; renderer.refresh(); });
-  renderer.on('leaveNode', () => { hovered = null; renderer.getContainer().style.cursor = 'grab'; renderer.refresh(); });
+  renderer.on('enterNode', ({ node }) => { hovered = node; hoveredNeighbours = new Set(graph.neighbors(node)); renderer.getContainer().style.cursor = 'pointer'; renderer.refresh(); });
+  renderer.on('leaveNode', () => { hovered = null; hoveredNeighbours = new Set(); renderer.getContainer().style.cursor = 'grab'; renderer.refresh(); });
   const closeSpotlight = () => container.querySelector('.graphSpotlight')?.remove();
   renderer.on('clickNode', ({ node }) => {
-    selectedId = node; neighbours = new Set(graph.neighbors(node)); renderer.refresh(); closeSpotlight();
+    selectedId = node; selectedNeighbours = new Set(graph.neighbors(node)); renderer.refresh(); closeSpotlight();
     const item = nodeById.get(node); const display = renderer.getNodeDisplayData(node); const card = document.createElement('article'); card.className = 'graphSpotlight';
     const kind = document.createElement('span'); kind.className = 'eyebrow'; kind.textContent = item.kind;
     const title = document.createElement('h3'); title.textContent = item.title;
@@ -68,7 +68,7 @@ export function mountKnowledgeGraph(container, model, onSelect) {
     card.append(kind, title, meta, summary, open); container.appendChild(card);
     const width = container.clientWidth, height = container.clientHeight; card.style.left = `${Math.max(220, Math.min(width - 220, display?.x || width / 2))}px`; card.style.top = `${Math.max(150, Math.min(height - 170, display?.y || height / 2))}px`;
   });
-  renderer.on('clickStage', () => { selectedId = null; neighbours = new Set(); closeSpotlight(); renderer.refresh(); });
+  renderer.on('clickStage', () => { selectedId = null; selectedNeighbours = new Set(); closeSpotlight(); renderer.refresh(); });
   const controls = document.createElement('div'); controls.className = 'sigmaControls';
   for (const [label, title, action] of [['+', 'Zoom in', () => renderer.getCamera().animatedZoom({ duration: 180 })], ['−', 'Zoom out', () => renderer.getCamera().animatedUnzoom({ duration: 180 })], ['⌂', 'Fit graph', () => renderer.getCamera().animatedReset({ duration: 260 })]]) { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.title = title; button.setAttribute('aria-label', title); button.addEventListener('click', action); controls.appendChild(button); }
   container.appendChild(controls);
