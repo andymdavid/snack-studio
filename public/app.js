@@ -1083,7 +1083,7 @@ function renderGraphOverview(model) {
 }
 
 async function startKnowledgePipelineForEpisode(episode) {
-  const prepared = await api(`/api/episodes/${encodeURIComponent(episode.episodeId)}/pipeline-requests`, { method: 'POST', body: JSON.stringify({ operation: 'publication-metadata', pipelineName: 'snack-studio-graph-relationships', pipelineVersion: '2', promptSuiteVersion: 'v2-transcript-knowledge', resultSchemaVersion: '4', idempotencyKey: `graph-v2:${episode.episodeId}:${episode.transcriptRevisionId}`, autopilotTargetId: state.activeAutopilotTargetId || undefined }) });
+  const prepared = await api(`/api/episodes/${encodeURIComponent(episode.episodeId)}/pipeline-requests`, { method: 'POST', body: JSON.stringify({ operation: 'publication-metadata', pipelineName: 'snack-studio-graph-relationships', pipelineVersion: '3', promptSuiteVersion: 'v3-evidence-id-graph', resultSchemaVersion: '4', idempotencyKey: `graph-v3:${episode.episodeId}:${episode.transcriptRevisionId}`, autopilotTargetId: state.activeAutopilotTargetId || undefined }) });
   const triggerRequest = structuredClone(prepared.triggerRequest);
   for (const reference of triggerRequest.body?.input?.localContext?.references || []) reference.authorization = await signNip98Request({ url: reference.url, method: 'GET' });
   const autopilotAuthorization = await signNip98Request(triggerRequest);
@@ -3143,7 +3143,7 @@ async function approveFinalCandidateBatch() {
 }
 
 async function ensureActiveEpisodeKnowledgeGraph() {
-  const existing = state.pipelineRequests.some((request) => request.pipelineName === 'snack-studio-graph-relationships' && request.resultSchemaVersion === '4' && !['failed','timed-out','cancelled','needs-review'].includes(request.status));
+  const existing = state.pipelineRequests.some((request) => request.pipelineName === 'snack-studio-graph-relationships' && request.pipelineVersion === '3' && request.resultSchemaVersion === '4' && !['failed','timed-out','cancelled','needs-review'].includes(request.status));
   if (existing || !state.activeEpisode?.activeTranscriptRevisionId) return;
   const request = await startKnowledgePipelineForEpisode({ episodeId: state.activeEpisode.id, transcriptRevisionId: state.activeEpisode.activeTranscriptRevisionId });
   state.pipelineRequests = [request, ...state.pipelineRequests.filter((item) => item.id !== request.id)];
@@ -3167,7 +3167,7 @@ async function preparePublication() {
     const cleanupActive = state.pipelineRequests.some((request) => request.operation === 'transcript-normalization' && ['created','awaiting-authorization','queued','running','applying-result'].includes(request.status));
     if (!state.publicTranscript && !cleanupActive) await startPublicTranscriptCleanup();
     if (state.publicationPreparation.needsTopicClassification?.length && !metadataActive) await startPublicationMetadataClassification();
-    const graphRequested = state.pipelineRequests.some((request) => request.pipelineName === 'snack-studio-graph-relationships' && request.resultSchemaVersion === '4' && !['failed','timed-out','cancelled','needs-review'].includes(request.status));
+    const graphRequested = state.pipelineRequests.some((request) => request.pipelineName === 'snack-studio-graph-relationships' && request.pipelineVersion === '3' && request.resultSchemaVersion === '4' && !['failed','timed-out','cancelled','needs-review'].includes(request.status));
     if (!graphRequested) await startGraphRelationshipSuggestions();
     else setStudioStatus("Ready");
   } catch (error) {
