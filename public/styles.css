@@ -1976,6 +1976,7 @@ kbd { min-width:20px; display:inline-flex; align-items:center; justify-content:c
 .graphKind-question { --graph-kind: #9674cf; }
 .graphKind-snack { --graph-kind: #d65f87; }
 .graphKind-root { --graph-kind: #343b37; }
+.graphKind-host { --graph-kind: #4f78a8; }
 .graphKind-episode { --graph-kind: #72817a; }
 .graphKind-contributor { --graph-kind: #a26f49; }
 .graphFocusNode[class*="graphKind-"], .graphConnection[class*="graphKind-"] { border-color: color-mix(in srgb, var(--graph-kind) 72%, var(--border)); }

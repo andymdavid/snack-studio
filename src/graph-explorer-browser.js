@@ -2,12 +2,12 @@ import { MultiDirectedGraph } from 'graphology';
 import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY } from 'd3-force';
 import Sigma from 'sigma';
 
-const KIND_COLOURS = { root: '#343b37', episode: '#72817a', contributor: '#a26f49', concept: '#4aa8a5', claim: '#d96b45', example: '#d49a32', question: '#9674cf', snack: '#d65f87' };
-const MUTED_KIND_COLOURS = { root: '#9da49f', episode: '#b3bbb7', contributor: '#cbb7a8', concept: '#a9cecc', claim: '#d8b2a5', example: '#d8c49d', question: '#c5b8d9', snack: '#d8b2bf' };
+const KIND_COLOURS = { root: '#343b37', host: '#4f78a8', episode: '#72817a', contributor: '#a26f49', concept: '#4aa8a5', claim: '#d96b45', example: '#d49a32', question: '#9674cf', snack: '#d65f87' };
+const MUTED_KIND_COLOURS = { root: '#9da49f', host: '#a9bbd0', episode: '#b3bbb7', contributor: '#cbb7a8', concept: '#a9cecc', claim: '#d8b2a5', example: '#d8c49d', question: '#c5b8d9', snack: '#d8b2bf' };
 const ACTIVE_COLOUR = '#fe7141';
 let active = null;
 
-const nodeSize = (node) => node.kind === 'root' ? 15 : node.kind === 'episode' ? 12 : node.kind === 'contributor' ? 10 : node.kind === 'snack' ? 7 : 9;
+const nodeSize = (node) => node.kind === 'root' ? 15 : node.kind === 'episode' ? 12 : node.kind === 'host' ? 11 : node.kind === 'contributor' ? 10 : node.kind === 'snack' ? 7 : 9;
 
 export function mountKnowledgeGraph(container, model, onSelect) {
   active?.kill(); active = null; container.replaceChildren();
@@ -21,7 +21,7 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   const episodeOffsets = new Map();
   const simulationNodes = nodes.map((node, index) => {
     const anchor = episodeAnchors.get(node.episodeId) || { x: 0, y: 0 }; const localIndex = episodeOffsets.get(node.episodeId) || 0; episodeOffsets.set(node.episodeId, localIndex + 1);
-    const angle = localIndex * Math.PI * (3 - Math.sqrt(5)); const radius = node.kind === 'root' ? 0 : node.kind === 'contributor' ? 175 + index * 11 : 34 * Math.sqrt(localIndex);
+    const angle = localIndex * Math.PI * (3 - Math.sqrt(5)); const radius = node.kind === 'root' ? 0 : ['host','contributor'].includes(node.kind) ? 175 + index * 11 : 34 * Math.sqrt(localIndex);
     return { id: node.id, kind: node.kind, episodeId: node.episodeId, x: anchor.x + Math.cos(angle) * radius, y: anchor.y + Math.sin(angle) * radius, size: nodeSize(node), fx: node.kind === 'root' ? 0 : undefined, fy: node.kind === 'root' ? 0 : undefined };
   });
   const simulationLinks = [];
@@ -33,8 +33,8 @@ export function mountKnowledgeGraph(container, model, onSelect) {
     .force('charge', forceManyBody().strength((node) => node.kind === 'root' ? -520 : node.kind === 'episode' ? -410 : -295).distanceMin(28).distanceMax(820))
     .force('collide', forceCollide().radius((node) => node.size + 25).strength(1).iterations(4))
     .force('center', forceCenter(0, 0).strength(0.015))
-    .force('x', forceX((node) => episodeAnchors.get(node.episodeId)?.x || 0).strength((node) => node.kind === 'episode' ? 0.34 : node.kind === 'contributor' ? 0.025 : node.kind === 'root' ? 1 : 0.11))
-    .force('y', forceY((node) => episodeAnchors.get(node.episodeId)?.y || 0).strength((node) => node.kind === 'episode' ? 0.34 : node.kind === 'contributor' ? 0.025 : node.kind === 'root' ? 1 : 0.11))
+    .force('x', forceX((node) => episodeAnchors.get(node.episodeId)?.x || 0).strength((node) => node.kind === 'episode' ? 0.34 : ['host','contributor'].includes(node.kind) ? 0.025 : node.kind === 'root' ? 1 : 0.11))
+    .force('y', forceY((node) => episodeAnchors.get(node.episodeId)?.y || 0).strength((node) => node.kind === 'episode' ? 0.34 : ['host','contributor'].includes(node.kind) ? 0.025 : node.kind === 'root' ? 1 : 0.11))
     .alphaDecay(0.022).alphaMin(0.002).velocityDecay(0.35).stop();
   const simulationNodeById = new Map(simulationNodes.map((node) => [node.id, node]));
   simulation.tick(60);
@@ -94,7 +94,7 @@ export function mountKnowledgeGraph(container, model, onSelect) {
     const title = document.createElement('h3'); title.textContent = item.title;
     const meta = document.createElement('span'); meta.className = 'metadata'; meta.textContent = `${graph.degree(node)} connection${graph.degree(node) === 1 ? '' : 's'}${item.episodeNumber ? ` · Episode ${item.episodeNumber}` : ''}`;
     const summary = document.createElement('p'); summary.textContent = item.summary || 'Explore this node’s connections in the knowledge graph.';
-    const open = document.createElement('button'); open.type = 'button'; open.className = 'btn btnPrimary'; open.textContent = item.kind === 'snack' ? 'Open Snack' : item.kind === 'contributor' ? 'Open contributor' : 'Explore node'; open.addEventListener('click', () => onSelect(node, item));
+    const open = document.createElement('button'); open.type = 'button'; open.className = 'btn btnPrimary'; open.textContent = item.kind === 'snack' ? 'Open Snack' : ['host','contributor'].includes(item.kind) ? 'Open contributor' : 'Explore node'; open.addEventListener('click', () => onSelect(node, item));
     card.append(kind, title, meta, summary, open); container.appendChild(card);
     const width = container.clientWidth, height = container.clientHeight; card.style.left = `${Math.max(220, Math.min(width - 220, display?.x || width / 2))}px`; card.style.top = `${Math.max(150, Math.min(height - 170, display?.y || height / 2))}px`;
   });

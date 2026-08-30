@@ -50,7 +50,8 @@ test('deriveKnowledgeFocus connects the collection, episodes, contributors, tran
   expect(result.connections.map((item) => item.relationshipType).sort()).toEqual(['contributed', 'developed-into', 'exemplifies']);
   expect(result.allConnections).toHaveLength(12);
   expect(result.nodes).toContainEqual(expect.objectContaining({ id: 'root:intelligence-snacks', kind: 'root' }));
-  expect(result.nodes).toContainEqual(expect.objectContaining({ id: 'contributor:pete', kind: 'contributor' }));
+  expect(result.nodes).toContainEqual(expect.objectContaining({ id: 'contributor:pete', kind: 'host', role: 'Host' }));
+  expect(result.allConnections).toContainEqual(expect.objectContaining({ sourceId: 'contributor:pete', targetId: 'episode:episode-1', relationshipType: 'hosted' }));
   expect(result.nodes.filter((node) => ['claim','example'].includes(node.kind))).toHaveLength(2);
   expect(deriveKnowledgeFocus(payload).explicitFocus).toBeFalse();
 });
