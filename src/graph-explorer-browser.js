@@ -36,6 +36,7 @@ export function mountKnowledgeGraph(container, model, onSelect) {
     .force('x', forceX((node) => episodeAnchors.get(node.episodeId)?.x || 0).strength((node) => node.kind === 'episode' ? 0.34 : node.kind === 'contributor' ? 0.025 : node.kind === 'root' ? 1 : 0.11))
     .force('y', forceY((node) => episodeAnchors.get(node.episodeId)?.y || 0).strength((node) => node.kind === 'episode' ? 0.34 : node.kind === 'contributor' ? 0.025 : node.kind === 'root' ? 1 : 0.11))
     .alphaDecay(0.022).alphaMin(0.002).velocityDecay(0.35).stop();
+  const simulationNodeById = new Map(simulationNodes.map((node) => [node.id, node]));
   simulation.tick(60);
   for (const node of simulationNodes) graph.mergeNodeAttributes(node.id, { x: node.x, y: node.y });
   const canvas = document.createElement('div'); canvas.className = 'sigmaCanvas'; container.appendChild(canvas);
@@ -53,12 +54,40 @@ export function mountKnowledgeGraph(container, model, onSelect) {
     for (const node of simulationNodes) graph.mergeNodeAttributes(node.id, { x: node.x, y: node.y });
     renderer.refresh();
     if (simulation.alpha() > simulation.alphaMin()) frame = requestAnimationFrame(animateLayout);
+    else frame = null;
   };
-  frame = requestAnimationFrame(animateLayout);
+  const reheatLayout = (alpha) => {
+    simulation.alpha(Math.max(simulation.alpha(), alpha));
+    if (!frame) frame = requestAnimationFrame(animateLayout);
+  };
+  reheatLayout(simulation.alpha());
   renderer.on('enterNode', ({ node }) => { hovered = node; hoveredNeighbours = new Set(graph.neighbors(node)); renderer.getContainer().style.cursor = 'pointer'; renderer.refresh(); });
   renderer.on('leaveNode', () => { hovered = null; hoveredNeighbours = new Set(); renderer.getContainer().style.cursor = 'grab'; renderer.refresh(); });
+  let draggedId = null; let dragged = false; let suppressClick = false;
+  const releaseDraggedNode = () => {
+    if (!draggedId) return;
+    const node = simulationNodeById.get(draggedId);
+    if (node) { node.fx = node.kind === 'root' ? 0 : null; node.fy = node.kind === 'root' ? 0 : null; }
+    draggedId = null; renderer.getCamera().enable(); renderer.getContainer().style.cursor = 'grab'; reheatLayout(0.48);
+  };
+  renderer.on('downNode', ({ node, event }) => {
+    event.preventSigmaDefault(); draggedId = node; dragged = false;
+    const simulationNode = simulationNodeById.get(node);
+    if (simulationNode) { simulationNode.fx = simulationNode.x; simulationNode.fy = simulationNode.y; }
+    renderer.getCamera().disable(); renderer.getContainer().style.cursor = 'grabbing'; reheatLayout(0.3);
+  });
+  renderer.on('moveBody', ({ event }) => {
+    if (!draggedId) return;
+    const simulationNode = simulationNodeById.get(draggedId); if (!simulationNode) return;
+    const position = renderer.viewportToGraph({ x: event.x, y: event.y });
+    simulationNode.fx = position.x; simulationNode.fy = position.y; simulationNode.x = position.x; simulationNode.y = position.y;
+    dragged = true; suppressClick = true; reheatLayout(0.34);
+  });
+  renderer.on('upNode', releaseDraggedNode);
+  renderer.on('upStage', releaseDraggedNode);
   const closeSpotlight = () => container.querySelector('.graphSpotlight')?.remove();
   renderer.on('clickNode', ({ node }) => {
+    if (suppressClick || dragged) { suppressClick = false; dragged = false; return; }
     selectedId = node; selectedNeighbours = new Set(graph.neighbors(node)); renderer.refresh(); closeSpotlight();
     const item = nodeById.get(node); const display = renderer.getNodeDisplayData(node); const card = document.createElement('article'); card.className = 'graphSpotlight';
     const kind = document.createElement('span'); kind.className = 'eyebrow'; kind.textContent = item.kind;
