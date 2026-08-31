@@ -20,9 +20,11 @@ The editorial production workflow currently provides:
 - newsletter and relationship curation records for later package assembly;
 - configurable Autopilot targets and a health endpoint at `/api/health`.
 
-The accepted production transcript pipeline is pinned to the Episode 64 v3
-baseline. Targeted regeneration uses its own v1 definition without changing the
-full-run prompt suite.
+The accepted production transcript pipeline is pinned to the Episode 66 and 67
+v9 baseline. It preserves the completed v3 generation path, then independently
+edits each Snack once against the full transcript and the frozen editorial
+standard before deterministic validation and delivery. Targeted regeneration
+uses its own v1 definition without changing the full-run prompt suite.
 
 ## Development
 

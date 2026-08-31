@@ -29,13 +29,13 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   for (const connection of model.allConnections) if (visible.has(connection.sourceId) && visible.has(connection.targetId)) { graph.addEdgeWithKey(connection.id, connection.sourceId, connection.targetId, { label: connection.relationshipType, size: 1.2, color: '#38413d' }); simulationLinks.push({ source: connection.sourceId, target: connection.targetId, relationshipType: connection.relationshipType }); }
   if (!graph.order) return () => {};
   const simulation = forceSimulation(simulationNodes)
-    .force('link', forceLink(simulationLinks).id((node) => node.id).distance((link) => ['contains','features','hosted-by'].includes(link.relationshipType) ? 250 : ['publishes','contributed-to','hosted'].includes(link.relationshipType) ? 175 : link.relationshipType === 'developed-into' ? 118 : 150).strength((link) => ['contains','features','hosted-by'].includes(link.relationshipType) ? 0.1 : ['publishes','contributed-to','hosted'].includes(link.relationshipType) ? 0.15 : 0.11))
+    .force('link', forceLink(simulationLinks).id((node) => node.id).distance((link) => ['contains','features','hosted-by'].includes(link.relationshipType) ? 250 : ['publishes','contributed-to','hosted'].includes(link.relationshipType) ? 175 : link.relationshipType === 'developed-into' ? 118 : 150).strength((link) => ['contains','features','hosted-by'].includes(link.relationshipType) ? 0.035 : ['publishes','contributed-to','hosted'].includes(link.relationshipType) ? 0.05 : 0.04))
     .force('charge', forceManyBody().strength((node) => node.kind === 'root' ? -520 : node.kind === 'episode' ? -410 : -295).distanceMin(28).distanceMax(820))
     .force('collide', forceCollide().radius((node) => node.size + 25).strength(1).iterations(4))
     .force('center', forceCenter(0, 0).strength(0.015))
-    .force('x', forceX((node) => episodeAnchors.get(node.episodeId)?.x || 0).strength((node) => node.kind === 'episode' ? 0.5 : ['host','contributor'].includes(node.kind) ? 0.018 : node.kind === 'root' ? 1 : 0.2))
-    .force('y', forceY((node) => episodeAnchors.get(node.episodeId)?.y || 0).strength((node) => node.kind === 'episode' ? 0.5 : ['host','contributor'].includes(node.kind) ? 0.018 : node.kind === 'root' ? 1 : 0.2))
-    .alphaDecay(0.022).alphaMin(0.002).velocityDecay(0.35).stop();
+    .force('x', forceX((node) => episodeAnchors.get(node.episodeId)?.x || 0).strength((node) => node.kind === 'episode' ? 0.12 : ['host','contributor'].includes(node.kind) ? 0.005 : node.kind === 'root' ? 0.4 : 0.055))
+    .force('y', forceY((node) => episodeAnchors.get(node.episodeId)?.y || 0).strength((node) => node.kind === 'episode' ? 0.12 : ['host','contributor'].includes(node.kind) ? 0.005 : node.kind === 'root' ? 0.4 : 0.055))
+    .alphaDecay(0.028).alphaMin(0.002).velocityDecay(0.58).stop();
   const simulationNodeById = new Map(simulationNodes.map((node) => [node.id, node]));
   simulation.tick(60);
   for (const node of simulationNodes) graph.mergeNodeAttributes(node.id, { x: node.x, y: node.y });
@@ -68,20 +68,20 @@ export function mountKnowledgeGraph(container, model, onSelect) {
     if (!draggedId) return;
     const node = simulationNodeById.get(draggedId);
     if (node) { node.fx = node.kind === 'root' ? 0 : null; node.fy = node.kind === 'root' ? 0 : null; }
-    draggedId = null; renderer.getCamera().enable(); renderer.getContainer().style.cursor = 'grab'; reheatLayout(0.48);
+    draggedId = null; renderer.getCamera().enable(); renderer.getContainer().style.cursor = 'grab'; reheatLayout(0.42);
   };
   renderer.on('downNode', ({ node, event }) => {
     event.preventSigmaDefault(); draggedId = node; dragged = false;
     const simulationNode = simulationNodeById.get(node);
     if (simulationNode) { simulationNode.fx = simulationNode.x; simulationNode.fy = simulationNode.y; }
-    renderer.getCamera().disable(); renderer.getContainer().style.cursor = 'grabbing'; reheatLayout(0.3);
+    renderer.getCamera().disable(); renderer.getContainer().style.cursor = 'grabbing'; reheatLayout(0.08);
   });
   renderer.on('moveBody', ({ event }) => {
     if (!draggedId) return;
     const simulationNode = simulationNodeById.get(draggedId); if (!simulationNode) return;
     const position = renderer.viewportToGraph({ x: event.x, y: event.y });
     simulationNode.fx = position.x; simulationNode.fy = position.y; simulationNode.x = position.x; simulationNode.y = position.y;
-    dragged = true; suppressClick = true; reheatLayout(0.34);
+    dragged = true; suppressClick = true; reheatLayout(0.11);
   });
   renderer.on('upNode', releaseDraggedNode);
   renderer.on('upStage', releaseDraggedNode);

@@ -148,7 +148,7 @@ export function buildEpisodePipelineTriggerRequest(input: {
   // The version is also retained in the payload for provenance, but Autopilot
   // resolves the definition from the route rather than from input metadata.
   const pipelineName = input.pipelineVersion
-    && ["snack-studio-transcript-to-snacks", "snack-studio-regenerate-snack", "snack-studio-publication-metadata"].includes(input.pipelineName)
+    && ["snack-studio-transcript-to-snacks", "snack-studio-regenerate-snack", "snack-studio-publication-metadata", "snack-studio-graph-relationships"].includes(input.pipelineName)
     ? `${input.pipelineName}.v${input.pipelineVersion}`
     : input.pipelineName;
   return {

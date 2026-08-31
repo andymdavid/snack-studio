@@ -4,6 +4,7 @@ import { bytesToHex } from "@noble/hashes/utils";
 import { db as appDb } from "./db.ts";
 import { THUMBNAIL_TOPICS } from "./thumbnail-catalog.ts";
 import { listThemes } from './themes.ts';
+import { listDiscussionTopics, listGovernedDiscussionTopics } from './discussion-topics.ts';
 
 export const PIPELINE_OPERATIONS = ["transcript-to-snacks", "transcript-normalization", "snack-regeneration", "publication-metadata"] as const;
 export type PipelineOperation = typeof PIPELINE_OPERATIONS[number];
@@ -43,6 +44,21 @@ export type PipelineRequest = {
   createdAt: number;
   updatedAt: number;
 };
+
+export const CURRENT_KNOWLEDGE_GRAPH_CONTRACT = {
+  pipelineName: 'snack-studio-graph-relationships',
+  pipelineVersion: '7',
+  promptSuiteVersion: 'v7-governed-roots-reusable-subtopics',
+  resultSchemaVersion: '5',
+} as const;
+
+export function isObsoleteKnowledgeGraphRequest(request: Pick<PipelineRequest,
+  'pipelineName' | 'pipelineVersion' | 'promptSuiteVersion' | 'resultSchemaVersion'>): boolean {
+  if (request.pipelineName !== CURRENT_KNOWLEDGE_GRAPH_CONTRACT.pipelineName) return false;
+  return request.pipelineVersion !== CURRENT_KNOWLEDGE_GRAPH_CONTRACT.pipelineVersion
+    || request.promptSuiteVersion !== CURRENT_KNOWLEDGE_GRAPH_CONTRACT.promptSuiteVersion
+    || request.resultSchemaVersion !== CURRENT_KNOWLEDGE_GRAPH_CONTRACT.resultSchemaVersion;
+}
 
 export type PipelineRun = {
   id: string;
@@ -182,7 +198,7 @@ export function createPipelineRequest(input: {
     input.autopilotTargetId,
     input.pipelineName,
     input.pipelineVersion ?? null,
-    input.promptSuiteVersion || "v3-intelligence-snacks-natural-prose",
+    input.promptSuiteVersion || "v9-frozen-single-editorial-pass",
     input.resultSchemaVersion || "1",
     input.idempotencyKey || crypto.randomUUID(),
     input.targetCandidateId || null,
@@ -480,6 +496,9 @@ export function getPipelineRequestContext(requestId: string, database: Database 
         LEFT JOIN snack_theme_assignments t ON t.snack_revision_id=r.id
         WHERE c.review_decision='accepted' ORDER BY c.episode_id,c.approved_position`).all() as Record<string, unknown>[]).map((item) => ({ candidateId: String(item.candidate_id), episodeId: String(item.episode_id), revisionId: String(item.current_revision_id), publicTitle: String(item.public_title), standfirst: String(item.standfirst), bodyMarkdown: String(item.body_markdown), themeId: item.theme_id == null ? null : String(item.theme_id) }))
     : [];
+  const existingKnowledgeNodeCount = String(row.operation) === 'publication-metadata'
+    ? Number((database.query('SELECT COUNT(*) AS count FROM knowledge_nodes WHERE episode_id=?1 AND source_transcript_revision_id=?2').get(String(row.episode_id), String(row.input_transcript_revision_id)) as { count: number }).count)
+    : 0;
   return {
     request: mapRequest(row),
     episode: {
@@ -506,6 +525,8 @@ export function getPipelineRequestContext(requestId: string, database: Database 
     graphCandidates,
     canonicalTopics: String(row.operation) === "publication-metadata" ? THUMBNAIL_TOPICS : [],
     canonicalThemes: String(row.operation) === 'publication-metadata' ? listThemes(database) : [],
+    canonicalDiscussionTopics: String(row.operation) === 'publication-metadata' && String(row.pipeline_name) === 'snack-studio-graph-relationships' ? listDiscussionTopics(database) : String(row.operation) === 'publication-metadata' ? listGovernedDiscussionTopics(database) : [],
+    existingKnowledgeNodeCount,
     targetCandidate: targetRow ? {
       id: String(targetRow.id),
       baseRevisionId: String(row.base_candidate_revision_id),

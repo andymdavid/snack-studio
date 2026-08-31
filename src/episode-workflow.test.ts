@@ -41,6 +41,10 @@ describe('deriveEpisodeWorkProjection', () => {
     const work = deriveEpisodeWorkProjection(projectionBase);
     expect(work.snacks.available).toBe(true); expect(work.snacks.outstandingCount).toBe(0); expect(work.snacks.state).toBe('approved');
   });
+  test('keeps a newly uploaded transcript on the generation action until a run exists', () => {
+    const work = deriveEpisodeWorkProjection({ ...projectionBase, generationStatus:null, candidateCount:0, finalSetReady:false, finalSetApproved:false });
+    expect(work.recommendedAction).toEqual({ label:'Start Snack generation', route:'overview' });
+  });
   test('projects one episode into every applicable work surface independently', () => {
     const work = { episodeId:'episode-1', episodeNumber:1, title:'One', updatedAt:1,
       ...deriveEpisodeWorkProjection({ ...projectionBase, candidateDecisionCount:1, assetReviewCount:2, assetReasons:['Two assets remain.'], blockers:[{ message:'Assets remain.' }] }) } as EpisodeWorkProjection;

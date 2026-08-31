@@ -7,6 +7,10 @@ import type { SuccessfulThemeResult } from './theme-result-input.ts';
 export function normalizeThemeEvidence(value: string) {
   return value
     .toLowerCase()
+    // Speaker-colon transcripts place diarisation metadata between fragments of
+    // a continuous spoken sentence. Evidence must match the spoken words, not
+    // the speaker label and timestamp inserted between them.
+    .replace(/^([^\n:]{1,100}):[ \t]*\n[ \t]*(?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?[ \t]*$/gm, ' ')
     // ASR preserves abandoned word starts such as “they would s- these”.
     .replace(/\b[a-z]+-\s+/g, ' ')
     // It also emits repeated initial sounds such as “e-educating”.

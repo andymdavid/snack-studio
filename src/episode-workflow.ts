@@ -52,7 +52,9 @@ export function deriveEpisodeWorkProjection(input: {
   const assets = { state: input.assetReviewCount ? 'needs-review' : input.finalSetApproved ? 'ready' : 'locked', outstandingCount: input.assetReviewCount, reasons: input.assetReasons, ready: input.finalSetApproved && !input.assetReviewCount };
   const publicationState = input.deploymentCurrent ? 'deployed' : input.publicationCurrent ? 'published-main' : input.validationCurrent ? 'validated' : input.packageReady ? 'ready-to-validate' : input.publicationActive ? 'preparing' : input.finalSetApproved ? 'blocked' : 'locked';
   const publication = { state: publicationState, outstandingCount: publicationReasons.length, reasons: publicationReasons, ready: input.deploymentCurrent, eligible: input.finalSetApproved, deployed: input.deploymentCurrent };
+  const generationNotStarted = input.hasTranscript && !input.generationStatus && !input.candidateCount;
   const recommendedAction = !source.ready ? { label: source.state === 'needs-transcript' ? 'Upload transcript' : 'Review generation', route: 'overview' as const }
+    : generationNotStarted ? { label: 'Start Snack generation', route: 'overview' as const }
     : snacks.outstandingCount || !snacks.finalSetApproved ? { label: 'Review Snacks', route: 'snacks' as const }
     : assets.outstandingCount ? { label: 'Review assets', route: 'assets' as const }
     : !publication.deployed ? { label: publication.state === 'ready-to-validate' ? 'Validate publication' : publication.state === 'validated' ? 'Publish to main' : publication.state === 'published-main' ? 'Deploy website' : 'Complete publication', route: 'publication' as const }

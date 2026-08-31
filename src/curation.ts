@@ -147,10 +147,15 @@ export function createRelationship(input: {
 }
 
 export function listGraphCandidates() {
-  return (db.query(`SELECT c.id AS candidate_id,c.episode_id,c.review_decision,r.public_title,r.standfirst,e.episode_number,e.working_title
+  return (db.query(`SELECT c.id AS candidate_id,c.episode_id,c.review_decision,r.public_title,r.standfirst,e.episode_number,e.working_title,
+      theme.id AS theme_id,theme.name AS theme_name,theme.description AS theme_description,theme.colour AS theme_colour
     FROM snack_candidates c JOIN snack_revisions r ON r.id=c.current_revision_id JOIN episodes e ON e.id=c.episode_id
+    LEFT JOIN snack_theme_assignments assignment ON assignment.snack_revision_id=r.id
+    LEFT JOIN themes theme ON theme.id=assignment.theme_id
     WHERE c.review_decision='accepted' ORDER BY e.episode_number,c.approved_position`).all() as Record<string, unknown>[]).map((row) => ({
       candidateId: String(row.candidate_id), episodeId: String(row.episode_id), title: String(row.public_title), standfirst: String(row.standfirst), episodeNumber: row.episode_number == null ? null : Number(row.episode_number), episodeTitle: String(row.working_title),
+      themeId: row.theme_id == null ? null : String(row.theme_id), themeName: row.theme_name == null ? null : String(row.theme_name),
+      themeDescription: row.theme_description == null ? null : String(row.theme_description), themeColour: row.theme_colour == null ? null : String(row.theme_colour),
     }));
 }
 

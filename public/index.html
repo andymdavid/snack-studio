@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=20260831-topic-row-marker-fix" />
   </head>
   <body>
     <main id="app">
@@ -89,7 +89,10 @@
 
             <section class="episodeList card" aria-live="polite">
               <div class="episodeListHeader">
-                <span>Episode</span><span>Stage</span><span>Last activity</span><span></span>
+                <span><button class="episodeSortButton" id="episodeNumberSort" type="button" data-sort-key="number">Episode <span aria-hidden="true"></span></button></span>
+                <span><button class="episodeSortButton" id="episodeStageSort" type="button" data-sort-key="stage">Stage <span aria-hidden="true"></span></button></span>
+                <span><button class="episodeSortButton" id="episodeActivitySort" type="button" data-sort-key="activity">Last activity <span aria-hidden="true"></span></button></span>
+                <span></span>
               </div>
               <div id="episodeList"></div>
             </section>
@@ -301,6 +304,6 @@
         </section>
       </section>
     </main>
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="/app.js?v=20260831-episode-graph-route"></script>
   </body>
 </html>

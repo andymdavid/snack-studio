@@ -89,7 +89,10 @@ export function publishValidatedPackageToMain(episodeId: string, actorPubkey: st
         .run(commitSha, cleanOutput, Date.now(), attemptId);
     } else {
       const paths = packageValue.files.map((file) => file.destination);
-      run(['git', 'add', '--', ...paths], validation.worktreePath);
+      // The validated worktree is isolated. Stage all of its changes so a
+      // retry also handles deletions that an earlier attempt already removed
+      // from the index, then enforce the manifest boundary immediately below.
+      run(['git', 'add', '-A', '--', '.'], validation.worktreePath);
       const stagedOutsideManifest = run(['git', 'diff', '--cached', '--name-only'], validation.worktreePath).split('\n').filter(Boolean).filter((path) => !paths.includes(path));
       if (stagedOutsideManifest.length) throw new Error(`Publication contains files outside the manifest: ${stagedOutsideManifest.join(', ')}`);
       if (!run(['git', 'diff', '--cached', '--name-only'], validation.worktreePath)) throw new Error('The validated package does not contain any website changes.');

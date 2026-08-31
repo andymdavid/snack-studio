@@ -38,8 +38,10 @@ import { validateCandidateRevision, validateReviewDecision } from "./candidate-i
 import { activateCandidateRevision, approveCandidateBatch, createCandidateRevision, generateFixtureCandidates, getCandidate, listCandidates, setApprovedCandidateOrder, updateCandidateDecision, validateApprovedCandidateBatch } from "./candidates.ts";
 import { buildCandidateGenerations } from "./candidate-generations.ts";
 import { createFixtureRelationshipSuggestions, createRelationship, deleteRelationship, getCuration, listAllRelationships, listGraphCandidates, listGraphContributors, RELATIONSHIP_TYPES, reviewRelationshipCluster, setNewsletterItems, updateNewsletterDraft, updateRelationship } from "./curation.ts";
+import { listThemes } from './themes.ts';
 import { listKnowledgeBackfill, listKnowledgeGraph } from './knowledge-graph.ts';
 import { normalizeTranscriptText, validateEpisodeMetadata, validateTranscriptUpload } from "./transcript-input.ts";
+import { transcriptHasUsableSpeakerStructure } from "./publication-metadata.ts";
 import {
   activateTranscriptRevision,
   createEpisode,
@@ -78,6 +80,7 @@ import {
   markPipelineRunStarted,
   markPipelineResultRejected,
   markStalePipelineRunsTimedOut,
+  isObsoleteKnowledgeGraphRequest,
   PIPELINE_OPERATIONS,
   type PipelineOperation,
   verifyPreparedPipelineTrigger,
@@ -101,7 +104,9 @@ import { getLatestPublicTranscript, reviewPublicTranscript } from './public-tran
 import { validateSuccessfulGraphResult } from './graph-result-input.ts';
 import { applySuccessfulGraphResult } from './graph-results.ts';
 import { validateSuccessfulKnowledgeResult } from './knowledge-result-input.ts';
+import { validateSuccessfulKnowledgeTopicResult } from './knowledge-topic-result-input.ts';
 import { applySuccessfulKnowledgeResult } from './knowledge-results.ts';
+import { listDiscussionTopics, listTranscriptTopicIndex } from './discussion-topics.ts';
 import { getApprovedGraphProjection } from './graph-projection.ts';
 import { buildPublicationPackage } from "./publication-package.ts";
 import { getLatestWebsiteValidation, stageAndValidateWebsitePackage } from './website-validation.ts';
@@ -311,7 +316,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
     if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
     const episodeId = url.searchParams.get('episodeId') || undefined;
-    return json({ candidates: listGraphCandidates(), contributors: listGraphContributors(), relationships: listAllRelationships(), knowledge: listKnowledgeGraph(episodeId), backfill: listKnowledgeBackfill() });
+    return json({ candidates: listGraphCandidates(), contributors: listGraphContributors(), themes: listThemes(), relationships: listAllRelationships(), knowledge: listKnowledgeGraph(episodeId), topicIndex: listTranscriptTopicIndex(), backfill: listKnowledgeBackfill() });
   }
   if (pathname === '/api/graph/projection' && req.method === 'GET') {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
@@ -646,7 +651,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     if (!session) return json({ error: 'unauthorized' }, 401);
     if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
     const requestedView = url.searchParams.get('view');
-    const view = requestedView === 'snacks' || requestedView === 'assets' || requestedView === 'publication' ? requestedView : 'overview';
+    const view = requestedView === 'snacks' || requestedView === 'graph' || requestedView === 'assets' || requestedView === 'publication' ? requestedView : 'overview';
     const workspace = buildEpisodeWorkspace(decodeURIComponent(episodeWorkspaceMatch[1]!), { view });
     return workspace ? json({ workspace }) : json({ error: 'episode not found' }, 404);
   }
@@ -852,7 +857,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const candidate = getThumbnailCandidateRow(decodeURIComponent(thumbnailCandidateImageMatch[1]!));
     if (!candidate) return json({ error: 'thumbnail candidate not found' }, 404);
     const file = Bun.file(String(candidate.source_uri)); if (!await file.exists()) return json({ error: 'image not found' }, 404);
-    return new Response(file, { headers: { 'content-type': String(candidate.mime_type || 'image/png'), 'cache-control': 'private, max-age=300' } });
+    return new Response(file, { headers: { 'content-type': String(candidate.mime_type || 'image/png'), 'cache-control': 'private, no-store' } });
   }
   const thumbnailCandidateApproveMatch = pathname.match(/^\/api\/thumbnail-candidates\/([^/]+)\/approve$/);
   if (thumbnailCandidateApproveMatch && req.method === 'POST') {
@@ -1022,8 +1027,19 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const body = await readJson(req);
     const operation = String(body.operation || "transcript-to-snacks") as PipelineOperation;
     if (!PIPELINE_OPERATIONS.includes(operation)) return json({ error: "unsupported pipeline operation" }, 400);
+    if (operation === "transcript-to-snacks" && !transcriptHasUsableSpeakerStructure(transcript.transcriptText)) {
+      return json({
+        error: "This transcript has no detectable speaker labels. Upload or create a speaker-labelled transcript revision before generating Snacks.",
+      }, 409);
+    }
     const target = getRequestedAutopilotTarget(body.autopilotTargetId);
     const pipelineName = normalizePipelineName(body.pipelineName) || target.defaultPipeline;
+    if (pipelineName === 'snack-studio-graph-relationships' && isObsoleteKnowledgeGraphRequest({
+      pipelineName,
+      pipelineVersion: typeof body.pipelineVersion === 'string' ? body.pipelineVersion : null,
+      promptSuiteVersion: typeof body.promptSuiteVersion === 'string' ? body.promptSuiteVersion : '',
+      resultSchemaVersion: typeof body.resultSchemaVersion === 'string' ? body.resultSchemaVersion : '',
+    })) return json({ error: 'The browser is using an obsolete graph contract. Refresh Snack Studio before starting the topic index.' }, 409);
     const pipelineRequest = createPipelineRequest({
       episodeId,
       operation,
@@ -1068,6 +1084,9 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const requestId = decodeURIComponent(episodePipelineRetryMatch[1]!);
     const pipelineRequest = getPipelineRequest(requestId);
     if (!pipelineRequest) return json({ error: "pipeline request not found" }, 404);
+    if (isObsoleteKnowledgeGraphRequest(pipelineRequest)) {
+      return json({ error: "This graph request uses an obsolete extraction contract. Start the current graph pipeline instead of retrying it." }, 409);
+    }
     if (pipelineRequest.status === "completed") return json({ error: "completed pipeline requests cannot be retried" }, 409);
     if (["queued", "running", "applying-result"].includes(pipelineRequest.status)) {
       return json({ error: `pipeline request cannot be retried from ${pipelineRequest.status}` }, 409);
@@ -1715,7 +1734,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
         : pipelineRequest.operation === 'transcript-normalization'
           ? validateSuccessfulPublicTranscriptResult(body)
         : pipelineRequest.operation === "publication-metadata"
-          ? pipelineRequest.resultSchemaVersion === '4' ? validateSuccessfulKnowledgeResult(body) : pipelineRequest.resultSchemaVersion === '3' ? validateSuccessfulGraphResult(body) : pipelineRequest.resultSchemaVersion === '2' ? validateSuccessfulThemeResult(body) : validateSuccessfulPublicationMetadataResult(body)
+          ? pipelineRequest.resultSchemaVersion === '5' ? validateSuccessfulKnowledgeTopicResult(body) : pipelineRequest.resultSchemaVersion === '4' ? validateSuccessfulKnowledgeResult(body) : pipelineRequest.resultSchemaVersion === '3' ? validateSuccessfulGraphResult(body) : pipelineRequest.resultSchemaVersion === '2' ? validateSuccessfulThemeResult(body) : validateSuccessfulPublicationMetadataResult(body)
           : validateSuccessfulPipelineResult(body);
       if (!validation.ok) {
         markPipelineResultRejected({ runId: run.id, summary: validation.error });
@@ -1745,8 +1764,8 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
           return json({ ok: true, requestId, status: 'completed', ...applied });
         }
         if (pipelineRequest.operation === "publication-metadata") {
-          if (pipelineRequest.resultSchemaVersion === '4') {
-            const applied = applySuccessfulKnowledgeResult({ localRunId: run.id, result: validation.value as import('./knowledge-result-input.ts').SuccessfulKnowledgeResult });
+          if (['4','5'].includes(pipelineRequest.resultSchemaVersion)) {
+            const applied = applySuccessfulKnowledgeResult({ localRunId: run.id, result: validation.value as import('./knowledge-result-input.ts').SuccessfulKnowledgeResult | import('./knowledge-topic-result-input.ts').SuccessfulKnowledgeTopicResult });
             publishPipelineUpdate('completed');
             return json({ ok: true, requestId, status: 'completed', ...applied });
           }

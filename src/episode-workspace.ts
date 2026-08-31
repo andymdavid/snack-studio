@@ -12,6 +12,8 @@ import { getLatestPublicTranscript } from './public-transcripts.ts';
 import { listRegenerationProposals } from './regeneration-proposals.ts';
 import { getPublicationPreparation } from './thumbnails.ts';
 import { getLatestWebsiteValidation } from './website-validation.ts';
+import { getEpisodeGraphReadiness, listKnowledgeGraph } from './knowledge-graph.ts';
+import { listTranscriptTopicIndex } from './discussion-topics.ts';
 
 function optionalProjection<T>(read: () => T): { value: T | null; error: string | null } {
   try {
@@ -45,7 +47,7 @@ function transcriptForWorkspace(transcript: ReturnType<typeof getActiveTranscrip
   return metadata;
 }
 
-export type EpisodeWorkspaceView = 'overview' | 'snacks' | 'assets' | 'publication';
+export type EpisodeWorkspaceView = 'overview' | 'snacks' | 'graph' | 'assets' | 'publication';
 
 export function buildEpisodeWorkspace(episodeId: string, options: { view?: EpisodeWorkspaceView } = {}) {
   const episode = getEpisode(episodeId);
@@ -55,6 +57,7 @@ export function buildEpisodeWorkspace(episodeId: string, options: { view?: Episo
   const includeOverview = view === 'overview';
   const includeAssets = view === 'assets' || view === 'publication';
   const includePublication = view === 'publication';
+  const includeGraph = view === 'graph';
 
   markStalePipelineRunsTimedOut({ episodeId, timeoutMs: PIPELINE_TIMEOUT_MS });
   const pipelineRequests = listEpisodePipelineRequests(episodeId).map((request) => ({
@@ -78,6 +81,10 @@ export function buildEpisodeWorkspace(episodeId: string, options: { view?: Episo
     approvedBatch: validateApprovedCandidateBatch(episodeId),
     regenerationProposals: Object.fromEntries(candidates.map((candidate) => [candidate.id, listRegenerationProposals(candidate.id)])),
     curation: getCuration(episodeId),
+    graph: includeGraph ? (() => {
+      const readiness = getEpisodeGraphReadiness(episodeId); const knowledge = listKnowledgeGraph(episodeId); const topicIndex = listTranscriptTopicIndex();
+      return { readiness, knowledge, topicIndex: { topics: topicIndex.topics, analyses: topicIndex.analyses.filter((item) => item.episodeId === episodeId), passages: topicIndex.passages.filter((item) => item.episodeId === episodeId) } };
+    })() : null,
     pipelineRequests,
     pipelineTimeoutMs: PIPELINE_TIMEOUT_MS,
     publicationPreparation: includeAssets ? preparation.value : null,

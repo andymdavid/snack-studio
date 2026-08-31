@@ -1,12 +1,13 @@
 import { derivePubkeyFromNsec, signEventWithNsec, signLoginChallengeWithNsec } from "/nostr-login.js";
-import { deriveGraphFocus, deriveGraphReview, deriveKnowledgeFocus } from "/graph-review.js";
+import { deriveGraphDashboard, deriveGraphFocus, deriveGraphReview, deriveKnowledgeFocus } from "/graph-review.js?v=20260831-topic-colour-families";
 import { mountKnowledgeGraph } from "/graph-explorer.js";
 
 const PROFILE_CACHE_KEY = "snack_studio_profiles_v2";
 const PIPELINES_CACHE_KEY = "snack_studio_pipelines_v1";
 const PROFILE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const CURRENT_SNACK_PROMPT_SUITE = "v3-intelligence-snacks-natural-prose";
-const CURRENT_SNACK_PIPELINE_VERSION = "3";
+const CURRENT_SNACK_PROMPT_SUITE = "v9-frozen-single-editorial-pass";
+const CURRENT_SNACK_PIPELINE_VERSION = "9";
+const CURRENT_REGENERATION_PROMPT_SUITE = "v3-intelligence-snacks-natural-prose";
 const THEME_CATALOG = {
   'ai-coding': { name: 'AI Coding', colour: '#fe7141' },
   'ai-models-infrastructure': { name: 'AI Models & Infrastructure', colour: '#75c9c8' },
@@ -38,6 +39,7 @@ const state = {
   profiles: loadProfileCache(),
   directNsec: "",
   episodes: [],
+  episodeSort: { key: 'activity', direction: 'desc' },
   workflows: [],
   workflowCache: {},
   workspaceOrigin: "/",
@@ -61,6 +63,7 @@ const state = {
   episodeStageId: "",
   episodeAuditEvents: [],
   publicationPreparation: null,
+  publicationPreparationError: "",
   publicationPackage: null,
   websiteValidation: null,
   gitPublication: null,
@@ -77,9 +80,12 @@ const state = {
   graphPayload: null,
   graphFilters: { episodeId: 'all', reviewState: 'draft', relationshipType: 'all', query: '' },
   graphMode: 'explore',
+  graphDashboardRootId: '',
+  graphDashboardSubtopicId: '',
   graphFocusCandidateId: '',
   graphIncludeDrafts: true,
   graphSelectedRelationshipId: '',
+  graphBackfillTimer: null,
   loadedRoutes: new Set(),
   routeRequestController: null,
   routeGeneration: 0,
@@ -223,7 +229,7 @@ function profileInitial(rule, profile) {
 
 function appRoute() {
   if (["/act", "/chat", "/settings"].includes(window.location.pathname)) return window.location.pathname;
-  if (/^\/episodes\/[^/]+(?:\/(?:snacks|assets|publication))?$/.test(window.location.pathname)) return window.location.pathname;
+  if (/^\/episodes\/[^/]+(?:\/(?:snacks|graph|assets|publication))?$/.test(window.location.pathname)) return window.location.pathname;
   if (/^\/review(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
   if (/^\/assets(?:\/[^/]+)?$/.test(window.location.pathname)) return window.location.pathname;
   if (window.location.pathname === '/library') return window.location.pathname;
@@ -745,10 +751,10 @@ function formatActivity(timestamp) {
 }
 
 async function loadEpisodeRoute(routeContext) {
-  const match = state.route.match(/^\/episodes\/([^/]+)(?:\/(snacks|assets|publication))?$/);
+  const match = state.route.match(/^\/episodes\/([^/]+)(?:\/(snacks|graph|assets|publication))?$/);
   if (match) {
     const tab = match[2] || 'overview';
-    await loadEpisode(decodeURIComponent(match[1]), { tab, stage: tab === 'snacks' ? 'output' : tab === 'assets' || tab === 'publication' ? 'publication' : undefined, routeContext });
+    await loadEpisode(decodeURIComponent(match[1]), { tab, stage: tab === 'snacks' ? 'output' : ['graph','assets','publication'].includes(tab) ? 'publication' : undefined, routeContext });
     return;
   }
   await loadEpisodes(routeContext);
@@ -1003,14 +1009,15 @@ async function loadGraph(routeContext) {
     const payload = await api('/api/graph', { signal: routeContext.signal });
     if (!routeIsCurrent(routeContext)) return;
     state.graphPayload = payload; state.loadedRoutes.add('graph'); renderGraph(payload); setStudioStatus('Ready');
-    const pending = (payload.backfill || []).filter((episode) => ['not-started','retryable'].includes(episode.status));
-    if (pending.length && state.me?.access?.edit && !state.graphBackfillStarting) void startKnowledgeBackfill(pending);
   } catch (error) { if (!routeErrorIsAbort(error, routeContext)) { $('graphWorkspace').textContent = error.message; setStudioStatus(error.message); } }
 }
 
 function renderGraph(payload) {
   const container = $('graphWorkspace'); container.innerHTML = '';
-  renderGraphExplorer(container, payload); return;
+  container.appendChild(renderGraphViewSwitch());
+  if (state.graphMode === 'dashboard') renderGraphDashboard(container, payload);
+  else renderGraphExplorer(container, payload);
+  return;
   const review = deriveGraphReview(payload, state.graphFilters);
   if (!review.total) { const empty = document.createElement('div'); empty.className = 'workflowQueueEmpty'; empty.innerHTML = '<strong>No relationship suggestions yet</strong><span>Grounded suggestions are created automatically as approved episodes enter Publications.</span>'; container.appendChild(empty); return; }
   const summary = document.createElement('section'); summary.className = 'graphReviewSummary';
@@ -1043,6 +1050,40 @@ function renderGraph(payload) {
   }
 }
 
+function renderGraphViewSwitch() {
+  const nav = document.createElement('nav'); nav.className = 'graphViewSwitch'; nav.setAttribute('aria-label', 'Graph view');
+  for (const [mode, label] of [['explore', 'Graph'], ['dashboard', 'Dashboard']]) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = `btn btnSecondary${state.graphMode === mode ? ' active' : ''}`; button.textContent = label; button.setAttribute('aria-pressed', String(state.graphMode === mode));
+    button.addEventListener('click', () => { state.graphMode = mode; state.graphSelectedRelationshipId = ''; renderGraph(state.graphPayload); }); nav.appendChild(button);
+  }
+  return nav;
+}
+
+function renderGraphDashboard(container, payload) {
+  const model = deriveGraphDashboard(payload); const dashboard = document.createElement('div'); dashboard.className = 'graphDashboard';
+  const metrics = document.createElement('section'); metrics.className = 'graphDashboardMetrics';
+  for (const [label, value] of [['Episodes', model.totals.episodes], ['Published Snacks', model.totals.snacks], ['Transcript ideas', model.totals.knowledge], ['Connections', model.totals.connections]]) { const card = document.createElement('article'); const name = document.createElement('span'); name.textContent = label; const count = document.createElement('strong'); count.textContent = String(value); card.append(name, count); metrics.appendChild(card); }
+  dashboard.appendChild(metrics);
+
+  const selectRoot = (rootId) => { state.graphDashboardRootId = rootId; state.graphDashboardSubtopicId = ''; renderGraph(state.graphPayload); };
+  const selectedRoot = model.topicRows.find((row) => row.id === state.graphDashboardRootId) || null;
+  const makeDonut = (rows, centreValue, centreLabel, onSelect, selectedId = '') => {
+    const donut = document.createElement('div'); donut.className = 'graphDashboardDonut'; const svgNamespace = 'http://www.w3.org/2000/svg'; const chart = document.createElementNS(svgNamespace, 'svg'); chart.setAttribute('viewBox', '0 0 100 100'); chart.setAttribute('aria-label', centreLabel); const track = document.createElementNS(svgNamespace, 'circle'); track.classList.add('graphDashboardTrack'); track.setAttribute('cx', '50'); track.setAttribute('cy', '50'); track.setAttribute('r', '41'); chart.appendChild(track); const tooltip = document.createElement('div'); tooltip.className = 'graphDashboardTooltip'; tooltip.setAttribute('role', 'tooltip'); const circumference = 2 * Math.PI * 41; let cursor = 0; const hideTooltip = () => { tooltip.classList.remove('isVisible'); tooltip.textContent = ''; };
+    for (const row of rows) { const segment = document.createElementNS(svgNamespace, 'circle'); const percentage = `${(row.share * 100).toFixed(1)}%`; segment.classList.add('graphDashboardSegment'); if (row.id === selectedId) segment.classList.add('isSelected'); for (const [key, value] of [['cx','50'],['cy','50'],['r','41'],['fill','none'],['stroke',row.colour || '#72817a'],['stroke-width','17'],['stroke-dasharray',`${Math.max(0, row.share * circumference)} ${circumference}`],['stroke-dashoffset',String(-cursor * circumference)],['tabindex','0'],['role','button'],['aria-label',`${row.name}: ${percentage}`]]) segment.setAttribute(key, value); const show = () => { tooltip.textContent = `${row.name} · ${percentage} · ${row.episodes} episode${row.episodes === 1 ? '' : 's'}`; tooltip.classList.add('isVisible'); }; segment.addEventListener('pointerenter', show); segment.addEventListener('pointerleave', hideTooltip); segment.addEventListener('focus', show); segment.addEventListener('blur', hideTooltip); segment.addEventListener('click', () => onSelect(row.id)); segment.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(row.id); } }); chart.appendChild(segment); cursor += row.share; }
+    const centre = document.createElement('div'); centre.className = 'graphDashboardDonutCentre'; const value = document.createElement('strong'); value.textContent = String(centreValue); const label = document.createElement('span'); label.textContent = centreLabel; centre.append(value, label); donut.append(chart, centre, tooltip); return donut;
+  };
+  const makeRows = (rows, onSelect, selectedId = '') => { const table = document.createElement('div'); table.className = 'graphDashboardRows'; for (const row of rows) { const item = document.createElement('button'); item.type = 'button'; item.className = row.id === selectedId ? 'isSelected' : ''; item.style.setProperty('--row-colour', row.colour || '#72817a'); item.title = row.description || row.name; const name = document.createElement('strong'); name.textContent = row.name; const share = document.createElement('span'); share.textContent = `${(row.share * 100).toFixed(1)}%`; const count = document.createElement('span'); count.textContent = `${row.episodes} ep`; item.append(name, share, count); item.addEventListener('click', () => onSelect(row.id)); table.appendChild(item); } return table; };
+  const mix = document.createElement('section'); mix.className = 'graphDashboardPanel graphDashboardMix'; const header = document.createElement('header'); const copy = document.createElement('div'); const title = document.createElement('h2'); title.textContent = 'Knowledge mix'; const description = document.createElement('p'); description.textContent = 'Choose a category to explore its transcript-derived subtopics and episodes.'; copy.append(title, description); const total = document.createElement('strong'); total.textContent = model.totals.totalWords ? `${(model.totals.coverage * 100).toFixed(0)}% indexed` : 'Awaiting transcript index'; header.append(copy, total); const body = document.createElement('div'); body.append(makeDonut(model.topicRows, model.totals.topicMatches, 'passages', selectRoot, selectedRoot?.id), makeRows(model.topicRows, selectRoot, selectedRoot?.id)); mix.append(header, body); dashboard.appendChild(mix);
+  if (selectedRoot) {
+    const subtopics = model.subtopicsByRoot[selectedRoot.id] || []; const selectedSubtopic = subtopics.find((row) => row.id === state.graphDashboardSubtopicId) || null; const drill = document.createElement('section'); drill.className = 'graphDashboardPanel graphDashboardDrilldown'; const drillHeader = document.createElement('header'); const drillCopy = document.createElement('div'); const breadcrumb = document.createElement('button'); breadcrumb.type = 'button'; breadcrumb.className = 'graphDashboardBreadcrumb'; breadcrumb.textContent = 'All topics'; breadcrumb.addEventListener('click', () => selectRoot('')); const drillTitle = document.createElement('h2'); drillTitle.textContent = selectedRoot.name; const drillDescription = document.createElement('p'); drillDescription.textContent = selectedRoot.description; drillCopy.append(breadcrumb, drillTitle, drillDescription); drillHeader.appendChild(drillCopy); drill.appendChild(drillHeader);
+    if (subtopics.length) { const drillBody = document.createElement('div'); const selectSubtopic = (id) => { state.graphDashboardSubtopicId = id; renderGraph(state.graphPayload); }; drillBody.append(makeDonut(subtopics, subtopics.length, 'subtopics', selectSubtopic, selectedSubtopic?.id), makeRows(subtopics, selectSubtopic, selectedSubtopic?.id)); drill.appendChild(drillBody); }
+    else { const empty = document.createElement('p'); empty.className = 'graphDashboardEmpty'; empty.textContent = 'Subtopics will appear when the hierarchical transcript index completes.'; drill.appendChild(empty); }
+    if (selectedSubtopic) { const episodes = document.createElement('section'); episodes.className = 'graphDashboardEpisodes'; const episodeTitle = document.createElement('h3'); episodeTitle.textContent = `${selectedSubtopic.name} episodes`; const episodeDescription = document.createElement('p'); episodeDescription.textContent = selectedSubtopic.description; episodes.append(episodeTitle, episodeDescription); for (const episode of selectedSubtopic.episodeRows) { const row = document.createElement('div'); const label = document.createElement('strong'); label.textContent = `Episode ${episode.number || '—'} · ${episode.title}`; const share = document.createElement('span'); share.textContent = `${(episode.share * 100).toFixed(1)}% of this subtopic`; row.append(label, share); episodes.appendChild(row); } drill.appendChild(episodes); }
+    dashboard.appendChild(drill);
+  }
+  container.appendChild(dashboard);
+}
+
 function renderGraphExplorer(container, payload) {
   const model = deriveKnowledgeFocus(payload, state.graphFocusCandidateId);
   container.appendChild(renderGraphOverview(model));
@@ -1053,7 +1094,7 @@ function renderGraphExplorer(container, payload) {
   const connectedIds = new Set(model.allConnections.flatMap((connection) => [connection.sourceId, connection.targetId])); const unconnectedCount = model.nodes.filter((node) => !connectedIds.has(node.id)).length;
   const counts = document.createElement('span'); counts.className = 'metadata'; counts.textContent = `${model.totals.knowledge} transcript ideas · ${model.totals.connections} connections${model.totals.knowledge && unconnectedCount ? ` · ${unconnectedCount} unconnected hidden` : ''}`; controls.append(pickerLabel, counts);
   const backfill = Array.isArray(payload.backfill) ? payload.backfill : []; const pending = backfill.filter((episode) => ['not-started','retryable'].includes(episode.status)); const processing = backfill.filter((episode) => episode.status === 'processing');
-  if (pending.length || processing.length) { const status = document.createElement('span'); status.className = 'metadata'; status.textContent = `${pending.length + processing.length} episode${pending.length + processing.length === 1 ? '' : 's'} indexing automatically`; controls.appendChild(status); }
+  if (pending.length || processing.length) { const status = document.createElement('span'); status.className = 'metadata'; status.textContent = `${pending.length} episode${pending.length === 1 ? '' : 's'} awaiting graph review${processing.length ? ` · ${processing.length} processing` : ''}`; controls.appendChild(status); }
   container.appendChild(controls);
   if (!model.focus) { const empty = document.createElement('div'); empty.className = 'workflowQueueEmpty'; empty.innerHTML = '<strong>No graph knowledge is available yet</strong><span>Process an episode transcript to build its graph.</span>'; container.appendChild(empty); return; }
   const canvas = document.createElement('section'); canvas.className = 'graphExplorerCanvas';
@@ -1083,7 +1124,7 @@ function renderGraphOverview(model) {
 }
 
 async function startKnowledgePipelineForEpisode(episode) {
-  const prepared = await api(`/api/episodes/${encodeURIComponent(episode.episodeId)}/pipeline-requests`, { method: 'POST', body: JSON.stringify({ operation: 'publication-metadata', pipelineName: 'snack-studio-graph-relationships', pipelineVersion: '3', promptSuiteVersion: 'v3-evidence-id-graph', resultSchemaVersion: '4', idempotencyKey: `graph-v3:${episode.episodeId}:${episode.transcriptRevisionId}`, autopilotTargetId: state.activeAutopilotTargetId || undefined }) });
+  const prepared = await api(`/api/episodes/${encodeURIComponent(episode.episodeId)}/pipeline-requests`, { method: 'POST', body: JSON.stringify({ operation: 'publication-metadata', pipelineName: 'snack-studio-graph-relationships', pipelineVersion: '7', promptSuiteVersion: 'v7-governed-roots-reusable-subtopics', resultSchemaVersion: '5', idempotencyKey: `graph-v7:${episode.episodeId}:${episode.transcriptRevisionId}`, autopilotTargetId: state.activeAutopilotTargetId || undefined }) });
   const triggerRequest = structuredClone(prepared.triggerRequest);
   for (const reference of triggerRequest.body?.input?.localContext?.references || []) reference.authorization = await signNip98Request({ url: reference.url, method: 'GET' });
   const autopilotAuthorization = await signNip98Request(triggerRequest);
@@ -1093,16 +1134,30 @@ async function startKnowledgePipelineForEpisode(episode) {
 
 async function startKnowledgeBackfill(episodes) {
   if (state.graphBackfillStarting) return;
+  const processing = episodes.filter((episode) => episode.status === 'processing').length;
+  const pending = episodes.filter((episode) => ['not-started','retryable'].includes(episode.status));
+  const availableSlots = Math.max(0, 4 - processing); const batch = pending.slice(0, availableSlots);
+  if (!batch.length) { if (processing || pending.length) scheduleKnowledgeBackfillPoll(); return; }
   state.graphBackfillStarting = true; let launched = 0;
   try {
-    for (const episode of episodes) {
-      setStudioStatus(`Indexing transcript graph ${launched + 1} of ${episodes.length}…`);
+    for (const episode of batch) {
+      setStudioStatus(`Indexing transcript topics ${launched + 1} of ${batch.length}…`);
       await startKnowledgePipelineForEpisode(episode);
       launched++;
     }
-    state.graphPayload = await api('/api/graph'); renderGraph(state.graphPayload); setStudioStatus(`${launched} transcript graph run${launched === 1 ? '' : 's'} started`);
+    state.graphPayload = await api('/api/graph'); if (state.route === '/graph') renderGraph(state.graphPayload); setStudioStatus(`${launched} transcript topic run${launched === 1 ? '' : 's'} started`);
   } catch (error) { setStudioStatus(`Graph indexing will retry automatically: ${error.message}`); }
-  finally { state.graphBackfillStarting = false; }
+  finally { state.graphBackfillStarting = false; scheduleKnowledgeBackfillPoll(); }
+}
+
+function scheduleKnowledgeBackfillPoll() {
+  if (state.graphBackfillTimer) clearTimeout(state.graphBackfillTimer);
+  state.graphBackfillTimer = setTimeout(async () => {
+    state.graphBackfillTimer = null;
+    if (!state.me?.access?.edit || state.graphBackfillStarting) return;
+    try { const payload = await api('/api/graph'); state.graphPayload = payload; if (state.route === '/graph') renderGraph(payload); await startKnowledgeBackfill(payload.backfill || []); }
+    catch (error) { setStudioStatus(`Topic indexing will retry automatically: ${error.message}`); scheduleKnowledgeBackfillPoll(); }
+  }, 10000);
 }
 
 function renderKnowledgeConnectionInspector(connection) {
@@ -1176,6 +1231,7 @@ function renderEpisodes() {
 
   const list = $("episodeList");
   list.innerHTML = "";
+  updateEpisodeSortControls();
   if (!episodes.length) {
     const empty = document.createElement("div");
     empty.className = "episodeEmpty";
@@ -1188,7 +1244,7 @@ function renderEpisodes() {
     return;
   }
 
-  for (const episode of episodes) {
+  for (const episode of sortedEpisodes(episodes)) {
     const row = document.createElement("div");
     row.className = "episodeRow";
     row.tabIndex = 0; row.setAttribute('role', 'link');
@@ -1218,13 +1274,64 @@ function renderEpisodes() {
   }
 }
 
+const EPISODE_STAGE_ORDER = [
+  'transcript-preparation', 'ready-for-extraction', 'processing', 'in-review', 'approved', 'published',
+];
+
+function sortedEpisodes(episodes) {
+  const { key, direction } = state.episodeSort;
+  const multiplier = direction === 'asc' ? 1 : -1;
+  return [...episodes].sort((left, right) => {
+    let comparison = 0;
+    if (key === 'number') {
+      const leftNumber = Number.isFinite(left.episodeNumber) ? left.episodeNumber : null;
+      const rightNumber = Number.isFinite(right.episodeNumber) ? right.episodeNumber : null;
+      if (leftNumber === null || rightNumber === null) {
+        if (leftNumber !== rightNumber) return leftNumber === null ? 1 : -1;
+      }
+      else comparison = leftNumber - rightNumber;
+    } else if (key === 'stage') {
+      const leftIndex = EPISODE_STAGE_ORDER.indexOf(left.status);
+      const rightIndex = EPISODE_STAGE_ORDER.indexOf(right.status);
+      comparison = (leftIndex < 0 ? EPISODE_STAGE_ORDER.length : leftIndex) - (rightIndex < 0 ? EPISODE_STAGE_ORDER.length : rightIndex);
+      if (!comparison) comparison = formatEpisodeStatus(left.status).localeCompare(formatEpisodeStatus(right.status));
+    } else {
+      comparison = Number(left.updatedAt || 0) - Number(right.updatedAt || 0);
+    }
+    if (!comparison) comparison = Number(left.episodeNumber || 0) - Number(right.episodeNumber || 0);
+    return comparison * multiplier;
+  });
+}
+
+function updateEpisodeSortControls() {
+  for (const button of document.querySelectorAll('.episodeSortButton')) {
+    const active = button.dataset.sortKey === state.episodeSort.key;
+    const indicator = button.querySelector('span');
+    if (indicator) indicator.textContent = active ? state.episodeSort.direction === 'asc' ? '↑' : '↓' : '↕';
+    button.classList.toggle('active', active);
+    button.parentElement?.setAttribute('aria-sort', active ? state.episodeSort.direction === 'asc' ? 'ascending' : 'descending' : 'none');
+    button.setAttribute('aria-label', `${button.firstChild?.textContent?.trim() || 'Column'}: ${active ? `${state.episodeSort.direction}ending; activate to reverse` : 'activate to sort'}`);
+    if (button.dataset.sortBound === 'true') continue;
+    button.dataset.sortBound = 'true';
+    button.addEventListener('click', () => {
+      const key = button.dataset.sortKey;
+      if (!key) return;
+      const defaultDirection = key === 'activity' ? 'desc' : 'asc';
+      state.episodeSort = state.episodeSort.key === key
+        ? { key, direction: state.episodeSort.direction === 'asc' ? 'desc' : 'asc' }
+        : { key, direction: defaultDirection };
+      renderEpisodes();
+    });
+  }
+}
+
 async function loadEpisode(id, options = {}) {
   const routeContext = options.routeContext;
   const requestOptions = routeContext ? { signal: routeContext.signal } : {};
   document.querySelector('.candidateEditorDialog')?.remove();
   state.activeEpisodeTab = options.tab || (state.activeEpisode?.id === id ? state.activeEpisodeTab : 'overview');
   state.workspaceOrigin = state.activeEpisodeTab === 'snacks' ? '/review' : state.activeEpisodeTab === 'assets' ? '/assets' : state.activeEpisodeTab === 'publication' ? '/publications' : '/';
-  $('episodesBackButton').textContent = state.activeEpisodeTab === 'snacks' ? '← Snack Review' : state.activeEpisodeTab === 'assets' ? '← Asset Review' : state.activeEpisodeTab === 'publication' ? '← Publications' : '← All episodes';
+  $('episodesBackButton').textContent = state.activeEpisodeTab === 'snacks' ? '← Snack Review' : state.activeEpisodeTab === 'graph' ? '← All episodes' : state.activeEpisodeTab === 'assets' ? '← Asset Review' : state.activeEpisodeTab === 'publication' ? '← Publications' : '← All episodes';
   showStudioPage("episodePage", `Snack Studio / Episodes / ${state.activeEpisodeTab === 'overview' ? 'Overview' : state.activeEpisodeTab[0].toUpperCase() + state.activeEpisodeTab.slice(1)}`);
   const renderedFromCache = state.activeEpisode?.id === id;
   if (renderedFromCache) {
@@ -1233,7 +1340,7 @@ async function loadEpisode(id, options = {}) {
     setStudioStatus("Loading workspace…");
   }
   try {
-    const workspaceView = ['snacks', 'assets', 'publication'].includes(state.activeEpisodeTab) ? state.activeEpisodeTab : 'overview';
+    const workspaceView = ['snacks', 'graph', 'assets', 'publication'].includes(state.activeEpisodeTab) ? state.activeEpisodeTab : 'overview';
     const { workspace } = await api(`/api/episodes/${encodeURIComponent(id)}/workspace?view=${encodeURIComponent(workspaceView)}`, requestOptions);
     if (routeContext && !routeIsCurrent(routeContext)) return;
     const workspaceSignature = episodeWorkspaceSignature(workspace);
@@ -1256,6 +1363,7 @@ async function loadEpisode(id, options = {}) {
       state.activeCandidateId = "";
     }
     state.curation = workspace.curation;
+    state.episodeGraph = workspace.graph || null;
     state.pipelineRequests = workspace.pipelineRequests || [];
     state.pipelineTimeoutMs = Number(workspace.pipelineTimeoutMs || 0);
     state.episodeAuditEvents = workspace.auditEvents || [];
@@ -1277,7 +1385,12 @@ async function loadEpisode(id, options = {}) {
       renderEpisodeWorkspace(workspace.episode, workspace.transcript, workspace.transcriptRevisions || [], workspace.auditEvents || [], state.candidates);
     }
     state.activeWorkspaceSignature = workspaceSignature;
-    if (['assets','publication'].includes(state.activeEpisodeTab) && ['approved','published'].includes(state.activeEpisode.status) && !state.publicationPreparation?.jobs?.length) await preparePublication();
+    // Always resume the publication workflow when an approved episode enters
+    // Assets or Publication. preparePublication is idempotent for existing
+    // jobs and is also responsible for starting any missing theme, transcript,
+    // or transcript work after those jobs have been created. Graph building is
+    // an explicit episode step on the Graph tab.
+    if (['assets','publication'].includes(state.activeEpisodeTab) && ['approved','published'].includes(state.activeEpisode.status) && !state.publicationPreparation?.jobs?.length) void preparePublication();
     startEpisodePipelinePolling();
     setStudioStatus("Ready");
   } catch (error) {
@@ -1352,11 +1465,12 @@ function renderEpisodeWorkspaceContent(episode, transcript, transcriptRevisions,
   for (const [route, label, available, unavailableReason] of [
     [`/episodes/${episode.id}`, 'Overview', true, ''],
     [`/episodes/${episode.id}/snacks`, 'Snacks', Boolean(candidates.length), 'Snacks will appear after generation finishes.'],
+    [`/episodes/${episode.id}/graph`, 'Graph', ['approved','published'].includes(episode.status), 'Approve the final Snack set before building the graph.'],
     [`/episodes/${episode.id}/assets`, 'Assets', ['approved','published'].includes(episode.status), 'Approve the final Snack set before preparing assets.'],
     [`/episodes/${episode.id}/publication`, 'Publication', ['approved','published'].includes(episode.status), 'Approve the final Snack set before preparing publication.'],
   ]) {
     const button = document.createElement('button'); button.type = 'button'; button.textContent = label;
-    const tab = route.endsWith('/snacks') ? 'snacks' : route.endsWith('/assets') ? 'assets' : route.endsWith('/publication') ? 'publication' : 'overview';
+    const tab = route.endsWith('/snacks') ? 'snacks' : route.endsWith('/graph') ? 'graph' : route.endsWith('/assets') ? 'assets' : route.endsWith('/publication') ? 'publication' : 'overview';
     if (state.activeEpisodeTab === tab) button.classList.add('active');
     button.disabled = !available; if (!available) button.title = unavailableReason;
     button.addEventListener('click', () => navigate(route)); destinations.appendChild(button);
@@ -1367,6 +1481,10 @@ function renderEpisodeWorkspaceContent(episode, transcript, transcriptRevisions,
   // workflow and hiding most of it afterwards.
   if (state.activeEpisodeTab === 'snacks') {
     workspace.append(header, destinations, renderCandidateSection(episode, candidates));
+    return;
+  }
+  if (state.activeEpisodeTab === 'graph') {
+    workspace.append(header, destinations, renderEpisodeGraphWorkspace(episode));
     return;
   }
   if (state.activeEpisodeTab === 'assets') {
@@ -1603,7 +1721,9 @@ function renderEpisodeWorkspaceContent(episode, transcript, transcriptRevisions,
 function renderEpisodeOverview(episode, transcript, candidates, processingStage) {
   const overview = document.createElement('section'); overview.className = 'episodeOverview';
   const work = state.activeWork;
-  if (work?.source?.state === 'generating' && !candidates.length) { overview.appendChild(processingStage); return overview; }
+  const generationRequest = state.pipelineRequests.find((request) => request.operation === 'transcript-to-snacks');
+  const generationActive = generationRequest && ['created', 'awaiting-authorization', 'queued', 'running', 'applying-result'].includes(generationRequest.status);
+  if (generationActive) { overview.appendChild(processingStage); return overview; }
   const statusCard = document.createElement('div'); statusCard.className = 'episodeOverviewStatus';
   const copy = document.createElement('div'); const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = 'Current stage';
   const title = document.createElement('h2'); title.textContent = work?.publication?.deployed ? 'Episode deployed' : work?.recommendedAction?.label || formatEpisodeStatus(episode.status);
@@ -1612,10 +1732,10 @@ function renderEpisodeOverview(episode, transcript, candidates, processingStage)
   if (work?.recommendedAction) {
     const action = document.createElement('button'); action.type = 'button'; action.className = 'btn btnPrimary'; action.textContent = work.recommendedAction.label;
     action.addEventListener('click', () => {
-      if (work.recommendedAction.route === 'snacks') navigate(`/episodes/${encodeURIComponent(episode.id)}/snacks`);
+      if (work.recommendedAction.route === 'overview') void startEpisodeExtraction();
+      else if (work.recommendedAction.route === 'snacks') navigate(`/episodes/${encodeURIComponent(episode.id)}/snacks`);
       else if (work.recommendedAction.route === 'assets') navigate(`/episodes/${encodeURIComponent(episode.id)}/assets`);
       else if (work.recommendedAction.route === 'publication') navigate(`/episodes/${encodeURIComponent(episode.id)}/publication`);
-      else if (work.source.state === 'needs-attention') void startEpisodeExtraction();
     });
     statusCard.append(copy, action);
   } else statusCard.appendChild(copy);
@@ -1667,8 +1787,12 @@ function renderPublicationPreparation(episode, candidates, options = {}) {
   const preparation = state.publicationPreparation;
   if (!preparation) {
     const empty = document.createElement("p");
-    empty.textContent = "Publication preparation has not started.";
+    empty.textContent = state.publicationPreparationError || "Publication preparation has not started.";
     section.appendChild(empty);
+    if (state.me?.access?.edit) {
+      const retry = document.createElement("button"); retry.type = "button"; retry.className = "btn btnPrimary"; retry.textContent = "Start publication preparation";
+      retry.addEventListener("click", () => preparePublication()); section.appendChild(retry);
+    }
     return section;
   }
   const facts = document.createElement("div");
@@ -1676,7 +1800,7 @@ function renderPublicationPreparation(episode, candidates, options = {}) {
   const resolved = preparation.participants?.resolved || [];
   const unresolved = preparation.participants?.unresolved || [];
   const topicsMissing = preparation.needsTopicClassification || [];
-  const topicRequest = state.pipelineRequests.find((request) => request.operation === "publication-metadata");
+  const topicRequest = state.pipelineRequests.find(isThemeClassificationRequest);
   const topicsRunning = topicRequest && ["created", "awaiting-authorization", "queued", "running", "applying-result"].includes(topicRequest.status);
   const snackJobs = (preparation.jobs || []).filter((job) => job.assetKind === 'snack');
   const episodeJob = (preparation.jobs || []).find((job) => job.assetKind === 'episode');
@@ -1692,11 +1816,11 @@ function renderPublicationPreparation(episode, candidates, options = {}) {
     item.append(name, valueNode); facts.appendChild(item);
   }
   section.appendChild(facts);
-  if (topicRequest && ['failed', 'needs-input'].includes(topicRequest.status) && topicsMissing.length) {
+  if (topicRequest && ['failed', 'needs-input', 'needs-review', 'timed-out'].includes(topicRequest.status) && topicsMissing.length) {
     const retryPanel = document.createElement('div'); retryPanel.className = 'publicationPreparationBlocker';
     const retryCopy = document.createElement('p'); retryCopy.textContent = topicRequest.failureSummary || 'Automatic theme derivation needs another attempt.';
     const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'btn btnSecondary'; retry.textContent = 'Retry theme assessment'; retry.disabled = !state.me?.access?.edit;
-    retry.addEventListener('click', () => retryPipelineRequest(topicRequest.id));
+    retry.addEventListener('click', () => startPublicationMetadataClassification());
     retryPanel.append(retryCopy, retry); section.appendChild(retryPanel);
   }
   if (!assetsOnly) {
@@ -1848,6 +1972,7 @@ function renderPublicationPackageManifest(packageValue) {
 function publicationBlockerDestination(blocker) {
   const episodeId = state.activeEpisode?.id; if (!episodeId) return null;
   const base = `/episodes/${encodeURIComponent(episodeId)}`;
+  if (blocker.code === 'graph-not-ready') return { label: 'Open Graph', path: `${base}/graph` };
   if (['episode-not-approved'].includes(blocker.code) || blocker.code?.startsWith('approved-')) return { label: 'Open Snacks', path: `${base}/snacks` };
   if (blocker.code === 'public-transcript-missing') return { label: 'Review transcript', path: `${base}/publication?gate=transcript` };
   if (blocker.code === 'newsletter-selection-incomplete') return { label: 'Choose Snacks', path: `${base}/publication?channel=newsletter` };
@@ -2095,6 +2220,7 @@ async function openThumbnailReview(jobId, snackTitle, triggerButton = null, isEp
           preview.append(previewImage, caption); previews.appendChild(preview);
         }
         const actions = document.createElement('div'); actions.className = 'thumbnailReviewActions';
+        const resolution = document.createElement('span'); resolution.className = 'metadata'; resolution.textContent = `${candidate.width} × ${candidate.height} · ${candidate.mimeType === 'image/png' ? 'lossless PNG' : candidate.mimeType}`;
         const download = document.createElement('button'); download.type = 'button'; download.className = 'btn btnSecondary'; download.textContent = 'Download high-resolution';
         download.addEventListener('click', () => {
           if (!sourceBlob) return setStudioStatus('The high-resolution image is still loading…');
@@ -2102,7 +2228,7 @@ async function openThumbnailReview(jobId, snackTitle, triggerButton = null, isEp
           anchor.href = url; anchor.download = `episode-${state.activeEpisode?.episodeNumber || 'thumbnail'}-thumbnail.${sourceBlob.type.includes('png') ? 'png' : 'webp'}`;
           anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
         });
-        actions.append(action, download); card.append(stage, previews, actions);
+        actions.append(action, resolution, download); card.append(stage, previews, actions);
       } else card.append(image, action);
       gallery.appendChild(card);
     }
@@ -2358,7 +2484,7 @@ async function deleteEpisodeWorkspace(episode) {
 function renderSimplePipelineProgress() {
   const section = document.createElement("section");
   section.className = "simplePipelineProgress";
-  const latest = state.pipelineRequests[0] || null;
+  const latest = state.pipelineRequests.find((request) => request.operation === 'transcript-to-snacks') || null;
   const latestRun = latest?.runs?.[0] || null;
   const active = latest && ["created", "awaiting-authorization", "queued", "running", "applying-result"].includes(latest.status);
   const failed = latest && ["failed", "timed-out", "needs-review", "cancelled"].includes(latest.status);
@@ -2470,9 +2596,12 @@ function renderPipelineRequestsSection(episode, requests) {
       retry.type = "button";
       retry.className = "btn btnSecondary";
       const targetPipeline = currentTarget()?.defaultPipeline || "snack-studio-transcript-to-snacks";
-      const obsoletePipeline = request.operation === "transcript-to-snacks" && request.pipelineName !== targetPipeline;
-      retry.textContent = obsoletePipeline ? "Return to Setup" : request.status === "awaiting-authorization" ? "Resume" : "Retry";
-      retry.disabled = !state.me?.access?.edit;
+      const obsoleteSnackPipeline = request.operation === "transcript-to-snacks" && request.pipelineName !== targetPipeline;
+      const obsoleteGraphPipeline = request.pipelineName === 'snack-studio-graph-relationships'
+        && (request.pipelineVersion !== '7' || request.promptSuiteVersion !== 'v7-governed-roots-reusable-subtopics' || request.resultSchemaVersion !== '5');
+      const obsoletePipeline = obsoleteSnackPipeline || obsoleteGraphPipeline;
+      retry.textContent = obsoleteGraphPipeline ? "Superseded" : obsoletePipeline ? "Return to Setup" : request.status === "awaiting-authorization" ? "Resume" : "Retry";
+      retry.disabled = obsoleteGraphPipeline || !state.me?.access?.edit;
       retry.addEventListener("click", () => obsoletePipeline ? setEpisodeStage("setup") : retryPipelineRequest(request.id));
       actions.appendChild(retry);
     }
@@ -2567,6 +2696,7 @@ function startEpisodePipelinePolling() {
         work: api(`/api/episodes/${encodedEpisodeId}/work`).catch(() => ({ work: state.activeWork })),
       };
       if (tab === 'snacks' || tab === 'publication') requests.curation = api(`/api/episodes/${encodedEpisodeId}/curation`);
+      if (tab === 'graph') requests.graphWorkspace = api(`/api/episodes/${encodedEpisodeId}/workspace?view=graph`);
       if (tab === 'assets' || tab === 'publication') requests.preparation = api(`/api/episodes/${encodedEpisodeId}/publication-preparation`).catch(() => ({ preparation: state.publicationPreparation }));
       if (tab === 'publication') {
         requests.publicTranscript = api(`/api/episodes/${encodedEpisodeId}/public-transcript`).catch(() => ({ publicTranscript: state.publicTranscript }));
@@ -2587,6 +2717,7 @@ function startEpisodePipelinePolling() {
         state.activeCandidateId = "";
       }
       if (payloads.curation) state.curation = payloads.curation;
+      if (payloads.graphWorkspace?.workspace) state.episodeGraph = payloads.graphWorkspace.workspace.graph || state.episodeGraph;
       if (payloads.preparation) state.publicationPreparation = payloads.preparation.preparation || state.publicationPreparation;
       if (payloads.publicTranscript) state.publicTranscript = payloads.publicTranscript.publicTranscript || state.publicTranscript;
       if (payloads.package) state.publicationPackage = payloads.package.package || state.publicationPackage;
@@ -2927,7 +3058,7 @@ async function startSnackRegeneration(candidate, instruction) {
     method: "POST",
     body: JSON.stringify({
       operation: "snack-regeneration", pipelineName: "snack-studio-regenerate-snack",
-      pipelineVersion: "1", promptSuiteVersion: CURRENT_SNACK_PROMPT_SUITE,
+      pipelineVersion: "1", promptSuiteVersion: CURRENT_REGENERATION_PROMPT_SUITE,
       resultSchemaVersion: "1", targetCandidateId: candidate.id,
       regenerationInstruction: instruction.trim() || null, idempotencyKey: crypto.randomUUID(),
       autopilotTargetId: state.activeAutopilotTargetId || undefined,
@@ -3135,44 +3266,99 @@ async function approveFinalCandidateBatch() {
     state.activeEpisode = payload.episode;
     state.approvedBatch = payload.approvedBatch;
     renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, [], state.candidates);
-    setStudioStatus("Final Snack set approved; indexing transcript knowledge…");
-    await ensureActiveEpisodeKnowledgeGraph();
+    setStudioStatus("Final Snack set approved; Graph is ready as the next episode step");
+    await prepareThemeAssignments();
   } catch (error) {
     setStudioStatus(error.message);
   }
 }
 
+const THEME_CLASSIFIER_PIPELINE = 'snack-studio-publication-metadata';
+
 async function ensureActiveEpisodeKnowledgeGraph() {
-  const existing = state.pipelineRequests.some((request) => request.pipelineName === 'snack-studio-graph-relationships' && request.pipelineVersion === '3' && request.resultSchemaVersion === '4' && !['failed','timed-out','cancelled','needs-review'].includes(request.status));
+  const existing = state.pipelineRequests.some((request) => request.pipelineName === 'snack-studio-graph-relationships' && request.pipelineVersion === '7' && request.promptSuiteVersion === 'v7-governed-roots-reusable-subtopics' && request.resultSchemaVersion === '5' && request.inputTranscriptRevisionId === state.activeEpisode?.activeTranscriptRevisionId && !['failed','timed-out','cancelled','needs-review'].includes(request.status));
   if (existing || !state.activeEpisode?.activeTranscriptRevisionId) return;
   const request = await startKnowledgePipelineForEpisode({ episodeId: state.activeEpisode.id, transcriptRevisionId: state.activeEpisode.activeTranscriptRevisionId });
   state.pipelineRequests = [request, ...state.pipelineRequests.filter((item) => item.id !== request.id)];
+}
+
+function isThemeClassificationRequest(request) {
+  return request?.operation === 'publication-metadata'
+    && request.pipelineName === THEME_CLASSIFIER_PIPELINE
+    && request.resultSchemaVersion === '2';
+}
+
+async function prepareThemeAssignments() {
+  const payload = await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`, {
+    method: 'POST', body: JSON.stringify({}),
+  });
+  state.publicationPreparation = payload.preparation;
+  state.publicationPreparationError = '';
+  const active = state.pipelineRequests.some((request) => isThemeClassificationRequest(request)
+    && ['created', 'awaiting-authorization', 'queued', 'running', 'applying-result'].includes(request.status));
+  if (state.publicationPreparation.needsTopicClassification?.length && !active) {
+    await startPublicationMetadataClassification();
+  } else {
+    setStudioStatus('Final Snack set approved');
+  }
 }
 
 async function preparePublication() {
   if (!state.activeEpisode) return;
   setStudioStatus("Preparing publication…");
   try {
-    const payload = state.publicationPreparation?.jobs?.length
-      ? { preparation: state.publicationPreparation }
-      : await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`, { method: "POST", body: JSON.stringify({}) });
+    // This endpoint is idempotent. Always refresh from the server because theme
+    // callbacks can resolve assignments while the Assets screen is open.
+    const payload = await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/publication-preparation`, { method: "POST", body: JSON.stringify({}) });
     state.publicationPreparation = payload.preparation;
+    state.publicationPreparationError = "";
     state.episodeStage = "publication";
     if (episodeWorkspaceRefreshBlocked()) {
       setStudioStatus("Publication preparation updated");
       return;
     }
     renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
-    const metadataActive = state.pipelineRequests.some((request) => request.operation === "publication-metadata" && ["created", "awaiting-authorization", "queued", "running", "applying-result"].includes(request.status));
+    const metadataActive = state.pipelineRequests.some((request) => isThemeClassificationRequest(request) && ["created", "awaiting-authorization", "queued", "running", "applying-result"].includes(request.status));
     const cleanupActive = state.pipelineRequests.some((request) => request.operation === 'transcript-normalization' && ['created','awaiting-authorization','queued','running','applying-result'].includes(request.status));
     if (!state.publicTranscript && !cleanupActive) await startPublicTranscriptCleanup();
     if (state.publicationPreparation.needsTopicClassification?.length && !metadataActive) await startPublicationMetadataClassification();
-    const graphRequested = state.pipelineRequests.some((request) => request.pipelineName === 'snack-studio-graph-relationships' && request.pipelineVersion === '3' && request.resultSchemaVersion === '4' && !['failed','timed-out','cancelled','needs-review'].includes(request.status));
-    if (!graphRequested) await startGraphRelationshipSuggestions();
-    else setStudioStatus("Ready");
+    setStudioStatus("Ready");
   } catch (error) {
+    state.publicationPreparationError = error.message;
+    renderEpisodeWorkspace(state.activeEpisode, state.activeTranscript, state.transcriptRevisions, state.episodeAuditEvents, state.candidates);
     setStudioStatus(error.message);
   }
+}
+
+function renderEpisodeGraphWorkspace(episode) {
+  const section = document.createElement('section'); section.className = 'workspaceSection episodeGraphWorkspace';
+  const graph = state.episodeGraph; const readiness = graph?.readiness || { state: 'not-started', ready: false, reason: 'Graph status is unavailable.' };
+  const header = document.createElement('div'); header.className = 'workspaceSectionHeader';
+  const copy = document.createElement('div'); const title = document.createElement('h2'); title.textContent = 'Episode graph';
+  const description = document.createElement('p'); description.textContent = 'Build transcript-grounded ideas, relationships and discussion topics for this episode, then inspect the result before publication.';
+  copy.append(title, description); const status = document.createElement('span'); status.className = `statusPill ${statusClass(readiness.state)}`; status.textContent = formatEpisodeStatus(readiness.state); header.append(copy, status); section.appendChild(header);
+
+  const summary = document.createElement('div'); summary.className = 'publicationPreparationFacts';
+  for (const [label, value] of [['Knowledge nodes', readiness.nodeCount || 0], ['Relationships', readiness.edgeCount || 0], ['Topic passages', readiness.passageCount || 0]]) {
+    const item = document.createElement('div'); const strong = document.createElement('strong'); strong.textContent = String(value); const span = document.createElement('span'); span.textContent = label; item.append(strong, span); summary.appendChild(item);
+  }
+  section.appendChild(summary);
+
+  if (!readiness.ready) {
+    const notice = document.createElement('div'); notice.className = 'publicationPreparationBlocker'; const message = document.createElement('p'); message.textContent = readiness.reason || 'Build the graph for the active transcript.'; notice.appendChild(message);
+    const active = readiness.state === 'processing'; const failedRequest = readiness.request && ['failed','timed-out','needs-review','cancelled'].includes(readiness.request.status);
+    const action = document.createElement('button'); action.type = 'button'; action.className = 'btn btnPrimary'; action.disabled = !state.me?.access?.edit || active; action.textContent = active ? 'Graph building…' : failedRequest ? 'Retry graph builder' : 'Build episode graph';
+    action.addEventListener('click', async () => { const clear = setButtonBusy(action, failedRequest ? 'Preparing retry…' : 'Starting graph builder…'); try { if (failedRequest) await retryPipelineRequest(readiness.request.id); else { const request = await startKnowledgePipelineForEpisode({ episodeId: episode.id, transcriptRevisionId: episode.activeTranscriptRevisionId }); state.pipelineRequests = [request, ...state.pipelineRequests.filter((item) => item.id !== request.id)]; await loadEpisode(episode.id, { tab: 'graph', stage: 'publication' }); } } catch (error) { setStudioStatus(error.message); } finally { clear(); } });
+    notice.appendChild(action); section.appendChild(notice);
+  } else {
+    const complete = document.createElement('div'); complete.className = 'publicationPreparationBlocker'; const message = document.createElement('p'); message.textContent = 'The graph is current for this transcript and now satisfies the website publication gate.';
+    const inspect = document.createElement('button'); inspect.type = 'button'; inspect.className = 'btn btnSecondary'; inspect.textContent = 'Inspect full graph'; inspect.addEventListener('click', () => navigate('/graph')); complete.append(message, inspect); section.appendChild(complete);
+  }
+
+  const nodes = graph?.knowledge?.nodes || []; const topics = graph?.topicIndex?.topics || []; const passages = graph?.topicIndex?.passages || [];
+  if (nodes.length) { const nodePanel = document.createElement('div'); nodePanel.className = 'curationPanel'; const heading = document.createElement('h3'); heading.textContent = 'Extracted knowledge'; nodePanel.appendChild(heading); for (const node of nodes) { const row = document.createElement('div'); row.className = 'pipelineRequestItem'; const rowCopy = document.createElement('div'); const name = document.createElement('strong'); name.textContent = node.title; const detail = document.createElement('span'); detail.textContent = `${formatEpisodeStatus(node.kind)} · ${node.summary}`; rowCopy.append(name, detail); row.appendChild(rowCopy); nodePanel.appendChild(row); } section.appendChild(nodePanel); }
+  if (passages.length) { const used = new Set(passages.flatMap((passage) => [passage.primaryTopicId, ...(passage.secondaryTopicIds || [])])); const topicPanel = document.createElement('div'); topicPanel.className = 'curationPanel'; const heading = document.createElement('h3'); heading.textContent = 'Discussion topics'; topicPanel.appendChild(heading); const list = document.createElement('div'); list.className = 'topicList'; for (const topic of topics.filter((item) => used.has(item.id))) { const chip = document.createElement('span'); chip.textContent = topic.name; chip.title = topic.description; list.appendChild(chip); } topicPanel.appendChild(list); section.appendChild(topicPanel); }
+  return section;
 }
 
 function renderPublicTranscriptWorkflow() {
@@ -3306,31 +3492,37 @@ async function startGraphRelationshipSuggestions() {
 }
 
 async function startPublicationMetadataClassification() {
+  if (state.publicationMetadataStarting) return;
+  state.publicationMetadataStarting = true;
   setStudioStatus("Preparing transcript theme assessment…");
-  const prepared = await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/pipeline-requests`, {
+  try {
+    const prepared = await api(`/api/episodes/${encodeURIComponent(state.activeEpisode.id)}/pipeline-requests`, {
     method: "POST",
     body: JSON.stringify({
       operation: "publication-metadata",
-      pipelineName: "snack-studio-publication-metadata",
-      pipelineVersion: "3",
-      promptSuiteVersion: "v3-governed-theme-classifier",
+      pipelineName: THEME_CLASSIFIER_PIPELINE,
+      pipelineVersion: "4",
+      promptSuiteVersion: "v4-governed-theme-classifier",
       resultSchemaVersion: "2",
       idempotencyKey: crypto.randomUUID(),
       autopilotTargetId: state.activeAutopilotTargetId || undefined,
     }),
   });
-  state.pipelineRequests = [prepared.pipelineRequest, ...state.pipelineRequests.filter((request) => request.id !== prepared.pipelineRequest.id)];
-  if (!prepared.requiresAutopilotAuth || !prepared.triggerRequest) throw new Error("Theme assessment trigger was not prepared");
-  const triggerRequest = structuredClone(prepared.triggerRequest);
-  for (const reference of triggerRequest.body?.input?.localContext?.references || []) {
-    reference.authorization = await signNip98Request({ url: reference.url, method: "GET" });
+    state.pipelineRequests = [prepared.pipelineRequest, ...state.pipelineRequests.filter((request) => request.id !== prepared.pipelineRequest.id)];
+    if (!prepared.requiresAutopilotAuth || !prepared.triggerRequest) throw new Error("Theme assessment trigger was not prepared");
+    const triggerRequest = structuredClone(prepared.triggerRequest);
+    for (const reference of triggerRequest.body?.input?.localContext?.references || []) {
+      reference.authorization = await signNip98Request({ url: reference.url, method: "GET" });
+    }
+    const autopilotAuthorization = await signNip98Request(triggerRequest);
+    await api(`/api/episode-pipeline-runs/${encodeURIComponent(prepared.runId)}/start`, {
+      method: "POST", body: JSON.stringify({ autopilotAuthorization, triggerRequest }),
+    });
+    await loadEpisode(state.activeEpisode.id, { stage: 'publication', origin: '/publications' });
+    setStudioStatus("Deriving episode themes from the transcript…");
+  } finally {
+    state.publicationMetadataStarting = false;
   }
-  const autopilotAuthorization = await signNip98Request(triggerRequest);
-  await api(`/api/episode-pipeline-runs/${encodeURIComponent(prepared.runId)}/start`, {
-    method: "POST", body: JSON.stringify({ autopilotAuthorization, triggerRequest }),
-  });
-  await loadEpisode(state.activeEpisode.id, { stage: 'publication', origin: '/publications' });
-  setStudioStatus("Deriving episode themes from the transcript…");
 }
 
 async function refreshCuration() {

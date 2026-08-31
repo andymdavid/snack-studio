@@ -14,14 +14,36 @@ import { getCurrentAutopilotTarget } from './db.ts';
 
 export type ThumbnailJobStatus = "draft" | "extracting" | "grounding" | "generating" | "in-review" | "approved" | "failed";
 
-const EPISODE_THUMBNAIL_PIPELINE_VERSION = '6';
+const EPISODE_THUMBNAIL_PIPELINE_VERSION = '10';
 const SNACK_THUMBNAIL_PIPELINE_VERSION = '4';
-const EPISODE_THUMBNAIL_VISUAL_REFERENCE = resolve('public/images/references/episode-thumbnail-guest-canonical.png');
+const EPISODE_THUMBNAIL_GUEST_REFERENCE = resolve('public/images/references/episode-thumbnail-guest-canonical.png');
+const EPISODE_THUMBNAIL_TWO_HOST_REFERENCE = resolve('public/images/references/episode-thumbnail-two-host-canonical.png');
+const EPISODE_THUMBNAIL_TWO_HOST_FOREGROUND = resolve('public/images/references/episode-thumbnail-two-host-foreground-v1.png');
 
 export function thumbnailPipelineRoute(assetKind: ThumbnailAssetKind) {
   const pipeline = assetKind === 'episode' ? 'snack-studio-episode-thumbnail' : 'snack-studio-snack-thumbnail';
   const version = assetKind === 'episode' ? EPISODE_THUMBNAIL_PIPELINE_VERSION : SNACK_THUMBNAIL_PIPELINE_VERSION;
   return { pipeline, version, path: `/snack-studio-${assetKind}-thumbnail.v${version}` };
+}
+
+export function episodeThumbnailTemplate(contributorIds: string[]) {
+  return contributorIds.some((id) => !['pete-winn', 'andy-david'].includes(id))
+    ? 'two-hosts-plus-guest'
+    : 'two-hosts';
+}
+
+export function episodeTitleAccentY(template: 'two-hosts' | 'two-hosts-plus-guest', leadY: number, leadHeight: number) {
+  return template === 'two-hosts-plus-guest' ? leadY + leadHeight + 28 : 335;
+}
+
+function currentTranscriptContributorIds(transcriptText: string) {
+  const participants = resolveTranscriptParticipants(transcriptText);
+  if (participants.unresolved.length) {
+    throw new Error(`Resolve transcript contributors before generating thumbnails: ${participants.unresolved.join(', ')}`);
+  }
+  const contributorIds = [...new Set(participants.resolved.map(({ contributorId }) => contributorId))];
+  if (!contributorIds.length) throw new Error('No episode contributors could be resolved from the transcript');
+  return contributorIds;
 }
 
 export type ThumbnailJob = {
@@ -131,13 +153,17 @@ export function listFinishedThumbnailAssets() {
 }
 
 export function createThumbnailGeneration(jobId: string, actorPubkey: string, publicOrigin: string, reviewNote?: string) {
-  const job = getThumbnailJob(jobId);
+  let job = getThumbnailJob(jobId);
   if (!job) throw new Error('Thumbnail job not found');
   if (job.assetKind === 'snack' && (!job.snackCandidateId || !job.topicColour)) throw new Error('Snack thumbnail context is incomplete');
   const candidate = job.snackCandidateId ? getCandidate(job.snackCandidateId) : null;
   const transcript = getActiveTranscriptRevision(job.episodeId);
   const episode = getEpisode(job.episodeId);
   if ((job.assetKind === 'snack' && !candidate) || !transcript || !episode) throw new Error('Thumbnail source context is incomplete');
+  const contributorIds = currentTranscriptContributorIds(transcript.transcriptText);
+  db.query('UPDATE thumbnail_jobs SET transcript_revision_id=?1, contributor_ids_json=?2, updated_at=?3 WHERE id=?4')
+    .run(transcript.id, JSON.stringify(contributorIds), Date.now(), job.id);
+  job = getThumbnailJob(job.id)!;
   const contributors = job.contributorIds.map(getContributor);
   if (contributors.some((item) => !item?.portraitPath || item.portraitStatus !== 'approved')) throw new Error('Every contributor needs an approved portrait');
   const round = Number(job.generationRound || 0) + 1;
@@ -145,11 +171,15 @@ export function createThumbnailGeneration(jobId: string, actorPubkey: string, pu
   const outputDirectory = resolve(join(CONTRIBUTOR_UPLOAD_DIR, '..', 'thumbnails', job.id, `round-${round}`));
   mkdirSync(outputDirectory, { recursive: true });
   const contextPath = join(outputDirectory, 'context.json');
+  const episodeTemplate = episodeThumbnailTemplate(job.contributorIds);
+  const hasGuest = episodeTemplate === 'two-hosts-plus-guest';
+  const episodeReference = hasGuest ? EPISODE_THUMBNAIL_GUEST_REFERENCE : EPISODE_THUMBNAIL_TWO_HOST_REFERENCE;
   writeFileSync(contextPath, JSON.stringify({
     jobId: job.id, assetKind: job.assetKind, snack: candidate?.revision || null, transcript: transcript.transcriptText, topicColour: job.topicColour,
     episode: { number: episode.episodeNumber, title: episode.publicTitle || episode.workingTitle },
     contributors: contributors.map((item) => ({ id: item!.id, name: item!.name, portraitPath: resolve(`public${item!.portraitPath}`) })),
-    calibrationReferencePath: job.assetKind === 'episode' && existsSync(EPISODE_THUMBNAIL_VISUAL_REFERENCE) ? EPISODE_THUMBNAIL_VISUAL_REFERENCE : null,
+    episodeTemplate: job.assetKind === 'episode' ? episodeTemplate : null,
+    calibrationReferencePath: job.assetKind === 'episode' && existsSync(episodeReference) ? episodeReference : null,
     reviewNote: targetedNote || null,
   }, null, 2));
   const token = `${crypto.randomUUID().replaceAll('-', '')}${crypto.randomUUID().replaceAll('-', '')}`;
@@ -227,13 +257,13 @@ export function applyThumbnailResult(jobId: string, token: string, body: Record<
     for (const [index, raw] of candidates.entries()) {
       const item = raw as Record<string, unknown>; let path = safeThumbnailPath(jobId, round, String(item.path || '')); let dimensions = thumbnailDimensions(path, assetKind);
       if (assetKind === 'episode') {
-        const preview = join(resolve(path, '..'), 'candidate-1-finished.webp');
+        const preview = join(resolve(path, '..'), 'candidate-1-finished.png');
         const finished = finishEpisodeThumbnail({ ...row, source_uri: path }, preview);
         if (finished.exitCode !== 0) throw new Error('Episode thumbnail preview could not be composed');
         path = preview; dimensions = thumbnailDimensions(path, 'episode');
       }
       db.query(`INSERT INTO thumbnail_candidates(id,job_id,generation_round,candidate_number,source_uri,prompt_text,model_name,width,height,mime_type,size_bytes,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)`)
-        .run(crypto.randomUUID(), jobId, round, index + 1, path, String(response.prompt || ''), String(response.model || ''), dimensions.width, dimensions.height, assetKind === 'episode' ? 'image/webp' : String(item.mimeType || (extname(path)==='.webp'?'image/webp':'image/png')), statSync(path).size, now);
+        .run(crypto.randomUUID(), jobId, round, index + 1, path, String(response.prompt || ''), String(response.model || ''), dimensions.width, dimensions.height, assetKind === 'episode' ? 'image/png' : String(item.mimeType || (extname(path)==='.webp'?'image/webp':'image/png')), statSync(path).size, now);
     }
     db.query("UPDATE thumbnail_jobs SET status='in-review', updated_at=?1 WHERE id=?2").run(now, jobId);
   })();
@@ -315,12 +345,14 @@ export function finishEpisodeThumbnail(row: Record<string, unknown>, destination
   const displayTitle = String(episode.publicTitle || episode.workingTitle)
     .replace(/^episode\s+\d+\s*:\s*/i, '').replace(/\s+v\d+$/i, '').trim();
   const words = displayTitle.toUpperCase().split(/\s+/).filter(Boolean);
-  const connectors = new Set(['WITH', 'WITHOUT', 'FOR', 'FROM', 'IN', 'ON', 'TO', 'AND', 'OF']);
-  let split = Math.max(1, Math.ceil(words.length * .48));
-  if (words.length > 2) {
-    const connectorIndex = words.findIndex((word, index) => index > 0 && index < words.length - 1 && connectors.has(word));
-    if (connectorIndex > 0) split = connectorIndex;
+  let split = 1;
+  let splitScore = Number.POSITIVE_INFINITY;
+  for (let index = 1; index < words.length; index += 1) {
+    const score = Math.abs(words.slice(0, index).join(' ').length - words.slice(index).join(' ').length);
+    if (score < splitScore) { split = index; splitScore = score; }
   }
+  const punctuationBreak = words.findIndex((word, index) => index > 0 && index < words.length - 1 && /[,;:]$/.test(word));
+  if (punctuationBreak > 0) split = punctuationBreak + 1;
   const lead = words.slice(0, split).join(' ');
   const accent = words.slice(split).join(' ') || words.slice(0, split).join(' ');
   const contributorIds = parseStringArray(row.contributor_ids_json);
@@ -329,44 +361,103 @@ export function finishEpisodeThumbnail(row: Record<string, unknown>, destination
   const displayFont = resolve('public/fonts/Anton-Regular.ttf');
   const pixelFont = resolve('public/fonts/Jersey15-Regular.ttf');
   const temporary = mkdtempSync('/tmp/snack-studio-episode-');
-  const renderLabel = (name: string, text: string, font: string, pointSize: number, colour: string, maxWidth?: number) => {
+  const centralWhitespace = (y: number, height: number, fallbackWidth: number) => {
+    const projection = Bun.spawnSync([
+      'magick', String(row.source_uri), '-resize', '1672x941^', '-gravity', 'center', '-extent', '1672x941',
+      '-crop', `1672x${height}+0+${y}`, '+repage', '-colorspace', 'gray', '-threshold', '88%', '-negate',
+      '-scale', '1672x1!', 'txt:-',
+    ]);
+    if (projection.exitCode !== 0) return { x: Math.round((1672 - fallbackWidth) / 2), width: fallbackWidth };
+    const occupancy = new Array<number>(1672).fill(100);
+    for (const line of projection.stdout.toString().split('\n')) {
+      const match = line.match(/^(\d+),0:.*gray\(([\d.]+)(%)?\)/);
+      if (match) occupancy[Number(match[1])] = match[3] ? Number(match[2]) : Number(match[2]) * 100 / 255;
+    }
+    const centre = 836;
+    let left = centre; let right = centre;
+    while (left > 0 && occupancy[left - 1]! <= 20) left -= 1;
+    while (right < 1671 && occupancy[right + 1]! <= 20) right += 1;
+    const inset = 22;
+    const measuredWidth = right - left + 1 - inset * 2;
+    if (measuredWidth < 360) return { x: Math.round((1672 - fallbackWidth) / 2), width: fallbackWidth };
+    return { x: left + inset, width: measuredWidth };
+  };
+  const renderLabel = (name: string, text: string, font: string, pointSize: number, colour: string, maxWidth?: number, preserveHeight = false) => {
     const path = join(temporary, `${name}.png`);
-    const rendered = Bun.spawnSync(['magick', '-background', 'none', '-font', font, '-fill', colour, '-pointsize', String(pointSize), `label:${text}`, '-trim', '+repage', path]);
-    if (rendered.exitCode !== 0) throw new Error(`Could not render episode thumbnail ${name}`);
     const identifyLabel = () => {
       const result = Bun.spawnSync(['identify', '-format', '%w %h', path]);
       if (result.exitCode !== 0) throw new Error(`Could not measure episode thumbnail ${name}`);
       const [width, height] = result.stdout.toString().trim().split(/\s+/).map(Number);
       return { width, height };
     };
-    let dimensions = identifyLabel();
-    if (maxWidth && dimensions.width > maxWidth) {
-      const resized = Bun.spawnSync(['magick', path, '-resize', `${maxWidth}x${dimensions.height}!`, path]);
-      if (resized.exitCode !== 0) throw new Error(`Could not fit episode thumbnail ${name}`);
+    let size = pointSize;
+    let dimensions = { width: 0, height: 0 };
+    do {
+      const rendered = Bun.spawnSync(['magick', '-background', 'none', '-font', font, '-fill', colour, '-pointsize', String(size), `label:${text}`, '-trim', '+repage', path]);
+      if (rendered.exitCode !== 0) throw new Error(`Could not render episode thumbnail ${name}`);
       dimensions = identifyLabel();
-    }
+      if (preserveHeight && maxWidth && dimensions.width > maxWidth) {
+        const fitted = Bun.spawnSync(['magick', path, '-resize', `${maxWidth}x${dimensions.height}!`, path]);
+        if (fitted.exitCode !== 0) throw new Error(`Could not fit episode thumbnail ${name}`);
+        dimensions = identifyLabel();
+        break;
+      }
+      size -= 6;
+    } while (maxWidth && dimensions.width > maxWidth && size >= 54);
     return { path, ...dimensions };
   };
+  const forceDimensions = (layer: { path: string; width: number; height: number }, width: number, height: number) => {
+    const fitted = Bun.spawnSync(['magick', layer.path, '-resize', `${width}x${height}!`, layer.path]);
+    if (fitted.exitCode !== 0) throw new Error('Could not apply canonical episode typography dimensions');
+    return { ...layer, width, height };
+  };
   try {
-    const leadLayer = renderLabel('lead', lead, displayFont, 255, '#242424', 810);
-    const accentLayer = renderLabel('accent', accent, displayFont, 235, '#f2f2f2', 620);
-    const guestLayer = guestLine ? renderLabel('guest', guestLine, displayFont, 105, '#242424', 740) : null;
-    const brandLayer = renderLabel('brand', 'INTELLIGENCE SNACKS', pixelFont, 68, '#f2f2f2', 540);
-    const episodeLayer = renderLabel('episode', `- EP ${episode.episodeNumber || ''}`, pixelFont, 68, '#ff751f', 200);
-    const accentX = 54; const accentY = 460; const accentPadX = 34; const accentPadY = 30;
-    const brandX = 45; const brandY = 64; const brandPadX = 18; const brandPadY = 10;
+    const hasGuest = guests.length > 0;
+    const leadSpace = hasGuest ? { x: 52, width: 810 } : centralWhitespace(145, 270, 660);
+    const accentSpace = hasGuest ? { x: 54, width: 620 } : centralWhitespace(325, 335, 660);
+    const leadLayer = hasGuest
+      ? renderLabel('lead', lead, displayFont, 255, '#0f0f0f', leadSpace.width)
+      : forceDimensions(renderLabel('lead', lead, displayFont, 155, '#0f0f0f'), 655, 112);
+    const accentLayer = hasGuest
+      ? renderLabel('accent', accent, displayFont, 235, '#efeded', 620)
+      : forceDimensions(renderLabel('accent', accent, displayFont, 315, '#efeded'), 616, 282);
+    const guestLayer = guestLine ? renderLabel('guest', guestLine, displayFont, 105, '#171717', 740) : null;
+    const brandLayer = hasGuest
+      ? renderLabel('brand', 'INTELLIGENCE SNACKS', pixelFont, 68, '#efeded', 540)
+      : forceDimensions(renderLabel('brand', 'INTELLIGENCE SNACKS', pixelFont, 58, '#efeded'), 385, 40);
+    const episodeLayer = hasGuest
+      ? renderLabel('episode', `- ${episode.episodeNumber || ''}`, pixelFont, 68, '#f94901', 160)
+      : forceDimensions(renderLabel('episode', `- ${episode.episodeNumber || ''}`, pixelFont, 58, '#f94901'), 62, 40);
+    const accentPadX = hasGuest ? 34 : 40; const accentPadY = hasGuest ? 30 : 26;
+    const accentWidth = accentLayer.width + accentPadX * 2;
+    const accentX = hasGuest ? 54 : 488;
+    const leadX = hasGuest ? 52 : 505;
+    const leadY = hasGuest ? 205 : 200;
+    const accentY = episodeTitleAccentY(hasGuest ? 'two-hosts-plus-guest' : 'two-hosts', leadY, leadLayer.height);
+    const brandPadX = hasGuest ? 18 : 26; const brandPadY = hasGuest ? 10 : 15;
+    const brandGap = 10; const brandWidth = brandLayer.width + episodeLayer.width + brandGap;
+    const brandX = hasGuest ? 45 : 575;
+    const brandY = hasGuest ? 64 : 765;
     const args = ['magick', String(row.source_uri), '-resize', '1672x941^', '-gravity', 'center', '-extent', '1672x941',
       '-gravity', 'northwest',
       '(', '-size', '1672x941', 'xc:none', '-fill', 'rgba(36,36,36,.22)', '-draw', `roundrectangle ${accentX + 3},${accentY + 7} ${accentX + accentLayer.width + accentPadX * 2 + 3},${accentY + accentLayer.height + accentPadY * 2 + 7} 3,3`, '-blur', '0x15', ')', '-composite',
-      '-fill', '#ff751f', '-draw', `roundrectangle ${accentX},${accentY} ${accentX + accentLayer.width + accentPadX * 2},${accentY + accentLayer.height + accentPadY * 2} 3,3`,
-      '(', leadLayer.path, ')', '-gravity', 'northwest', '-geometry', '+52+205', '-composite',
+      '-fill', '#f94901', '-draw', `roundrectangle ${accentX},${accentY} ${accentX + accentLayer.width + accentPadX * 2},${accentY + accentLayer.height + accentPadY * 2} 3,3`,
+      '(', leadLayer.path, '-channel', 'A', '-evaluate', 'multiply', '0.32', '+channel', '-blur', '0x7', ')', '-gravity', 'northwest', '-geometry', `+${leadX + 4}+${leadY + 7}`, '-composite', '-channel', 'RGBA',
+      '(', leadLayer.path, ')', '-gravity', 'northwest', '-geometry', `+${leadX}+${leadY}`, '-composite',
+      '(', accentLayer.path, '-channel', 'A', '-evaluate', 'multiply', '0.26', '+channel', '-blur', '0x7', ')', '-gravity', 'northwest', '-geometry', `+${accentX + accentPadX + 4}+${accentY + accentPadY + 7}`, '-composite', '-channel', 'RGBA',
       '(', accentLayer.path, ')', '-gravity', 'northwest', '-geometry', `+${accentX + accentPadX}+${accentY + accentPadY}`, '-composite'];
     if (guestLayer) args.push('(', guestLayer.path, ')', '-gravity', 'northwest', '-geometry', '+54+770', '-composite');
-    const brandGap = 10; const brandWidth = brandLayer.width + episodeLayer.width + brandGap;
-    args.push('-fill', '#242424', '-draw', `roundrectangle ${brandX},${brandY} ${brandX + brandWidth + brandPadX * 2},${brandY + Math.max(brandLayer.height, episodeLayer.height) + brandPadY * 2} 12,12`,
+    if (!hasGuest) args.push('-fill', 'none', '-stroke', '#f94901', '-strokewidth', '5', '-draw', "path 'M 874,681 C 835,684 811,711 800,756 M 800,756 L 797,736 M 800,756 L 817,743'", '-stroke', 'none');
+    args.push('-fill', '#0a0a0a', '-draw', `roundrectangle ${brandX},${brandY} ${brandX + brandWidth + brandPadX * 2},${brandY + Math.max(brandLayer.height, episodeLayer.height) + brandPadY * 2} 12,12`,
       '(', brandLayer.path, ')', '-gravity', 'northwest', '-geometry', `+${brandX + brandPadX}+${brandY + brandPadY}`, '-composite',
-      '(', episodeLayer.path, ')', '-gravity', 'northwest', '-geometry', `+${brandX + brandPadX + brandLayer.width + brandGap}+${brandY + brandPadY}`, '-composite',
-      '-strip', '-define', 'webp:method=6', '-quality', '96', destination);
+      '(', episodeLayer.path, ')', '-gravity', 'northwest', '-geometry', `+${brandX + brandPadX + brandLayer.width + brandGap}+${brandY + brandPadY}`, '-composite');
+    // The canonical host silhouettes are the final visual layer. This permits the
+    // highlight block to tuck slightly behind a character without ever painting
+    // title graphics over Pete or Andy.
+    if (!hasGuest && existsSync(EPISODE_THUMBNAIL_TWO_HOST_FOREGROUND)) {
+      args.push('(', EPISODE_THUMBNAIL_TWO_HOST_FOREGROUND, ')', '-gravity', 'northwest', '-geometry', '+0+0', '-composite');
+    }
+    args.push('-strip', destination);
     return Bun.spawnSync(args);
   } finally {
     rmSync(temporary, { recursive: true, force: true });

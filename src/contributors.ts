@@ -82,10 +82,14 @@ export async function updateContributor(id: string, input: ContributorProfileInp
     portraitStatus = 'ready-to-generate';
   }
   const now = Date.now();
+  // Transcript aliases are identity links used by every historical episode.
+  // Editing the public profile may add aliases, but must not silently sever an
+  // existing transcript spelling from the contributor.
+  const aliases = [...new Set([...existing.aliases, ...input.aliases])];
   db.transaction(() => {
     db.query(`UPDATE contributors SET name=?1,role=?2,short_bio=?3,biography_markdown=?4,aliases_json=?5,
       external_url=?6,x_url=?7,linkedin_url=?8,nostr_url=?9,reference_photo_path=?10,portrait_status=?11,updated_at=?12 WHERE id=?13`)
-      .run(input.name, input.role, input.shortBio, input.biographyMarkdown, JSON.stringify(input.aliases), input.externalUrl,
+      .run(input.name, input.role, input.shortBio, input.biographyMarkdown, JSON.stringify(aliases), input.externalUrl,
         input.xUrl, input.linkedinUrl, input.nostrUrl, photoPath, portraitStatus, now, id);
     recordAuditEvent({ actorPubkey: input.actorPubkey, action: input.photo ? 'contributor.identity-photo.replaced' : 'contributor.updated', entityType: 'contributor', entityId: id });
   })();

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { deriveGraphFocus, deriveGraphReview, deriveKnowledgeFocus } from '../public/graph-review.js';
+import { deriveGraphDashboard, deriveGraphFocus, deriveGraphReview, deriveKnowledgeFocus } from '../public/graph-review.js';
 
 const payload = {
   candidates: [
@@ -48,10 +48,42 @@ test('deriveKnowledgeFocus connects the collection, episodes, contributors, tran
   expect(result.focus).toMatchObject({ kind: 'claim', title: 'Memory compounds' });
   expect(result.explicitFocus).toBeTrue();
   expect(result.connections.map((item) => item.relationshipType).sort()).toEqual(['contributed', 'developed-into', 'exemplifies']);
-  expect(result.allConnections).toHaveLength(12);
+  expect(result.allConnections).toHaveLength(13);
   expect(result.nodes).toContainEqual(expect.objectContaining({ id: 'root:intelligence-snacks', kind: 'root' }));
   expect(result.nodes).toContainEqual(expect.objectContaining({ id: 'contributor:pete', kind: 'host', role: 'Host' }));
   expect(result.allConnections).toContainEqual(expect.objectContaining({ sourceId: 'contributor:pete', targetId: 'episode:episode-1', relationshipType: 'hosted' }));
+  expect(result.allConnections).toContainEqual(expect.objectContaining({ sourceId: 'contributor:pete', targetId: 'snack:a', relationshipType: 'contributed-to' }));
   expect(result.nodes.filter((node) => ['claim','example'].includes(node.kind))).toHaveLength(2);
   expect(deriveKnowledgeFocus(payload).explicitFocus).toBeFalse();
+});
+
+test('deriveGraphDashboard summarizes governed subject themes rather than graph node kinds', () => {
+  const result = deriveGraphDashboard({ ...payload, topicIndex: { topics: [{ id: 'technology', name: 'Technology', description: 'Technology', parentTopicId: null }, { id: 'agents', name: 'Agents', description: 'Agent systems', parentTopicId: 'technology' }, { id: 'business-markets', name: 'Business & Markets', description: 'Markets', parentTopicId: null }], analyses: [{ totalWordCount: 1200, classifiedWordCount: 1000 }], passages: [{ id: 'passage-1', episodeId: 'episode-1', primaryTopicId: 'agents', secondaryTopicIds: [], wordCount: 750 }, { id: 'passage-2', episodeId: 'episode-2', primaryTopicId: 'business-markets', secondaryTopicIds: ['agents'], wordCount: 250 }] }, knowledge: { nodes: [{ id: 'claim-1', episodeId: 'episode-1', kind: 'claim', evidence: [{ speaker: 'Pete' }] }], edges: [], snackLinks: [] } });
+  expect(result.totals).toMatchObject({ episodes: 2, snacks: 3, knowledge: 1 });
+  expect(result.totals).toMatchObject({ topicMatches: 2, classifiedWords: 1000, totalWords: 1200, coverage: 1000 / 1200 });
+  expect(result.topicRows[0]).toMatchObject({ id: 'technology', words: 750, count: 2, episodes: 2, share: 0.75 });
+  expect(result.subtopicsByRoot.technology).toContainEqual(expect.objectContaining({ id: 'agents', words: 750, episodes: 1, share: 1 }));
+});
+
+test('deriveGraphDashboard gives roots distinct colours and sibling subtopics progressive tones of their root', () => {
+  const topics = [
+    { id: 'agents', name: 'Agents', description: 'Agents', parentTopicId: null },
+    { id: 'software-systems', name: 'Software Systems', description: 'Software', parentTopicId: null },
+    { id: 'bitcoin', name: 'Bitcoin', description: 'Bitcoin', parentTopicId: null },
+    { id: 'agent-a', name: 'Agent A', description: 'A', parentTopicId: 'agents' },
+    { id: 'agent-b', name: 'Agent B', description: 'B', parentTopicId: 'agents' },
+    { id: 'agent-c', name: 'Agent C', description: 'C', parentTopicId: 'agents' },
+  ];
+  const passages = [
+    { id: 'one', episodeId: 'episode-1', primaryTopicId: 'agent-a', secondaryTopicIds: [], wordCount: 100 },
+    { id: 'two', episodeId: 'episode-1', primaryTopicId: 'agent-b', secondaryTopicIds: [], wordCount: 100 },
+    { id: 'three', episodeId: 'episode-2', primaryTopicId: 'agent-c', secondaryTopicIds: ['software-systems'], wordCount: 100 },
+    { id: 'four', episodeId: 'episode-2', primaryTopicId: 'bitcoin', secondaryTopicIds: [], wordCount: 100 },
+  ];
+  const result = deriveGraphDashboard({ ...payload, topicIndex: { topics, passages, analyses: [{ totalWordCount: 400, classifiedWordCount: 400 }] } });
+  expect(new Set(result.topicRows.map((topic) => topic.colour)).size).toBe(result.topicRows.length);
+  const agentTones = result.subtopicsByRoot.agents.map((topic) => topic.colour);
+  expect(new Set(agentTones).size).toBe(3);
+  expect(agentTones.every((colour) => colour.startsWith('hsl(130 '))).toBeTrue();
+  expect(result.topicRows.find((topic) => topic.id === 'bitcoin')?.colour).toBe('#fe7141');
 });

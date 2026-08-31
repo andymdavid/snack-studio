@@ -1,5 +1,5 @@
 export type GraphReviewFilters = { episodeId?: string; reviewState?: string; relationshipType?: string; query?: string };
-export type GraphReviewPayload = { candidates?: Array<Record<string, unknown>>; contributors?: Array<Record<string, unknown>>; relationships?: Array<Record<string, unknown>> };
+export type GraphReviewPayload = { candidates?: Array<Record<string, unknown>>; contributors?: Array<Record<string, unknown>>; themes?: Array<Record<string, unknown>>; relationships?: Array<Record<string, unknown>>; topicIndex?: Record<string, unknown> };
 export function deriveGraphReview(payload?: GraphReviewPayload, filters?: GraphReviewFilters): {
   filters: Required<GraphReviewFilters>;
   total: number;
@@ -23,4 +23,9 @@ export function deriveKnowledgeFocus(payload?: GraphReviewPayload & { knowledge?
   allConnections: Array<{ id: string; sourceId: string; targetId: string; relationshipType: string }>;
   nodes: Array<Record<string, unknown> & { kind: string }>;
   totals: { nodes: number; knowledge: number; connections: number };
+};
+export function deriveGraphDashboard(payload?: GraphReviewPayload & { knowledge?: { nodes?: Array<Record<string, unknown>>; edges?: Array<Record<string, unknown>>; snackLinks?: Array<Record<string, unknown>> } }): {
+  totals: { episodes: number; snacks: number; knowledge: number; connections: number; topicMatches: number; classifiedWords: number; totalWords: number; coverage: number };
+  topicRows: Array<{ id: string; name: string; description: string; colour: string; words: number; count: number; episodes: number; share: number }>;
+  subtopicsByRoot: Record<string, Array<{ id: string; rootId: string; name: string; description: string; colour: string; words: number; count: number; episodes: number; share: number; episodeRows: Array<{ id: string; number: unknown; title: unknown; words: number; share: number }> }>>;
 };

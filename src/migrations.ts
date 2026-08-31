@@ -1344,6 +1344,87 @@ const migrations: Migration[] = [
       db.query("UPDATE relationships SET review_state='approved', updated_at=?1 WHERE origin='pipeline' AND review_state='draft'").run(Date.now());
     },
   },
+  {
+    id: '037_transcript_discussion_topics',
+    description: 'Store transcript-first discussion topics and proportional grounded passage coverage',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS discussion_topics (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          description TEXT NOT NULL,
+          parent_topic_id TEXT,
+          source TEXT NOT NULL CHECK(source IN ('seed','pipeline','studio')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (parent_topic_id) REFERENCES discussion_topics(id)
+        );
+        CREATE TABLE IF NOT EXISTS transcript_topic_analyses (
+          id TEXT PRIMARY KEY,
+          episode_id TEXT NOT NULL,
+          transcript_revision_id TEXT NOT NULL,
+          pipeline_request_id TEXT NOT NULL,
+          total_word_count INTEGER NOT NULL CHECK(total_word_count >= 0),
+          classified_word_count INTEGER NOT NULL CHECK(classified_word_count >= 0),
+          created_at INTEGER NOT NULL,
+          UNIQUE (episode_id, transcript_revision_id),
+          FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (transcript_revision_id) REFERENCES transcript_revisions(id),
+          FOREIGN KEY (pipeline_request_id) REFERENCES pipeline_requests(id)
+        );
+        CREATE TABLE IF NOT EXISTS transcript_topic_passages (
+          id TEXT PRIMARY KEY,
+          analysis_id TEXT NOT NULL,
+          episode_id TEXT NOT NULL,
+          transcript_revision_id TEXT NOT NULL,
+          primary_topic_id TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          evidence_ids_json TEXT NOT NULL,
+          evidence_excerpt TEXT NOT NULL,
+          transcript_start INTEGER NOT NULL CHECK(transcript_start >= 0),
+          transcript_end INTEGER NOT NULL CHECK(transcript_end >= transcript_start),
+          word_count INTEGER NOT NULL CHECK(word_count > 0),
+          confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (analysis_id) REFERENCES transcript_topic_analyses(id) ON DELETE CASCADE,
+          FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+          FOREIGN KEY (transcript_revision_id) REFERENCES transcript_revisions(id),
+          FOREIGN KEY (primary_topic_id) REFERENCES discussion_topics(id)
+        );
+        CREATE INDEX IF NOT EXISTS transcript_topic_passages_topic_index ON transcript_topic_passages(primary_topic_id, episode_id);
+        CREATE TABLE IF NOT EXISTS transcript_topic_secondary (
+          passage_id TEXT NOT NULL,
+          topic_id TEXT NOT NULL,
+          PRIMARY KEY (passage_id, topic_id),
+          FOREIGN KEY (passage_id) REFERENCES transcript_topic_passages(id) ON DELETE CASCADE,
+          FOREIGN KEY (topic_id) REFERENCES discussion_topics(id)
+        );
+      `);
+      const now = Date.now();
+      db.query(`INSERT OR IGNORE INTO discussion_topics(id,name,description,parent_topic_id,source,created_at,updated_at)
+        SELECT id,name,description,NULL,'seed',?1,?1 FROM themes`).run(now);
+    },
+  },
+  {
+    id: '038_governed_discussion_topic_roots',
+    description: 'Govern a compact peer-level topic set for proportional transcript classification',
+    up(db) {
+      const now = Date.now();
+      db.query(`INSERT INTO discussion_topics(id,name,description,parent_topic_id,source,created_at,updated_at)
+        VALUES('bitcoin','Bitcoin','Bitcoin, digital money, wallets, payment rails and the systems used to hold or transfer value.',NULL,'studio',?1,?1)
+        ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,parent_topic_id=NULL,source='studio',updated_at=excluded.updated_at`).run(now);
+      db.query(`INSERT INTO discussion_topics(id,name,description,parent_topic_id,source,created_at,updated_at)
+        VALUES('social-media','Social Media & Publishing','Social platforms, publishing, feeds, audiences and the movement of information through media.',NULL,'studio',?1,?1)
+        ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,parent_topic_id=NULL,source='studio',updated_at=excluded.updated_at`).run(now);
+    },
+  },
+  {
+    id: '039_rename_bitcoin_discussion_topic',
+    description: 'Use Bitcoin as the concise public label for the governed discussion topic',
+    up(db) {
+      db.query(`UPDATE discussion_topics SET name='Bitcoin',updated_at=?1 WHERE id='bitcoin'`).run(Date.now());
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

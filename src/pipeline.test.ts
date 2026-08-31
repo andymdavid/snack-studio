@@ -39,7 +39,7 @@ describe("episode Autopilot trigger", () => {
     });
   });
 
-  test("pins the production Snack Studio definition route to the accepted v3 baseline", () => {
+  test("pins the production Snack Studio definition route to the accepted v9 baseline", () => {
     const trigger = buildEpisodePipelineTriggerRequest({
       autopilotUrl: "https://autopilot.example/",
       pipelineName: "snack-studio-transcript-to-snacks",
@@ -49,8 +49,8 @@ describe("episode Autopilot trigger", () => {
       operation: "transcript-to-snacks",
       userNpub: "npub1editor",
       inputRevisionId: "revision-3",
-      pipelineVersion: "3",
-      promptSuiteVersion: "v3-intelligence-snacks-natural-prose",
+      pipelineVersion: "9",
+      promptSuiteVersion: "v9-frozen-single-editorial-pass",
       resultSchemaVersion: "1",
       contextUrl: "https://studio.example/context",
       transcriptUrl: "https://studio.example/transcript",
@@ -58,11 +58,11 @@ describe("episode Autopilot trigger", () => {
       webhookToken: "run-secret",
     });
 
-    expect(trigger.url).toBe("https://autopilot.example/api/pipelines/triggers/http/snack-studio-transcript-to-snacks.v3");
-    expect(trigger.body.input.pipelineVersion).toBe("3");
+    expect(trigger.url).toBe("https://autopilot.example/api/pipelines/triggers/http/snack-studio-transcript-to-snacks.v9");
+    expect(trigger.body.input.pipelineVersion).toBe("9");
   });
 
-  test("pins the targeted regeneration definition without changing the v3 prompt suite", () => {
+  test("pins targeted regeneration to its independent v3 prompt suite", () => {
     const trigger = buildEpisodePipelineTriggerRequest({
       autopilotUrl: "https://autopilot.example", pipelineName: "snack-studio-regenerate-snack",
       requestId: "request-2", attemptId: "attempt-2", episodeId: "episode-64",
@@ -86,5 +86,18 @@ describe("episode Autopilot trigger", () => {
     });
     expect(trigger.url).toBe("https://autopilot.example/api/pipelines/triggers/http/snack-studio-publication-metadata.v1");
     expect(trigger.body.input.operation).toBe("publication-metadata");
+  });
+
+  test("pins transcript knowledge extraction to the requested graph definition", () => {
+    const trigger = buildEpisodePipelineTriggerRequest({
+      autopilotUrl: "https://autopilot.example", pipelineName: "snack-studio-graph-relationships",
+      requestId: "request-graph", attemptId: "attempt-graph", episodeId: "episode-67",
+      operation: "publication-metadata", userNpub: "npub1editor", inputRevisionId: "revision-67",
+      pipelineVersion: "7", promptSuiteVersion: "v7-governed-roots-reusable-subtopics",
+      resultSchemaVersion: "5", contextUrl: "https://studio.example/context",
+      transcriptUrl: "https://studio.example/transcript", webhookUrl: "https://studio.example/webhook", webhookToken: "secret",
+    });
+    expect(trigger.url).toBe("https://autopilot.example/api/pipelines/triggers/http/snack-studio-graph-relationships.v7");
+    expect(trigger.body.input).toMatchObject({ pipelineVersion: "7", promptSuiteVersion: "v7-governed-roots-reusable-subtopics", resultSchemaVersion: "5" });
   });
 });

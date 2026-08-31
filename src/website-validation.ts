@@ -1,13 +1,14 @@
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { db } from './db.ts';
 import { INTELLIGENCE_SNACKS_REPO, PUBLICATION_WORKTREE_DIR } from './config.ts';
 import { buildPublicationPackage, type PublicationPackageFile } from './publication-package.ts';
 import { recordAuditEvent } from './episodes.ts';
+import { buildPublicGraphDataset } from './public-graph.ts';
 
 const ALLOWED_DESTINATIONS = [
   'src/content/episodes/', 'src/content/snacks/', 'src/content/people/', 'src/content/topics/',
-  'src/content/newsletters/', 'src/content/transcripts/', 'public/images/episodes/', 'public/images/snacks/', 'public/images/',
+  'src/content/newsletters/', 'src/content/transcripts/', 'src/data/', 'public/images/episodes/', 'public/images/snacks/', 'public/images/',
 ] as const;
 
 function run(command: string[], cwd: string) {
@@ -86,12 +87,14 @@ export function stageAndValidateWebsitePackage(episodeId: string, actorPubkey: s
     const themes = new Map(packageValue.themes.map((theme) => [theme.id, theme]));
     for (const file of packageValue.files) {
       const destination = safeDestination(worktree, file.destination); mkdirSync(dirname(destination), { recursive: true });
-      if (file.kind === 'episode') writeFileSync(destination, renderEpisode(packageValue.episode));
+      if (file.kind === 'stale-snack' || file.kind === 'stale-snack-thumbnail') rmSync(destination, { force: true });
+      else if (file.kind === 'episode') writeFileSync(destination, renderEpisode(packageValue.episode));
       else if (file.kind === 'snack') writeFileSync(destination, renderSnack(snacks.get(file.sourceRevisionId!)!, packageValue.episode.slug, packageValue.relationships));
       else if (file.kind === 'person') writeFileSync(destination, renderPerson(people.get(file.sourceId)!));
       else if (file.kind === 'theme') writeFileSync(destination, renderTheme(themes.get(file.sourceId)!));
       else if (file.kind === 'newsletter') writeFileSync(destination, renderNewsletter(packageValue.newsletter!));
       else if (file.kind === 'transcript') writeFileSync(destination, `${packageValue.transcript!.transcriptText.trim()}\n`);
+      else if (file.kind === 'graph') writeFileSync(destination, `${JSON.stringify(buildPublicGraphDataset(episodeId), null, 2)}\n`);
       else copyAsset(file, worktree);
     }
     db.query("UPDATE website_validation_attempts SET status='validating',base_commit=?1,updated_at=?2 WHERE id=?3").run(baseCommit, Date.now(), attemptId);
@@ -100,7 +103,7 @@ export function stageAndValidateWebsitePackage(episodeId: string, actorPubkey: s
     const changedFiles = run(['git', 'status', '--short'], worktree).split('\n').filter(Boolean);
     run(['git', 'add', '-N', '--', ...packageValue.files.map((file) => file.destination)], worktree);
     const diffStat = run(['git', 'diff', '--stat', '--', ...packageValue.files.map((file) => file.destination)], worktree);
-    const textPaths = packageValue.files.filter((file) => ['episode','snack','person','theme','newsletter','transcript'].includes(file.kind)).map((file) => file.destination);
+    const textPaths = packageValue.files.filter((file) => ['episode','snack','person','theme','newsletter','transcript','graph'].includes(file.kind)).map((file) => file.destination);
     const textDiff = textPaths.length ? run(['git', 'diff', '--', ...textPaths], worktree) : '';
     db.query(`UPDATE website_validation_attempts SET status='passed',changed_files_json=?1,diff_stat=?2,text_diff=?3,build_output=?4,updated_at=?5 WHERE id=?6`)
       .run(JSON.stringify(changedFiles), diffStat, textDiff.slice(0, 100_000), `${installOutput}\n${buildOutput}`.trim().slice(0, 40_000), Date.now(), attemptId);

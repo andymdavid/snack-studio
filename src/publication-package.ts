@@ -11,9 +11,11 @@ import { resolveTranscriptParticipants } from './publication-metadata.ts';
 import { getTheme } from './themes.ts';
 import { getApprovedPublicTranscript } from './public-transcripts.ts';
 import { listNewsletterItems, listRelationships } from './curation.ts';
+import { getEpisodeGraphReadiness } from './knowledge-graph.ts';
+import { buildPublicGraphDataset } from './public-graph.ts';
 
 export type PublicationPackageFile = {
-  kind: 'episode' | 'snack' | 'person' | 'theme' | 'newsletter' | 'transcript' | 'episode-thumbnail' | 'snack-thumbnail' | 'person-portrait';
+  kind: 'episode' | 'snack' | 'person' | 'theme' | 'newsletter' | 'transcript' | 'graph' | 'episode-thumbnail' | 'snack-thumbnail' | 'person-portrait' | 'stale-snack' | 'stale-snack-thumbnail';
   destination: string;
   sourceId: string;
   sourceRevisionId?: string;
@@ -66,6 +68,8 @@ export function buildPublicationPackage(episodeId: string) {
   if (!episode.episodeNumber) blockers.push({ code: 'episode-number-missing', message: 'The episode needs a publication number.' });
   if (!transcript) blockers.push({ code: 'transcript-missing', message: 'The episode needs an active transcript revision.' });
   if (!publicTranscript) blockers.push({ code: 'public-transcript-missing', message: 'Review and approve the cleaned public transcript.' });
+  const graph = getEpisodeGraphReadiness(episodeId);
+  if (!graph.ready) blockers.push({ code: 'graph-not-ready', message: graph.reason || 'Build and review the episode graph before publication.' });
   for (const check of approved.checks.filter((item) => !item.ok)) blockers.push({ code: `approved-${check.key}`, message: check.message });
 
   const episodeNumber = episode.episodeNumber || 0;
@@ -82,6 +86,7 @@ export function buildPublicationPackage(episodeId: string) {
   for (const person of people) if (!person.portraitPath) blockers.push({ code: 'portrait-missing', message: `${person.name} needs an approved portrait.`, sourceId: person.id });
 
   const files: PublicationPackageFile[] = [];
+  files.push({ kind: 'graph', destination: 'src/data/graph.json', sourceId: episode.id });
   if (episodeNumber) files.push({ kind: 'episode', destination: `src/content/episodes/${episodeSlug}.md`, sourceId: episode.id });
   if (publicTranscript && episodeNumber) files.push({ kind: 'transcript', destination: `src/content/transcripts/${episodeSlug}.txt`, sourceId: publicTranscript.id, sourceRevisionId: publicTranscript.sourceTranscriptRevisionId, sizeBytes: new TextEncoder().encode(publicTranscript.transcriptText).byteLength });
   for (const person of people.filter((item) => item.source === 'studio')) {
@@ -97,17 +102,36 @@ export function buildPublicationPackage(episodeId: string) {
 
   const snacks = approved.candidateIds.map(getCandidate).filter(Boolean).map((candidate) => {
     const revision = candidate!.revision;
-    const assignment = db.query('SELECT theme_id FROM snack_theme_assignments WHERE snack_revision_id=?1').get(revision.id) as { theme_id: string } | null;
+    const assignment = db.query(`SELECT sta.theme_id FROM snack_theme_assignments sta
+      JOIN snack_revisions sr ON sr.id=sta.snack_revision_id
+      WHERE sr.candidate_id=?1
+      ORDER BY CASE WHEN sta.snack_revision_id=?2 THEN 0 ELSE 1 END, sta.created_at DESC
+      LIMIT 1`).get(candidate!.id, revision.id) as { theme_id: string } | null;
     const theme = assignment?.theme_id || '';
     const slug = publicationSlug(revision.publicTitle);
     if (!slug) blockers.push({ code: 'snack-slug-missing', message: `Could not derive a slug for ${revision.publicTitle}.`, sourceId: candidate!.id });
     if (!theme) blockers.push({ code: 'snack-theme-missing', message: `${revision.publicTitle} needs one theme from the episode.`, sourceId: candidate!.id });
-    const job = db.query("SELECT * FROM thumbnail_jobs WHERE episode_id=?1 AND asset_kind='snack' AND snack_revision_id=?2 ORDER BY created_at DESC LIMIT 1")
-      .get(episodeId, revision.id) as Record<string, unknown> | null;
+    // Editorial copy revisions keep the candidate's approved visual identity.
+    // Prefer artwork made for this exact revision, then reuse the most recent
+    // approved artwork for the same candidate rather than blocking publication.
+    const job = db.query(`SELECT * FROM thumbnail_jobs
+      WHERE episode_id=?1 AND asset_kind='snack' AND snack_candidate_id=?2 AND status='approved'
+      ORDER BY CASE WHEN snack_revision_id=?3 THEN 0 ELSE 1 END, created_at DESC LIMIT 1`)
+      .get(episodeId, candidate!.id, revision.id) as Record<string, unknown> | null;
     const asset = job && String(job.status) === 'approved' ? selectedFinishedAsset(String(job.id)) : null;
     if (!asset) blockers.push({ code: 'snack-thumbnail-missing', message: `${revision.publicTitle} needs an approved finished thumbnail.`, sourceId: candidate!.id });
     files.push({ kind: 'snack', destination: `src/content/snacks/${slug || candidate!.id}.md`, sourceId: candidate!.id, sourceRevisionId: revision.id });
     if (asset) files.push({ kind: 'snack-thumbnail', destination: `public/images/snacks/${slug}.webp`, sourceId: candidate!.id, sourceRevisionId: revision.id, sourcePath: String(asset.website_storage_path), sizeBytes: Number(asset.website_size_bytes) });
+    const previousSlugs = new Set(candidate!.revisions
+      .filter((item) => item.id !== revision.id)
+      .map((item) => publicationSlug(item.publicTitle))
+      .filter((item) => item && item !== slug));
+    for (const previousSlug of previousSlugs) {
+      const markdownDestination = `src/content/snacks/${previousSlug}.md`;
+      const thumbnailDestination = `public/images/snacks/${previousSlug}.webp`;
+      if (existsSync(join(INTELLIGENCE_SNACKS_REPO, markdownDestination))) files.push({ kind: 'stale-snack', destination: markdownDestination, sourceId: candidate!.id });
+      if (existsSync(join(INTELLIGENCE_SNACKS_REPO, thumbnailDestination))) files.push({ kind: 'stale-snack-thumbnail', destination: thumbnailDestination, sourceId: candidate!.id });
+    }
     return {
       candidateId: candidate!.id, revisionId: revision.id, position: candidate!.approvedPosition,
       slug, title: revision.publicTitle, editorialTitle: revision.editorialTitle, standfirst: revision.standfirst,
@@ -139,6 +163,7 @@ export function buildPublicationPackage(episodeId: string) {
   for (const destination of new Set(duplicateDestinations)) blockers.push({ code: 'destination-collision', message: `More than one package item targets ${destination}.` });
   const packageValue = {
     schemaVersion: 1,
+    graphFingerprint: bytesToHex(sha256(new TextEncoder().encode(JSON.stringify(buildPublicGraphDataset(episodeId))))),
     episode: {
       id: episode.id, slug: episodeSlug, number: episode.episodeNumber, title: episodePublicTitle(episode.workingTitle, episode.episodeNumber),
       summary, status: 'published', participants: contributorIds, themes: themes.map((theme) => theme.id),

@@ -155,8 +155,12 @@ function removeApprovedPosition(episodeId: string, approvedPosition: number | nu
   if (approvedPosition === null) return;
   db.query("UPDATE snack_candidates SET approved_position = NULL WHERE episode_id = ?1 AND approved_position = ?2")
     .run(episodeId, approvedPosition);
-  db.query("UPDATE snack_candidates SET approved_position = approved_position - 1 WHERE episode_id = ?1 AND approved_position > ?2")
+  // Move through a temporary negative range so SQLite's per-row uniqueness
+  // checks cannot collide with the positions that have not moved yet.
+  db.query("UPDATE snack_candidates SET approved_position = -approved_position WHERE episode_id = ?1 AND approved_position > ?2")
     .run(episodeId, approvedPosition);
+  db.query("UPDATE snack_candidates SET approved_position = -approved_position - 1 WHERE episode_id = ?1 AND approved_position < 0")
+    .run(episodeId);
 }
 
 export function listCandidateRevisions(candidateId: string): SnackRevision[] {

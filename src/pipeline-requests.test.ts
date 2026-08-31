@@ -5,6 +5,7 @@ import {
   createPipelineRun,
   getPipelineRequestContext,
   getPipelineRequestTranscript,
+  isObsoleteKnowledgeGraphRequest,
   listEpisodePipelineRequests,
   markPipelineRunFailed,
   markPipelineRunStarted,
@@ -73,6 +74,19 @@ afterEach(() => {
 });
 
 describe("episode pipeline lifecycle", () => {
+  test("recognizes obsolete graph contracts so failed v2 requests cannot be retried forever", () => {
+    const base = {
+      pipelineName: 'snack-studio-graph-relationships',
+      pipelineVersion: '7',
+      promptSuiteVersion: 'v7-governed-roots-reusable-subtopics',
+      resultSchemaVersion: '5',
+    };
+    expect(isObsoleteKnowledgeGraphRequest(base)).toBeFalse();
+    expect(isObsoleteKnowledgeGraphRequest({ ...base, pipelineVersion: '2' })).toBeTrue();
+    expect(isObsoleteKnowledgeGraphRequest({ ...base, resultSchemaVersion: '3' })).toBeTrue();
+    expect(isObsoleteKnowledgeGraphRequest({ ...base, pipelineName: 'snack-studio-publication-metadata' })).toBeFalse();
+  });
+
   test("pins a request to an immutable transcript and exposes scoped context", () => {
     const database = testDatabase();
     const request = createPipelineRequest({
@@ -85,7 +99,7 @@ describe("episode pipeline lifecycle", () => {
     }, database);
 
     expect(request.inputTranscriptSha256).toBe("digest-1");
-    expect(request.promptSuiteVersion).toBe("v3-intelligence-snacks-natural-prose");
+    expect(request.promptSuiteVersion).toBe("v9-frozen-single-editorial-pass");
     expect(getPipelineRequestContext(request.id, database)?.transcript).toMatchObject({ id: "revision-1", sha256: "digest-1" });
     expect(getPipelineRequestTranscript(request.id, database)).toMatchObject({
       requestId: request.id,

@@ -10,12 +10,12 @@ export type SuccessfulKnowledgeResult = {
   snackLinks: Array<{ nodeKey: string; candidateId: string; relationshipType: typeof SNACK_LINK_TYPES[number]; confidence: number }>;
 };
 
-export function validateSuccessfulKnowledgeResult(value: Record<string, unknown>): { ok: true; value: SuccessfulKnowledgeResult } | { ok: false; error: string } {
+export function validateSuccessfulKnowledgeResult(value: Record<string, unknown>, options: { allowEmptyNodes?: boolean } = {}): { ok: true; value: SuccessfulKnowledgeResult } | { ok: false; error: string } {
   try {
     const required = (key: string) => { const result = typeof value[key] === 'string' ? String(value[key]).trim() : ''; if (!result) throw new Error(`${key} is required`); return result; };
     const confidence = (raw: unknown, label: string) => { const result = Number(raw); if (!Number.isFinite(result) || result < 0 || result > 1) throw new Error(`${label} confidence must be between 0 and 1`); return result; };
     if (value.operation !== 'publication-metadata' || value.resultSchemaVersion !== '4') throw new Error('knowledge callback contract mismatch');
-    if (!Array.isArray(value.nodes) || !value.nodes.length || value.nodes.length > 60) throw new Error('nodes must contain 1 to 60 transcript ideas');
+    if (!Array.isArray(value.nodes) || (!options.allowEmptyNodes && !value.nodes.length) || value.nodes.length > 60) throw new Error(`nodes must contain ${options.allowEmptyNodes ? '0' : '1'} to 60 transcript ideas`);
     const nodes = value.nodes.map((item, index) => {
       if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`node ${index + 1} must be an object`);
       const row = item as Record<string, unknown>; const key = String(row.key || '').trim(); const kind = String(row.kind || '') as SuccessfulKnowledgeResult['nodes'][number]['kind'];
