@@ -7,6 +7,7 @@ const KIND_COLOURS = { root: '#343b37', host: '#4f78a8', episode: '#72817a', con
 const MUTED_KIND_COLOURS = { root: '#9da49f', host: '#a9bbd0', episode: '#b3bbb7', contributor: '#cbb7a8', concept: '#a9cecc', claim: '#d8b2a5', example: '#d8c49d', question: '#c5b8d9', canonical: '#a9cecc', snack: '#d8b2bf' };
 const ACTIVE_COLOUR = '#fe7141';
 let active = null;
+const retainedPositions = new Map();
 
 const nodeSize = (node) => node.kind === 'root' ? 15 : node.kind === 'episode' ? 12 : node.kind === 'host' ? 11 : node.kind === 'contributor' ? 10 : node.kind === 'snack' ? 7 : 9;
 
@@ -22,7 +23,8 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   const simulationNodes = nodes.map((node, index) => {
     const anchor = episodeAnchors.get(node.episodeId) || { x: 0, y: 0 }; const localIndex = episodeOffsets.get(node.episodeId) || 0; episodeOffsets.set(node.episodeId, localIndex + 1);
     const angle = localIndex * Math.PI * (3 - Math.sqrt(5)); const radius = node.kind === 'root' ? 0 : ['host','contributor'].includes(node.kind) ? 210 + index * 12 : 42 * Math.sqrt(localIndex);
-    return { id: node.id, kind: node.kind, episodeId: node.episodeId, x: anchor.x + Math.cos(angle) * radius, y: anchor.y + Math.sin(angle) * radius, size: nodeSize(node), fx: node.kind === 'root' ? 0 : undefined, fy: node.kind === 'root' ? 0 : undefined };
+    const previous = retainedPositions.get(node.id);
+    return { id: node.id, kind: node.kind, episodeId: node.episodeId, x: previous?.x ?? anchor.x + Math.cos(angle) * radius, y: previous?.y ?? anchor.y + Math.sin(angle) * radius, size: nodeSize(node), fx: node.kind === 'root' ? 0 : undefined, fy: node.kind === 'root' ? 0 : undefined };
   });
   const simulationLinks = [];
   for (const node of nodes) { const connected = degree.has(node.id); const position = simulationNodes.find((item) => item.id === node.id); graph.addNode(node.id, { label: node.title, kind: node.kind, episodeId: node.episodeId, connected, x: position.x, y: position.y, size: connected ? nodeSize(node) : 4, color: connected ? KIND_COLOURS[node.kind] || '#9aa5a0' : MUTED_KIND_COLOURS[node.kind] || '#b8bfbb' }); }
@@ -37,7 +39,9 @@ export function mountKnowledgeGraph(container, model, onSelect) {
     .force('y', forceY((node) => episodeAnchors.get(node.episodeId)?.y || 0).strength((node) => node.kind === 'episode' ? 0.12 : ['host','contributor'].includes(node.kind) ? 0.005 : node.kind === 'root' ? 0.4 : 0.055))
     .alphaDecay(0.028).alphaMin(0.002).velocityDecay(0.58).stop();
   const simulationNodeById = new Map(simulationNodes.map((node) => [node.id, node]));
-  simulation.tick(window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 80 : 25);
+  const retained = nodes.every(node => retainedPositions.has(node.id));
+  simulation.tick(retained ? 0 : window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 80 : 25);
+  if (retained) simulation.alpha(0.04);
   for (const node of simulationNodes) graph.mergeNodeAttributes(node.id, { x: node.x, y: node.y });
   const canvas = document.createElement('div'); canvas.className = 'sigmaCanvas'; container.appendChild(canvas);
   let hovered = null; let hoveredNeighbours = new Set(); let selectedId = model.explicitFocus && model.focus?.id && graph.hasNode(model.focus.id) ? model.focus.id : null; let selectedNeighbours = new Set(selectedId ? graph.neighbors(selectedId) : []);
@@ -107,6 +111,6 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   renderer.getCamera().animatedReset({ duration: 420 });
   const freeze = () => { paused = true; if (frame) cancelAnimationFrame(frame); frame = null; simulation.stop(); };
   container.addEventListener('graph-freeze', freeze);
-  active = { kill() { container.removeEventListener('graph-freeze', freeze); if (frame) cancelAnimationFrame(frame); simulation.stop(); renderer.kill(); container.replaceChildren(); } };
+  active = { kill() { for (const node of simulationNodes) retainedPositions.set(node.id,{x:node.x,y:node.y}); container.removeEventListener('graph-freeze', freeze); if (frame) cancelAnimationFrame(frame); simulation.stop(); renderer.kill(); container.replaceChildren(); } };
   return () => { if (active) { active.kill(); active = null; } };
 }
