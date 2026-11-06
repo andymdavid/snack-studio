@@ -1,4 +1,3 @@
-import { mountEpisodeMap } from './episode-map.js';
 import { selectGraphView } from './graph-view.js';
 import { MultiDirectedGraph } from 'graphology';
 import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY } from 'd3-force';
@@ -14,11 +13,6 @@ const nodeSize = (node) => node.kind === 'root' ? 15 : node.kind === 'episode' ?
 
 export function mountKnowledgeGraph(container, model, onSelect) {
   active?.kill(); active = null; container.replaceChildren();
-  const episodeId = model.episodeContextId || (model.explicitFocus && model.focus?.kind === 'episode' ? model.focus.episodeId : null);
-  if (episodeId) {
-    const episodeMap = mountEpisodeMap(container,model,episodeId,onSelect);
-    if (episodeMap) { active=episodeMap; return () => { episodeMap.kill(); if(active===episodeMap)active=null; }; }
-  }
   const graph = new MultiDirectedGraph(); const nodeById = new Map(model.nodes.map((node) => [node.id, node]));
   const view = selectGraphView(model, { focusId: model.explicitFocus ? model.focus?.id : null, limit: model.viewLimit || 160 });
   const nodes = view.nodes; const visible = new Set(nodes.map((node) => node.id));
@@ -55,10 +49,10 @@ export function mountKnowledgeGraph(container, model, onSelect) {
     allowInvalidContainer: true, labelRenderedSizeThreshold: 14, labelDensity: 0.03, labelGridCellSize: 150,
     zoomingRatio: 1.25, zoomDuration: 220,
     defaultNodeColor: '#9aa5a0', defaultEdgeColor: '#d0d5d2', defaultEdgeType: 'line', renderEdgeLabels: false, hideEdgesOnMove: false,
-    nodeReducer(node, data) { const focusId = hovered || selectedId; const focusNeighbours = hovered ? hoveredNeighbours : selectedNeighbours; const selected = node === selectedId; const underPointer = node === hovered; const related = !focusId || node === focusId || focusNeighbours.has(node); return { ...data, highlighted: selected, forceLabel: selected || underPointer || data.kind === 'root', color: selected ? ACTIVE_COLOUR : focusId && !related ? MUTED_KIND_COLOURS[data.kind] || '#d2d6d3' : data.color, size: selected ? data.size * 1.4 : underPointer ? data.size * 1.18 : data.size, zIndex: selected ? 3 : underPointer ? 2 : related && focusId ? 1 : 0 }; },
+    nodeReducer(node, data) { const focusId = hovered || selectedId; const focusNeighbours = hovered ? hoveredNeighbours : selectedNeighbours; const selected = node === selectedId; const underPointer = node === hovered; const related = !focusId || node === focusId || focusNeighbours.has(node); return { ...data, highlighted: selected, forceLabel: selected || underPointer || (Boolean(focusId) && related) || data.kind === 'root', color: selected ? ACTIVE_COLOUR : focusId && !related ? MUTED_KIND_COLOURS[data.kind] || '#d2d6d3' : data.color, size: selected ? data.size * 1.4 : underPointer ? data.size * 1.18 : data.size, zIndex: selected ? 3 : underPointer ? 2 : related && focusId ? 1 : 0 }; },
     edgeReducer(edge, data) { const focusId = hovered || selectedId; if (!focusId) return { ...data, color: '#d0d5d2', size: 0.55 }; const [source, target] = graph.extremities(edge); const activeEdge = source === focusId || target === focusId; return { ...data, color: activeEdge ? hovered ? '#87958e' : ACTIVE_COLOUR : '#eceeec', size: activeEdge ? hovered ? 1.8 : 2.35 : 0.25, zIndex: activeEdge ? 1 : 0 }; },
   });
-  let frame = null; let paused = Boolean(model.freezeLayout);
+  let frame = null; let paused = false;
   const animateLayout = () => {
     simulation.tick();
     for (const node of simulationNodes) graph.mergeNodeAttributes(node.id, { x: node.x, y: node.y });
