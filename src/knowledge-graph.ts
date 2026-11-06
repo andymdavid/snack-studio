@@ -101,7 +101,7 @@ export function listKnowledgeGraph(episodeId?: string, database: Database = db) 
   const nodes = database.query(`SELECT * FROM knowledge_nodes${where} ORDER BY created_at ASC`).all(...args) as Record<string, unknown>[];
   if (!nodes.length) return { nodes: [], edges: [], snackLinks: [] };
   const nodeIds = new Set(nodes.map((row) => String(row.id)));
-  const rawEvidence = (database.query('SELECT * FROM knowledge_evidence ORDER BY created_at ASC').all() as Record<string, unknown>[]).filter((row) => nodeIds.has(String(row.knowledge_node_id)));
+  const rawEvidence = (database.query(`SELECT evidence.* FROM knowledge_evidence evidence JOIN knowledge_nodes node ON node.id=evidence.knowledge_node_id${episodeId ? ' WHERE node.episode_id=?1' : ''} ORDER BY evidence.created_at ASC`).all(...args) as Record<string, unknown>[]).filter((row) => nodeIds.has(String(row.knowledge_node_id)));
   const revisionIds = [...new Set(nodes.map((row) => String(row.source_transcript_revision_id)))];
   const transcriptByRevision = new Map<string, string>();
   const transcriptQuery = database.query('SELECT transcript_text FROM transcript_revisions WHERE id = ?1');

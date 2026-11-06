@@ -29,7 +29,7 @@ function renderEpisode(value: ReturnType<typeof buildPublicationPackage>['episod
 function renderSnack(value: ReturnType<typeof buildPublicationPackage>['snacks'][number], episodeSlug: string, relationships: ReturnType<typeof buildPublicationPackage>['relationships']) {
   const related = relationships.filter((item) => item.sourceCandidateId === value.candidateId);
   const relationshipYaml = related.length ? `relationships:\n${related.map((item) => `  - target: ${item.targetSlug}\n    type: ${item.type}${item.note ? `\n    note: ${yamlString(item.note)}` : ''}`).join('\n')}\n` : 'relationships: []\n';
-  return `---\ntitle: ${yamlString(value.title)}\n${yamlOptional('editorialTitle', value.editorialTitle)}thumbnail: ${yamlString(value.thumbnail || '')}\nstandfirst: ${yamlString(value.standfirst)}\nstatus: published\nsourceEpisode: ${episodeSlug}\nepisodePosition: ${value.position}\ntheme: ${value.theme}\nattribution: ${yamlString(value.attribution || '')}\n${yamlOptional('transcriptStart', value.transcriptStart)}${relationshipYaml}featured: false\nfixture: false\n${value.seo.title || value.seo.description ? `seo:\n${value.seo.title ? `  title: ${yamlString(value.seo.title)}\n` : ''}${value.seo.description ? `  description: ${yamlString(value.seo.description)}\n` : ''}` : ''}---\n\n${value.bodyMarkdown.trim()}\n`;
+  return `---\ntitle: ${yamlString(value.title)}\n${yamlOptional('editorialTitle', value.editorialTitle)}thumbnail: ${yamlString(value.thumbnail || '')}\nstandfirst: ${yamlString(value.standfirst)}\nstatus: published\nstudioCandidateId: ${value.candidateId}\nstudioRevisionId: ${value.revisionId}\nsourceEpisode: ${episodeSlug}\nepisodePosition: ${value.position}\ntheme: ${value.theme}\nattribution: ${yamlString(value.attribution || '')}\n${yamlOptional('transcriptStart', value.transcriptStart)}${relationshipYaml}featured: false\nfixture: false\n${value.seo.title || value.seo.description ? `seo:\n${value.seo.title ? `  title: ${yamlString(value.seo.title)}\n` : ''}${value.seo.description ? `  description: ${yamlString(value.seo.description)}\n` : ''}` : ''}---\n\n${value.bodyMarkdown.trim()}\n`;
 }
 
 function renderNewsletter(value: NonNullable<ReturnType<typeof buildPublicationPackage>['newsletter']>) {
@@ -94,9 +94,10 @@ export function stageAndValidateWebsitePackage(episodeId: string, actorPubkey: s
       else if (file.kind === 'theme') writeFileSync(destination, renderTheme(themes.get(file.sourceId)!));
       else if (file.kind === 'newsletter') writeFileSync(destination, renderNewsletter(packageValue.newsletter!));
       else if (file.kind === 'transcript') writeFileSync(destination, `${packageValue.transcript!.transcriptText.trim()}\n`);
-      else if (file.kind === 'graph') writeFileSync(destination, `${JSON.stringify(buildPublicGraphDataset(episodeId), null, 2)}\n`);
+      else if (file.kind === 'graph') continue; // Export after every canonical content file has been staged.
       else copyAsset(file, worktree);
     }
+    writeFileSync(safeDestination(worktree, 'src/data/graph.json'), `${JSON.stringify(buildPublicGraphDataset(episodeId, db, worktree), null, 2)}\n`);
     db.query("UPDATE website_validation_attempts SET status='validating',base_commit=?1,updated_at=?2 WHERE id=?3").run(baseCommit, Date.now(), attemptId);
     const installOutput = run(['bun', 'install', '--frozen-lockfile'], worktree);
     const buildOutput = run(['bun', 'run', 'build'], worktree);

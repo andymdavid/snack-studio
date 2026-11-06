@@ -1,20 +1,21 @@
+import { selectGraphView } from './graph-view.js';
 import { MultiDirectedGraph } from 'graphology';
 import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY } from 'd3-force';
 import Sigma from 'sigma';
 
-const KIND_COLOURS = { root: '#343b37', host: '#4f78a8', episode: '#72817a', contributor: '#a26f49', concept: '#4aa8a5', claim: '#d96b45', example: '#d49a32', question: '#9674cf', snack: '#d65f87' };
-const MUTED_KIND_COLOURS = { root: '#9da49f', host: '#a9bbd0', episode: '#b3bbb7', contributor: '#cbb7a8', concept: '#a9cecc', claim: '#d8b2a5', example: '#d8c49d', question: '#c5b8d9', snack: '#d8b2bf' };
+const KIND_COLOURS = { root: '#343b37', host: '#4f78a8', episode: '#72817a', contributor: '#a26f49', concept: '#4aa8a5', claim: '#d96b45', example: '#d49a32', question: '#9674cf', canonical: '#1e7069', snack: '#d65f87' };
+const MUTED_KIND_COLOURS = { root: '#9da49f', host: '#a9bbd0', episode: '#b3bbb7', contributor: '#cbb7a8', concept: '#a9cecc', claim: '#d8b2a5', example: '#d8c49d', question: '#c5b8d9', canonical: '#a9cecc', snack: '#d8b2bf' };
 const ACTIVE_COLOUR = '#fe7141';
 let active = null;
+const retainedPositions = new Map();
 
 const nodeSize = (node) => node.kind === 'root' ? 15 : node.kind === 'episode' ? 12 : node.kind === 'host' ? 11 : node.kind === 'contributor' ? 10 : node.kind === 'snack' ? 7 : 9;
 
 export function mountKnowledgeGraph(container, model, onSelect) {
   active?.kill(); active = null; container.replaceChildren();
   const graph = new MultiDirectedGraph(); const nodeById = new Map(model.nodes.map((node) => [node.id, node]));
-  const connectedIds = new Set(model.allConnections.flatMap((connection) => [connection.sourceId, connection.targetId]));
-  const usefulNodes = model.totals.knowledge ? model.nodes.filter((node) => connectedIds.has(node.id)) : model.nodes;
-  const nodes = usefulNodes.slice(0, 500); const visible = new Set(nodes.map((node) => node.id));
+  const view = selectGraphView(model, { focusId: model.explicitFocus ? model.focus?.id : null, limit: model.viewLimit || 160 });
+  const nodes = view.nodes; const visible = new Set(nodes.map((node) => node.id));
   const degree = new Map(); for (const connection of model.allConnections) for (const id of [connection.sourceId, connection.targetId]) degree.set(id, (degree.get(id) || 0) + 1);
   const episodeNodes = nodes.filter((node) => node.kind === 'episode');
   const episodeAnchors = new Map(episodeNodes.map((node, index) => { const angle = (Math.PI * 2 * index / Math.max(1, episodeNodes.length)) - Math.PI / 2; return [node.episodeId, { x: Math.cos(angle) * 680, y: Math.sin(angle) * 680 }]; }));
@@ -22,7 +23,8 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   const simulationNodes = nodes.map((node, index) => {
     const anchor = episodeAnchors.get(node.episodeId) || { x: 0, y: 0 }; const localIndex = episodeOffsets.get(node.episodeId) || 0; episodeOffsets.set(node.episodeId, localIndex + 1);
     const angle = localIndex * Math.PI * (3 - Math.sqrt(5)); const radius = node.kind === 'root' ? 0 : ['host','contributor'].includes(node.kind) ? 210 + index * 12 : 42 * Math.sqrt(localIndex);
-    return { id: node.id, kind: node.kind, episodeId: node.episodeId, x: anchor.x + Math.cos(angle) * radius, y: anchor.y + Math.sin(angle) * radius, size: nodeSize(node), fx: node.kind === 'root' ? 0 : undefined, fy: node.kind === 'root' ? 0 : undefined };
+    const previous = retainedPositions.get(node.id);
+    return { id: node.id, kind: node.kind, episodeId: node.episodeId, x: previous?.x ?? anchor.x + Math.cos(angle) * radius, y: previous?.y ?? anchor.y + Math.sin(angle) * radius, size: nodeSize(node), fx: node.kind === 'root' ? 0 : undefined, fy: node.kind === 'root' ? 0 : undefined };
   });
   const simulationLinks = [];
   for (const node of nodes) { const connected = degree.has(node.id); const position = simulationNodes.find((item) => item.id === node.id); graph.addNode(node.id, { label: node.title, kind: node.kind, episodeId: node.episodeId, connected, x: position.x, y: position.y, size: connected ? nodeSize(node) : 4, color: connected ? KIND_COLOURS[node.kind] || '#9aa5a0' : MUTED_KIND_COLOURS[node.kind] || '#b8bfbb' }); }
@@ -37,7 +39,9 @@ export function mountKnowledgeGraph(container, model, onSelect) {
     .force('y', forceY((node) => episodeAnchors.get(node.episodeId)?.y || 0).strength((node) => node.kind === 'episode' ? 0.12 : ['host','contributor'].includes(node.kind) ? 0.005 : node.kind === 'root' ? 0.4 : 0.055))
     .alphaDecay(0.028).alphaMin(0.002).velocityDecay(0.58).stop();
   const simulationNodeById = new Map(simulationNodes.map((node) => [node.id, node]));
-  simulation.tick(60);
+  const retained = nodes.every(node => retainedPositions.has(node.id));
+  simulation.tick(retained ? 0 : window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 80 : 25);
+  if (retained) simulation.alpha(0.04);
   for (const node of simulationNodes) graph.mergeNodeAttributes(node.id, { x: node.x, y: node.y });
   const canvas = document.createElement('div'); canvas.className = 'sigmaCanvas'; container.appendChild(canvas);
   let hovered = null; let hoveredNeighbours = new Set(); let selectedId = model.explicitFocus && model.focus?.id && graph.hasNode(model.focus.id) ? model.focus.id : null; let selectedNeighbours = new Set(selectedId ? graph.neighbors(selectedId) : []);
@@ -48,7 +52,7 @@ export function mountKnowledgeGraph(container, model, onSelect) {
     nodeReducer(node, data) { const focusId = hovered || selectedId; const focusNeighbours = hovered ? hoveredNeighbours : selectedNeighbours; const selected = node === selectedId; const underPointer = node === hovered; const related = !focusId || node === focusId || focusNeighbours.has(node); return { ...data, highlighted: selected, forceLabel: selected || underPointer || (Boolean(focusId) && related) || data.kind === 'root', color: selected ? ACTIVE_COLOUR : focusId && !related ? MUTED_KIND_COLOURS[data.kind] || '#d2d6d3' : data.color, size: selected ? data.size * 1.4 : underPointer ? data.size * 1.18 : data.size, zIndex: selected ? 3 : underPointer ? 2 : related && focusId ? 1 : 0 }; },
     edgeReducer(edge, data) { const focusId = hovered || selectedId; if (!focusId) return { ...data, color: '#d0d5d2', size: 0.55 }; const [source, target] = graph.extremities(edge); const activeEdge = source === focusId || target === focusId; return { ...data, color: activeEdge ? hovered ? '#87958e' : ACTIVE_COLOUR : '#eceeec', size: activeEdge ? hovered ? 1.8 : 2.35 : 0.25, zIndex: activeEdge ? 1 : 0 }; },
   });
-  let frame = null;
+  let frame = null; let paused = false;
   const animateLayout = () => {
     simulation.tick();
     for (const node of simulationNodes) graph.mergeNodeAttributes(node.id, { x: node.x, y: node.y });
@@ -58,9 +62,9 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   };
   const reheatLayout = (alpha) => {
     simulation.alpha(Math.max(simulation.alpha(), alpha));
-    if (!frame) frame = requestAnimationFrame(animateLayout);
+    if (!paused && !frame && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) frame = requestAnimationFrame(animateLayout);
   };
-  reheatLayout(simulation.alpha());
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) reheatLayout(simulation.alpha());
   renderer.on('enterNode', ({ node }) => { hovered = node; hoveredNeighbours = new Set(graph.neighbors(node)); renderer.getContainer().style.cursor = 'pointer'; renderer.refresh(); });
   renderer.on('leaveNode', () => { hovered = null; hoveredNeighbours = new Set(); renderer.getContainer().style.cursor = 'grab'; renderer.refresh(); });
   let draggedId = null; let dragged = false; let suppressClick = false;
@@ -88,6 +92,7 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   const closeSpotlight = () => container.querySelector('.graphSpotlight')?.remove();
   renderer.on('clickNode', ({ node }) => {
     if (suppressClick || dragged) { suppressClick = false; dragged = false; return; }
+    if (model.selectImmediately) { onSelect(node, nodeById.get(node)); return; }
     selectedId = node; selectedNeighbours = new Set(graph.neighbors(node)); renderer.refresh(); closeSpotlight();
     const item = nodeById.get(node); const display = renderer.getNodeDisplayData(node); const card = document.createElement('article'); card.className = 'graphSpotlight';
     const kind = document.createElement('span'); kind.className = 'eyebrow'; kind.textContent = item.kind;
@@ -96,13 +101,16 @@ export function mountKnowledgeGraph(container, model, onSelect) {
     const summary = document.createElement('p'); summary.textContent = item.summary || 'Explore this node’s connections in the knowledge graph.';
     const open = document.createElement('button'); open.type = 'button'; open.className = 'btn btnPrimary'; open.textContent = item.kind === 'snack' ? 'Open Snack' : ['host','contributor'].includes(item.kind) ? 'Open contributor' : 'Explore node'; open.addEventListener('click', () => onSelect(node, item));
     card.append(kind, title, meta, summary, open); container.appendChild(card);
-    const width = container.clientWidth, height = container.clientHeight; card.style.left = `${Math.max(220, Math.min(width - 220, display?.x || width / 2))}px`; card.style.top = `${Math.max(150, Math.min(height - 170, display?.y || height / 2))}px`;
+    const width = container.clientWidth, height = container.clientHeight; card.style.left = `${Math.max(220, Math.min(width - 220, renderer.graphToViewport(display || {x:0,y:0}).x || width / 2))}px`; card.style.top = `${Math.max(150, Math.min(height - 170, renderer.graphToViewport(display || {x:0,y:0}).y || height / 2))}px`;
   });
   renderer.on('clickStage', () => { selectedId = null; selectedNeighbours = new Set(); closeSpotlight(); renderer.refresh(); });
   const controls = document.createElement('div'); controls.className = 'sigmaControls';
   for (const [label, title, action] of [['+', 'Zoom in', () => renderer.getCamera().animatedZoom({ duration: 180 })], ['−', 'Zoom out', () => renderer.getCamera().animatedUnzoom({ duration: 180 })], ['⌂', 'Fit graph', () => renderer.getCamera().animatedReset({ duration: 260 })]]) { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.title = title; button.setAttribute('aria-label', title); button.addEventListener('click', action); controls.appendChild(button); }
+  const count = document.createElement('p'); count.className = 'graphVisibleCount'; count.style.cssText = 'position:absolute;top:0;left:.5rem;right:.5rem;background:white;padding:.4rem;font-size:.7rem;pointer-events:none'; count.textContent = `${nodes.length} of ${model.nodes.length} nodes shown · select a node to explore its neighborhood`; count.setAttribute('role','status'); container.appendChild(count);
   container.appendChild(controls);
   renderer.getCamera().animatedReset({ duration: 420 });
-  active = { kill() { if (frame) cancelAnimationFrame(frame); simulation.stop(); renderer.kill(); container.replaceChildren(); } };
+  const freeze = () => { paused = true; if (frame) cancelAnimationFrame(frame); frame = null; simulation.stop(); };
+  container.addEventListener('graph-freeze', freeze);
+  active = { kill() { for (const node of simulationNodes) retainedPositions.set(node.id,{x:node.x,y:node.y}); container.removeEventListener('graph-freeze', freeze); if (frame) cancelAnimationFrame(frame); simulation.stop(); renderer.kill(); container.replaceChildren(); } };
   return () => { if (active) { active.kill(); active = null; } };
 }

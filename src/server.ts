@@ -1,3 +1,5 @@
+import { listGraphParticipants, setGraphParticipants } from './graph-participants.ts';
+import { listCanonicalConcepts, saveCanonicalConcept, type ConceptInput } from './canonical-concepts.ts';
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import type { Event as NostrEvent } from "nostr-tools";
@@ -312,11 +314,31 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
     return json({ items: listDiagnostics() });
   }
+  if (pathname === '/api/graph/participants') {
+    const session = requireSession(req); if (!session) return json({error:'unauthorized'},401);
+    if (!hasAccess(session.pubkey, req.method === 'GET' ? 'read' : 'edit')) return json({error:'access required'},403);
+    if (req.method === 'GET') return json({participants:listGraphParticipants()});
+    if (req.method === 'POST') {
+      try { const body = await readJson(req); return json({participants:setGraphParticipants(String(body.episodeId),body.contributorIds as string[],session.pubkey)}); }
+      catch(error) { return json({error:error instanceof Error ? error.message : String(error)},400); }
+    }
+    return json({error:'method not allowed'},405);
+  }
+  if (pathname === '/api/graph/concepts') {
+    const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
+    if (!hasAccess(session.pubkey, req.method === 'GET' ? 'read' : 'edit')) return json({ error: 'access required' }, 403);
+    if (req.method === 'GET') return json(listCanonicalConcepts());
+    if (req.method === 'POST') {
+      try { return json(saveCanonicalConcept(await req.json() as ConceptInput, session.pubkey)); }
+      catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 409); }
+    }
+    return json({error:'method not allowed'},405);
+  }
   if (pathname === '/api/graph' && req.method === 'GET') {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
     if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
     const episodeId = url.searchParams.get('episodeId') || undefined;
-    return json({ candidates: listGraphCandidates(), contributors: listGraphContributors(), themes: listThemes(), relationships: listAllRelationships(), knowledge: listKnowledgeGraph(episodeId), topicIndex: listTranscriptTopicIndex(), backfill: listKnowledgeBackfill() });
+    return json({ conceptRegistry: listCanonicalConcepts(), candidates: listGraphCandidates(), contributors: listGraphContributors(), themes: listThemes(), relationships: listAllRelationships(), knowledge: listKnowledgeGraph(episodeId), topicIndex: listTranscriptTopicIndex(), backfill: listKnowledgeBackfill() });
   }
   if (pathname === '/api/graph/projection' && req.method === 'GET') {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);

@@ -1425,6 +1425,36 @@ const migrations: Migration[] = [
       db.query(`UPDATE discussion_topics SET name='Bitcoin',updated_at=?1 WHERE id='bitcoin'`).run(Date.now());
     },
   },
+  {
+    id: '041_reviewed_canonical_concepts',
+    description: 'Stable cross-episode concept groups with explicit editorial review',
+    up(db) {
+      db.exec(`CREATE TABLE canonical_concepts (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, summary TEXT NOT NULL,
+        review_state TEXT NOT NULL CHECK(review_state IN ('proposed','accepted','rejected')),
+        rationale TEXT NOT NULL, reviewed_by TEXT NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE canonical_concept_mentions (
+        concept_id TEXT NOT NULL REFERENCES canonical_concepts(id) ON DELETE CASCADE,
+        knowledge_node_id TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+        PRIMARY KEY(concept_id,knowledge_node_id));`);
+    },
+  },
+  {
+    id: '042_graph_editorial_participation',
+    description: 'Decouple editorial participation from thumbnail selections',
+    up(db) {
+      db.exec(`CREATE TABLE graph_episode_contributors (
+        episode_id TEXT NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+        contributor_id TEXT NOT NULL REFERENCES contributors(id) ON DELETE CASCADE,
+        source TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(episode_id,contributor_id));
+      CREATE TABLE graph_participant_reviews (
+        episode_id TEXT PRIMARY KEY REFERENCES episodes(id) ON DELETE CASCADE,
+        reviewed_by TEXT NOT NULL, updated_at INTEGER NOT NULL);
+      INSERT OR IGNORE INTO graph_episode_contributors(episode_id,contributor_id,source,updated_at)
+        SELECT j.episode_id, CAST(person.value AS TEXT), 'legacy-thumbnail-selection', j.updated_at
+        FROM thumbnail_jobs j, json_each(j.contributor_ids_json) person JOIN contributors c ON c.id=person.value;`);
+    },
+  },
 ];
 
 export function applyPendingDbImport(): void {

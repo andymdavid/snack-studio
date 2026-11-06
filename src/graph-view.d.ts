@@ -1,0 +1,1 @@
+export function selectGraphView(model: { nodes: any[]; allConnections: any[]; focus?: {id:string} | null }, options?: {limit?:number;focusId?:string | null}): {nodes:any[];allConnections:any[];totalNodes:number;hiddenNodes:number};
