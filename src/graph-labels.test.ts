@@ -14,3 +14,9 @@ test('episode gateways are not suppressed by the idea label budget',()=>{
  const labels=placeGraphLabels(nodes,{width:1100,height:650,measureText:(t:string)=>t.length*5.5});
  expect(labels.length).toBe(21);expect(new Set(labels.map((l:any)=>l.id)).size).toBe(21);
 });
+test('mobile episode gutters retain all gateways around dense content',()=>{
+ const episodes=Array.from({length:21},(_,i)=>({id:`e${i}`,kind:'episode',title:'Episode',episodeNumber:i+60,x:162+Math.cos(i*2*Math.PI/21)*60,y:210+Math.sin(i*2*Math.PI/21)*60,size:6.5}));
+ const ideas=Array.from({length:100},(_,i)=>({id:`i${i}`,kind:'claim',title:'An explanatory idea',x:110+(i%10)*10,y:150+Math.floor(i/10)*10,size:4}));
+ const labels=placeGraphLabels([...episodes,...ideas],{width:324,height:420,selectedId:'i50',measureText:(t:string)=>t.length*5.5});
+ expect(labels.filter((l:any)=>l.kind==='episode').length).toBe(21);
+});

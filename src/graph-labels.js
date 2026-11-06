@@ -8,7 +8,9 @@ const intersects = (a,b,gap=5) => a.x < b.x+b.width+gap && a.x+a.width+gap > b.x
 export function placeGraphLabels(nodes, options) {
   const {width,height,zoom=1,selectedId,hoveredId,focusEpisodeId,measureText} = options;
   const budget = Math.min(24, Math.max(4,Math.min(8,Math.floor(width*height/110000))) + (zoom<0.55?5:0) + (zoom<0.25?8:0));
-  const rank = node => node.id===hoveredId ? 100 : node.id===selectedId ? 90 : (focusEpisodeId&&node.episodeId===focusEpisodeId?20:0)+({episode:60,canonical:12,host:9,contributor:7,root:6,concept:4,claim:3,snack:2,example:1,question:1}[node.kind] || 0);
+  const rank = node => node.kind==='episode' ? (node.id===selectedId?240:200) : node.id===hoveredId ? 100 : node.id===selectedId ? 90 : (focusEpisodeId&&node.episodeId===focusEpisodeId?20:0)+({episode:60,canonical:12,host:9,contributor:7,root:6,concept:4,claim:3,snack:2,example:1,question:1}[node.kind] || 0);
+  const mobileSlots=new Map();
+  if(width<600){const episodes=nodes.filter(node=>node.kind==='episode').sort((a,b)=>a.x-b.x);const split=Math.ceil(episodes.length/2);for(const [side,group] of [[-1,episodes.slice(0,split)],[1,episodes.slice(split)]])group.sort((a,b)=>a.y-b.y).forEach((node,index)=>mobileSlots.set(node.id,{side,y:44+index*Math.min(25,(height-152)/Math.max(1,split-1))}));}
   const labels=[];
   const ordered=[...nodes].sort((a,b)=>rank(b)-rank(a)||a.id.localeCompare(b.id));
   for (const node of ordered) {
@@ -28,6 +30,7 @@ export function placeGraphLabels(nodes, options) {
       const gutterRows=[];for(let y=44;y+labelHeight<=height-90;y+=24)gutterRows.push(y);gutterRows.sort((a,b)=>Math.abs(a-node.y)-Math.abs(b-node.y));
       for(const y of gutterRows)for(const side of (dx>=0?[1,-1]:[-1,1]))positions.push({x:side>0?width-labelWidth-18:18,y});
     }
+    const slot=mobileSlots.get(node.id);if(slot)positions.unshift({x:slot.side>0?width-labelWidth-18:18,y:slot.y});
     if(node.id===selectedId||node.id===hoveredId)positions.push({x:14,y:52},{x:width-labelWidth-14,y:52});
     const position=positions.find(rect=>{
       const box={...rect,width:labelWidth,height:labelHeight};
