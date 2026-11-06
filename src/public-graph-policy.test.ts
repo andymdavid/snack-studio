@@ -18,3 +18,8 @@ test('over-500 graph preserves explicit focus and reachable neighborhood rather 
  expect(view.nodes.map((n:any)=>n.id)).toEqual(['n600','n699']);expect(view.totalNodes).toBe(700);expect(view.hiddenNodes).toBe(698);expect(view.allConnections.length).toBe(1);
  const overview=selectGraphView(model,{limit:160});expect(new Set(overview.nodes.map((n:any)=>n.episodeId)).size).toBe(20);
 });
+
+test('overview includes ideas even when Snacks precede all knowledge',()=>{
+ const nodes=[...Array.from({length:140},(_,i)=>({id:`s${i}`,kind:'snack',episodeId:`e${i%20}`})),...Array.from({length:400},(_,i)=>({id:`k${i}`,kind:i%2?'claim':'concept',episodeId:`e${i%20}`}))];
+ const view=selectGraphView({nodes,allConnections:[]},{limit:160});expect(view.nodes.some((node:any)=>node.kind==='concept')).toBe(true);expect(view.nodes.some((node:any)=>node.kind==='claim')).toBe(true);expect(view.nodes.some((node:any)=>node.kind==='snack')).toBe(true);
+});

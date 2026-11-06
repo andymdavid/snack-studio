@@ -10,7 +10,16 @@ export function selectGraphView(model, options = {}) {
   } else {
     for (const node of model.nodes) if (['root','episode','host','contributor','canonical'].includes(node.kind)) add(node.id);
     const groups = new Map();
-    for (const node of model.nodes) { const group = groups.get(node.episodeId) || []; group.push(node); groups.set(node.episodeId, group); }
+    for (const node of model.nodes) { if (picked.has(node.id)) continue; const group = groups.get(node.episodeId) || []; group.push(node); groups.set(node.episodeId, group); }
+    // Interleave kinds within each episode, so an overview cannot be consumed by Snacks before ideas.
+    for (const [episode, group] of groups) {
+      const kinds = ['concept','claim','snack','example','question'];
+      const buckets = kinds.map(kind => group.filter(node => node.kind === kind));
+      buckets.push(group.filter(node => !kinds.includes(node.kind)));
+      const interleaved = [];
+      for (let index = 0; interleaved.length < group.length; index++) for (const bucket of buckets) if (bucket[index]) interleaved.push(bucket[index]);
+      groups.set(episode, interleaved);
+    }
     for (let offset = 0; picked.size < Math.min(limit, model.nodes.length); offset++) {
       let added = false;
       for (const group of groups.values()) if (group[offset]) { add(group[offset].id); added = true; }
