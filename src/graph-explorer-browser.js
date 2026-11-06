@@ -91,14 +91,14 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   const releaseDraggedNode = () => {
     if (!draggedId) return;
     const node = simulationNodeById.get(draggedId);
-    if (node) { node.fx = node.kind === 'root' ? 0 : null; node.fy = node.kind === 'root' ? 0 : null; }
-    draggedId = null; renderer.getCamera().enable(); renderer.getContainer().style.cursor = 'grab'; reheatLayout(0.42);
+    if (node) { node.fx = (focusedEpisode ? node.id === model.focus.id : node.kind === 'root') ? 0 : null; node.fy = (focusedEpisode ? node.id === model.focus.id : node.kind === 'root') ? 0 : null; }
+    draggedId = null; renderer.getCamera().enable(); renderer.getContainer().style.cursor = 'grab'; if (dragged) reheatLayout(0.12);
   };
   renderer.on('downNode', ({ node, event }) => {
     event.preventSigmaDefault(); draggedId = node; dragged = false;
     const simulationNode = simulationNodeById.get(node);
     if (simulationNode) { simulationNode.fx = simulationNode.x; simulationNode.fy = simulationNode.y; }
-    renderer.getCamera().disable(); renderer.getContainer().style.cursor = 'grabbing'; reheatLayout(0.08);
+    renderer.getCamera().disable(); renderer.getContainer().style.cursor = 'grabbing';
   });
   renderer.on('moveBody', ({ event }) => {
     if (!draggedId) return;
