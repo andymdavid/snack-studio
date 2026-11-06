@@ -34,7 +34,7 @@ export function placeGraphLabels(nodes, options) {
     if(node.id===selectedId||node.id===hoveredId)positions.push({x:14,y:52},{x:width-labelWidth-14,y:52});
     const position=positions.find(rect=>{
       const box={...rect,width:labelWidth,height:labelHeight};
-      return box.x>=14&&box.y>=40&&box.x+box.width<=width-14&&box.y+box.height<=height-90&&!labels.some(label=>intersects(box,label))&&!nodes.some(other=>other.id!==node.id&&intersects(box,{x:other.x-other.size-2,y:other.y-other.size-2,width:other.size*2+4,height:other.size*2+4},2));
+      return box.x>=14&&box.y>=40&&box.x+box.width<=width-14&&box.y+box.height<=height-90&&!labels.some(label=>intersects(box,label))&&(slot||!nodes.some(other=>other.id!==node.id&&intersects(box,{x:other.x-other.size-2,y:other.y-other.size-2,width:other.size*2+4,height:other.size*2+4},2)));
     });
     if(position)labels.push({id:node.id,kind:node.kind,text,...position,width:labelWidth,height:labelHeight,nodeX:node.x,nodeY:node.y,active:node.id===selectedId||node.id===hoveredId});
   }
