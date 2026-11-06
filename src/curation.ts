@@ -146,8 +146,8 @@ export function createRelationship(input: {
   return listRelationships(input.episodeId).find((item) => item.id === id)!;
 }
 
-export function listGraphCandidates() {
-  return (db.query(`SELECT c.id AS candidate_id,c.episode_id,c.review_decision,r.public_title,r.standfirst,e.episode_number,e.working_title,
+export function listGraphCandidates(database = db) {
+  return (database.query(`SELECT c.id AS candidate_id,c.episode_id,c.review_decision,r.public_title,r.standfirst,e.episode_number,e.working_title,
       theme.id AS theme_id,theme.name AS theme_name,theme.description AS theme_description,theme.colour AS theme_colour
     FROM snack_candidates c JOIN snack_revisions r ON r.id=c.current_revision_id JOIN episodes e ON e.id=c.episode_id
     LEFT JOIN snack_theme_assignments assignment ON assignment.snack_revision_id=r.id
@@ -159,21 +159,29 @@ export function listGraphCandidates() {
     }));
 }
 
-export function listGraphContributors() {
+export function listGraphContributors(database = db) {
   const episodeIdsByContributor = new Map<string, Set<string>>();
-  const jobs = db.query("SELECT episode_id,contributor_ids_json FROM thumbnail_jobs").all() as Record<string, unknown>[];
-  for (const job of jobs) {
-    let ids: string[] = []; try { const parsed = JSON.parse(String(job.contributor_ids_json || '[]')); if (Array.isArray(parsed)) ids = parsed.map(String); } catch {}
-    for (const id of ids) { const episodes = episodeIdsByContributor.get(id) || new Set<string>(); episodes.add(String(job.episode_id)); episodeIdsByContributor.set(id, episodes); }
+  const memberships = database.query('SELECT episode_id,contributor_id FROM graph_episode_contributors').all() as Array<{episode_id:string;contributor_id:string}>;
+  for (const row of memberships) {
+    const episodes = episodeIdsByContributor.get(row.contributor_id) || new Set<string>();
+    episodes.add(row.episode_id); episodeIdsByContributor.set(row.contributor_id,episodes);
   }
-  return (db.query("SELECT id,name,role,short_bio,aliases_json FROM contributors ORDER BY name COLLATE NOCASE").all() as Record<string, unknown>[]).map((row) => {
+  const reviewedEpisodes = new Set((database.query('SELECT episode_id FROM graph_participant_reviews').all() as Array<{episode_id:string}>).map(row=>row.episode_id));
+  const attributed = database.query(`SELECT DISTINCT n.episode_id,evidence.speaker FROM knowledge_evidence evidence
+    JOIN knowledge_nodes n ON n.id=evidence.knowledge_node_id JOIN episodes e ON e.id=n.episode_id
+    WHERE n.source_transcript_revision_id=e.active_transcript_revision_id AND n.review_state='accepted' AND evidence.speaker IS NOT NULL`).all() as Array<{episode_id:string;speaker:string}>;
+  return (database.query("SELECT id,name,role,short_bio,aliases_json FROM contributors ORDER BY name COLLATE NOCASE").all() as Record<string, unknown>[]).map((row) => {
     let aliases: string[] = []; try { const parsed = JSON.parse(String(row.aliases_json || '[]')); if (Array.isArray(parsed)) aliases = parsed.map(String); } catch {}
-    return { contributorId: String(row.id), name: String(row.name), role: String(row.role || ''), shortBio: String(row.short_bio || ''), aliases, episodeIds: [...(episodeIdsByContributor.get(String(row.id)) || [])] };
+    const normalize = (value:string) => value.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+    const labels = new Set([String(row.name),...aliases].map(normalize));
+    const episodeIds = episodeIdsByContributor.get(String(row.id)) || new Set<string>();
+    for (const item of attributed) if (!reviewedEpisodes.has(item.episode_id) && labels.has(normalize(item.speaker))) episodeIds.add(item.episode_id);
+    return { contributorId: String(row.id), name: String(row.name), role: String(row.role || ''), shortBio: String(row.short_bio || ''), aliases, episodeIds: [...episodeIds] };
   });
 }
 
-export function listAllRelationships() {
-  const rows = db.query(`SELECT rel.*,source_revision.public_title AS source_title,target_revision.public_title AS target_title
+export function listAllRelationships(database = db) {
+  const rows = database.query(`SELECT rel.*,source_revision.public_title AS source_title,target_revision.public_title AS target_title
     FROM relationships rel JOIN snack_candidates source ON source.id=rel.source_candidate_id JOIN snack_revisions source_revision ON source_revision.id=source.current_revision_id
     JOIN snack_candidates target ON target.id=rel.target_candidate_id JOIN snack_revisions target_revision ON target_revision.id=target.current_revision_id
     ORDER BY rel.updated_at DESC`).all() as Record<string, unknown>[];
