@@ -32,7 +32,7 @@ export function importReviewedGraphPilot(db:Database,concepts:PilotConcept[],rel
    const context=loadReconciliationContext(db),sources=context.observations.filter(o=>o.episodeId===episodeId),batch=createReconciliationBatch(db,episodeId,sources[0]!.revisionId,context,'pilot-import');
    const subset=entries.filter(e=>sources.some(o=>o.id===e.proposal.sourceId)),ids=submitReconciliationProposals(db,batch.id,subset.map(e=>e.proposal));
    subset.forEach((e,i)=>reviewReconciliationProposal(db,ids[i]!,'accepted',e.reviewer,'Imported existing reviewed pilot; exact sources verified.',context,e.method));
-   finishReconciliationBatch(db,batch.id,context);
+   finishReconciliationBatch(db,batch.id,context,subset[0]!.reviewer,'Imported reviewed pilot only; not full episode reconciliation.');
   }
   const report={conceptMentions:entries.filter(e=>e.proposal.kind==='concept').length,relationships:relationships.length,episodes:episodes.length,replay:false};
   db.query('INSERT INTO graph_reconciliation_imports VALUES(?1,?2,?3)').run(importId,JSON.stringify(report),Date.now());return report;

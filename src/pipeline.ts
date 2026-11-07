@@ -1,4 +1,5 @@
-import { ALLOW_MOCK, HTTP_TRIGGER_TOKEN, PIPELINE_NAME, WEBHOOK_SECRET, WINGMAN_URL } from "./config.ts";
+import { ALLOW_MOCK, HTTP_TRIGGER_TOKEN, PIPELINE_NAME, WEBHOOK_SECRET, WINGMAN_URL, DB_PATH } from "./config.ts";
+import { resolve } from 'node:path';
 import type { Message } from "./db.ts";
 
 export type PipelineStartInput = {
@@ -61,6 +62,7 @@ export type EpisodePipelineTriggerRequest = {
       pipelineVersion: string | null;
       promptSuiteVersion: string;
       resultSchemaVersion: string;
+      reconciliationDatabasePath?: string;
       localContext: {
         references: Array<{
           type: "pipeline-context" | "transcript";
@@ -168,6 +170,7 @@ export function buildEpisodePipelineTriggerRequest(input: {
         pipelineVersion: input.pipelineVersion,
         promptSuiteVersion: input.promptSuiteVersion,
         resultSchemaVersion: input.resultSchemaVersion,
+        ...(input.pipelineName==='snack-studio-graph-relationships'&&input.pipelineVersion==='10'?{reconciliationDatabasePath:resolve(DB_PATH)}:{}),
         localContext: {
           references: [
             { type: "pipeline-context", url: input.contextUrl, authorization: "" },

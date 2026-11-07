@@ -4,7 +4,7 @@ This adds an evidence-pinned reconciliation layer after episode extraction. It d
 
 ## Delivery and activation status
 
-The schema, store, retrieval baseline, staging/review API, CLI, pilot importer and pipeline definitions are implemented on the feature branch. The pipeline definitions under `pipelines/` are staged source, not installed production definitions. The running service has not been restarted, its live database has not been migrated, and archive candidate suggestions have not been accepted in bulk.
+The schema, store, retrieval baseline, staging/review API, CLI, pilot importer and pipeline definitions are implemented on the feature branch. The v10 parent definition under `pipelines/` is staged source, not the active production definition. The new child can be registered separately for a signed shadow run. The running service has not been restarted, its live database has not been migrated, and archive candidate suggestions have not been accepted in bulk.
 
 The existing extraction callback now queues reconciliation in the same transaction as extraction completion. Queueing does not mean a model run has started or finished. The v10 parent definition runs the new reconciliation child after the episode webhook; its failure policy records archive errors separately. Do not switch the service's current graph contract to v10 until both definitions/functions are registered and the shadow run below passes. Existing concurrent runtime changes use v9 while committed main still specifies v7: reconcile those changes before activating v10, rather than overwriting them.
 
@@ -27,7 +27,7 @@ The existing extraction callback now queues reconciliation in the same transacti
 - POST `{action:"prepare",episodeId,revisionId}`: grounded observations and bounded archive candidates, pinned batch/snapshot.
 - POST `{action:"submit",batchId,snapshot,proposals}`: validate and stage proposals against the current snapshot.
 - POST `{action:"review",proposalId,decision:"accepted"|"rejected",rationale}`: explicit decision attributed to the authenticated editor.
-- POST `{action:"finish",batchId}`: atomically apply accepted concept mentions and complete the batch. Outstanding proposals block completion.
+- POST `{action:"finish",batchId,rationale}`: atomically apply accepted concept mentions and complete the batch. Outstanding proposals block completion.
 
 Existing graph/website styling is reused. No new bespoke page or visual controls are introduced.
 
@@ -50,7 +50,7 @@ bun scripts/graph-reconciliation.ts evaluate --db /absolute/path/to/shadow.sqlit
 1. Merge/reconcile the Studio feature branch with current runtime development. Preserve unrelated dirty files. Validate the full diff before applying migration 043 to a backed-up live database.
 2. Register the two versioned function files and the child pipeline v1 from this repository in the user's current pipeline root. Their absolute imports target `/workspace/code/snack-studio`; configure their databasePath explicitly. They never create a missing database or silently install migrations.
 3. Run the child against the shadow database for a complete episode. Verify all source assessments and critic recommendations, including meaningful abstentions. Review staged proposals explicitly; confirm unchanged replay, changed transcript rejection and atomic completion. Source-level tests alone do not prove a live model run.
-4. Copy the parent v10 definition as a new version, preserving v9. Once the child is verified, update Studio's current graph pipeline version/prompt suite and include the explicit `reconciliationDatabasePath` in its trigger payload. The backend change requires managed service restart approval and an HTTP smoke test. No restart is implicit in deployment permission.
+4. Copy the parent v10 definition as a new version, preserving v9. Once the child is verified, enable `SNACK_STUDIO_ARCHIVE_RECONCILIATION=1`. The backend selects v10, the browser fetches its contract, and the trigger carries the absolute `reconciliationDatabasePath`. The backend change requires managed service restart approval and an HTTP smoke test. No restart is implicit in deployment permission.
 5. Backfill the remaining archive in reviewed, resumable batches. Keep pending/blocked/failed episodes in the denominator. Preserve all original observations, even if they cannot yet ground new links.
 6. Import the reviewed pilot before public cutover. Export Studio concept and relationship registries together; deploy website registry support before publishing new relationship types. Verify exact source links, full node retention, distinct episode reach and partial coverage labels. Website release remains main → fast-forward deployed → push deployed → live verification.
 
@@ -62,6 +62,6 @@ The first isolated archive run grounded 525 of 526 accepted observations across 
 
 ## Validation
 
-Run `bun run check` and `bun test src/graph-reconciliation.test.ts`. The broader committed-main test suite already has three failing tests (over-500 graph selection and two thumbnail trigger authorization cases); compare against main and report rather than treating them as introduced regressions.
+Run `bun run check`, `bun test src/graph-reconciliation.test.ts src/knowledge-identities.test.ts src/pipeline.test.ts src/pipeline-requests.test.ts`, and `bun scripts/verify-archive-reconciliation-http.ts /absolute/path/to/shadow.sqlite`. The HTTP smoke owns and stops only a temporary local child server, signs a temporary test identity, and operates on a disposable database copy. It does not launch a model run. The broader committed-main test suite already has three failing tests (over-500 graph selection and two thumbnail trigger authorization cases); compare against main and report rather than treating them as introduced regressions.
 
 Recovery uses the existing SQLite snapshot mechanism. Additive schema leaves source tables intact; restoring a pre-activation snapshot is the recovery path for a failed live migration. Never delete a live archive or re-extract it merely to reduce fragmentation. Growing hub counts and shrinking components are not quality measures by themselves.

@@ -52,6 +52,9 @@ export function installReconciliationSchema(db: Database) {
       status TEXT NOT NULL CHECK(status IN ('queued','review','complete','failed')),
       batch_id TEXT, error TEXT, updated_at INTEGER NOT NULL,
       PRIMARY KEY(episode_id,revision_id,contract_version));
+    CREATE TABLE IF NOT EXISTS graph_reconciliation_completions (
+      batch_id TEXT PRIMARY KEY REFERENCES graph_reconciliation_batches(id),
+      reviewer TEXT NOT NULL, rationale TEXT NOT NULL, created_at INTEGER NOT NULL);
   `);
   const columns=db.query('PRAGMA table_info(graph_reconciliation_batches)').all() as Array<{name:string}>;
   if(!columns.some(c=>c.name==='scope'))db.exec("ALTER TABLE graph_reconciliation_batches ADD COLUMN scope TEXT NOT NULL DEFAULT 'episode'");
@@ -178,7 +181,8 @@ export function reviewReconciliationProposal(db: Database, proposalId: string, d
   return { replay:false };
 }
 
-export function finishReconciliationBatch(db: Database, batchId: string, current: ReconciliationContext) {
+export function finishReconciliationBatch(db: Database, batchId: string, current: ReconciliationContext, reviewer:string, rationale:string) {
+  if(!reviewer?.trim()||!rationale?.trim())throw new Error('Explicit batch review attribution and rationale required');
   const row = db.query('SELECT snapshot,status FROM graph_reconciliation_batches WHERE id=?1').get(batchId) as {snapshot:string;status:string} | null;
   if(row?.status==='complete')return;
   if (!row || row.snapshot !== contextSnapshot(current) || row.status === 'pending' || row.status === 'stale') throw new Error('Batch must be submitted against current archive');
@@ -201,6 +205,7 @@ export function finishReconciliationBatch(db: Database, batchId: string, current
       for(const alias of c.aliases)db.query('INSERT OR IGNORE INTO graph_concept_aliases VALUES(?1,?2)').run(c.id,alias.trim());
     }
     db.query("UPDATE graph_reconciliation_batches SET status='complete',updated_at=?2 WHERE id=?1").run(batchId,Date.now());
+    db.query('INSERT INTO graph_reconciliation_completions VALUES(?1,?2,?3,?4)').run(batchId,reviewer,rationale,Date.now());
     db.query("UPDATE graph_reconciliation_jobs SET status='complete',updated_at=?2 WHERE batch_id=?1").run(batchId,Date.now());
   })();
 }

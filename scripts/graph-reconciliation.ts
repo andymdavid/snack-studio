@@ -28,7 +28,7 @@ try{
   const decision=required('decision');if(!['accepted','rejected'].includes(decision))throw new Error('Invalid decision');
   console.log(JSON.stringify(reviewReconciliationProposal(db,required('proposal'),decision as 'accepted'|'rejected',required('reviewer'),required('rationale'),loadReconciliationContext(db),options.get('--method')||'editor-explicit-review')));
  }else if(command==='finish'){
-  finishReconciliationBatch(db,required('batch'),loadReconciliationContext(db));console.log(JSON.stringify({complete:true}));
+  finishReconciliationBatch(db,required('batch'),loadReconciliationContext(db),required('reviewer'),required('rationale'));console.log(JSON.stringify({complete:true}));
  }else if(command==='export'){
   const context=loadReconciliationContext(db),ids=new Set(context.observations.map(o=>o.nodeId));
   writeFileSync(required('out'),JSON.stringify({...reconciliationPublicData(db,context,ids),coverage:reconciliationCoverage(db,context)},null,2)+'\n');console.log(JSON.stringify({written:required('out')}));

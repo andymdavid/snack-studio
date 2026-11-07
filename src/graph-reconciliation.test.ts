@@ -39,7 +39,7 @@ test('changed meaning creates a distinct identity and retains history',()=>{
  expect((db.query('SELECT COUNT(*) n FROM graph_observation_versions').get() as {n:number}).n).toBe(3);
 });
 test('no candidate links is a valid completed batch',()=>{
- const {db,batch,context}=fixture();submitReconciliationProposals(db,batch.id,[]);finishReconciliationBatch(db,batch.id,context);expect(acceptedReconciliation(db,context)).toEqual([]);
+ const {db,batch,context}=fixture();submitReconciliationProposals(db,batch.id,[]);finishReconciliationBatch(db,batch.id,context,'editor','Reviewed all source observations in this fixture.');expect(acceptedReconciliation(db,context)).toEqual([]);
 });
 test('proposal replay is idempotent and changed replay is rejected',()=>{
  const {db,batch,proposal}=fixture();const first=submitReconciliationProposals(db,batch.id,[proposal]);expect(submitReconciliationProposals(db,batch.id,[proposal])).toEqual(first);
@@ -53,13 +53,13 @@ test('proposal validation is atomic, grounded at both ends and archive-only',()=
 });
 test('unreviewed and partly reviewed batches cannot publish',()=>{
  const {db,batch,proposal,context}=fixture();const [id]=submitReconciliationProposals(db,batch.id,[proposal]);expect(acceptedReconciliation(db,context)).toEqual([]);
- expect(()=>finishReconciliationBatch(db,batch.id,context)).toThrow('outstanding');
+ expect(()=>finishReconciliationBatch(db,batch.id,context,'editor','Reviewed all source observations in this fixture.')).toThrow('outstanding');
  reviewReconciliationProposal(db,id!,'accepted','editor','Checked both source passages',context);
- expect(acceptedReconciliation(db,context)).toEqual([]);finishReconciliationBatch(db,batch.id,context);expect(acceptedReconciliation(db,context)).toHaveLength(1);
+ expect(acceptedReconciliation(db,context)).toEqual([]);finishReconciliationBatch(db,batch.id,context,'editor','Reviewed all source observations in this fixture.');expect(acceptedReconciliation(db,context)).toHaveLength(1);
 });
 test('rejections and explicit review metadata are retained and never published',()=>{
  const {db,batch,proposal,context}=fixture();const [id]=submitReconciliationProposals(db,batch.id,[proposal]);expect(()=>reviewReconciliationProposal(db,id!,'accepted','','',context)).toThrow('attribution');
- reviewReconciliationProposal(db,id!,'rejected','editor','Same topic, different meaning',context);finishReconciliationBatch(db,batch.id,context);expect(acceptedReconciliation(db,context)).toEqual([]);
+ reviewReconciliationProposal(db,id!,'rejected','editor','Same topic, different meaning',context);finishReconciliationBatch(db,batch.id,context,'editor','Reviewed all source observations in this fixture.');expect(acceptedReconciliation(db,context)).toEqual([]);
  expect((db.query('SELECT rationale FROM graph_reconciliation_decisions').get() as {rationale:string}).rationale).toBe('Same topic, different meaning');
 });
 test('review replay creates no duplicate decisions and cannot overwrite prior decisions',()=>{
@@ -70,18 +70,18 @@ test('review replay creates no duplicate decisions and cannot overwrite prior de
 test('concurrent archive changes block acceptance and stale endpoint revisions stop export',()=>{
  const {db,batch,proposal,context,a,make}=fixture();const [id]=submitReconciliationProposals(db,batch.id,[proposal]);const changed={...context,observations:[make('a-next','ep-a','rev-2'),context.observations[1]!]};
  expect(()=>reviewReconciliationProposal(db,id!,'accepted','editor','Supported',changed)).toThrow('Archive changed');
- reviewReconciliationProposal(db,id!,'accepted','editor','Supported',context);finishReconciliationBatch(db,batch.id,context);
+ reviewReconciliationProposal(db,id!,'accepted','editor','Supported',context);finishReconciliationBatch(db,batch.id,context,'editor','Reviewed all source observations in this fixture.');
  expect(acceptedReconciliation(db,changed)).toEqual([]);expect(acceptedReconciliation(db,context)[0]!.sourceId).toBe(a.id);
 });
 test('accepted relationships preserve source IDs, revisions and evidence in public export',()=>{
- const {db,batch,proposal,context}=fixture();const [id]=submitReconciliationProposals(db,batch.id,[proposal]);reviewReconciliationProposal(db,id!,'accepted','editor','Supported',context);finishReconciliationBatch(db,batch.id,context);
+ const {db,batch,proposal,context}=fixture();const [id]=submitReconciliationProposals(db,batch.id,[proposal]);reviewReconciliationProposal(db,id!,'accepted','editor','Supported',context);finishReconciliationBatch(db,batch.id,context,'editor','Reviewed all source observations in this fixture.');
  expect(reconciliationPublicData(db,context,new Set(['a','b'])).relationshipRegistry.relationships[0]).toMatchObject({sourceId:'a',targetId:'b',reviewer:'editor',sources:[{nodeId:'a',transcriptRevisionId:'rev-1',evidenceIds:['ev-a']},{nodeId:'b',transcriptRevisionId:'rev-1',evidenceIds:['ev-b']}]});
  expect(reconciliationPublicData(db,context,new Set(['a'])).relationshipRegistry.relationships).toEqual([]);
 });
 test('concept assignment preserves distinct claims and creates canonical mentions only after completion',()=>{
  const {db,batch,context,a}=fixture();const proposal:ReconciliationProposal={key:'concept-memory',kind:'concept',sourceId:a.id,concept:{id:'graph-memory',title:'Graph memory',summary:'Connected records as retrievable memory.',aliases:['connected memory']},explanation:'This observation concerns connected retrievable memory.',evidence:[{observationId:a.id,evidenceIds:['ev-a']}]};
  const [id]=submitReconciliationProposals(db,batch.id,[proposal]);reviewReconciliationProposal(db,id!,'accepted','editor','Checked definition',context);
- expect(db.query('SELECT * FROM canonical_concepts').all()).toEqual([]);finishReconciliationBatch(db,batch.id,context);
+ expect(db.query('SELECT * FROM canonical_concepts').all()).toEqual([]);finishReconciliationBatch(db,batch.id,context,'editor','Reviewed all source observations in this fixture.');
  expect(db.query('SELECT * FROM canonical_concept_mentions').all()).toEqual([{concept_id:'graph-memory',knowledge_node_id:'a'}]);
  expect(reconciliationPublicData(db,context,new Set(['a','b'])).conceptRegistry.concepts[0]!.mentions).toEqual(['a']);
  expect(context.observations).toHaveLength(2);
@@ -98,7 +98,7 @@ test('retrieval finds lexical/alias candidates but does not make decisions or fo
  expect(()=>retrieveArchiveCandidates(c,a,500)).toThrow('limit');
 });
 test('completed batches cannot be reopened to add unreviewed proposals',()=>{
- const {db,batch,context,proposal}=fixture();submitReconciliationProposals(db,batch.id,[]);finishReconciliationBatch(db,batch.id,context);
+ const {db,batch,context,proposal}=fixture();submitReconciliationProposals(db,batch.id,[]);finishReconciliationBatch(db,batch.id,context,'editor','Reviewed all source observations in this fixture.');
  expect(()=>submitReconciliationProposals(db,batch.id,[proposal])).toThrow('immutable');
  expect(submitReconciliationProposals(db,batch.id,[])).toEqual([]);
 });
@@ -122,4 +122,16 @@ test('ambiguous excerpts remain in source graph but cannot ground new archive de
  const {db}=fixture();db.query("UPDATE knowledge_evidence SET excerpt='absent',transcript_start=NULL,transcript_end=NULL WHERE knowledge_node_id='a'").run();
  const context=loadReconciliationContext(db);expect(context.observations.map(o=>o.nodeId)).toEqual(['b']);expect(reconciliationCoverage(db,context).find(e=>e.episodeId==='ep-a')!.status).toBe('blocked-evidence');
  expect((db.query("SELECT COUNT(*) n FROM knowledge_nodes WHERE id='a'").get() as {n:number}).n).toBe(1);
+});
+test('acceptance rechecks live evidence inside the decision transaction',()=>{
+ const {db,batch,context,proposal}=fixture();const [id]=submitReconciliationProposals(db,batch.id,[proposal]);
+ db.query("UPDATE knowledge_evidence SET speaker='Different speaker' WHERE id='ev-b'").run();
+ expect(()=>reviewReconciliationProposal(db,id!,'accepted','editor','Checked earlier snapshot',context)).toThrow('Source evidence changed');
+ expect(db.query('SELECT * FROM graph_reconciliation_decisions').all()).toEqual([]);
+});
+test('schema additions roll back with a failed migration and leave source tables intact',()=>{
+ const db=new Database(':memory:');databases.push(db);db.exec('CREATE TABLE canonical_concepts(id TEXT PRIMARY KEY)');
+ expect(()=>db.transaction(()=>{installReconciliationSchema(db);throw new Error('simulated failure');})()).toThrow('simulated failure');
+ expect(db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='graph_observation_versions'").all()).toEqual([]);
+ expect(db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='canonical_concepts'").all()).toHaveLength(1);
 });

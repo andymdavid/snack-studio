@@ -1123,8 +1123,12 @@ function renderGraphOverview(model) {
   return section;
 }
 
+let graphContract = { pipelineVersion: '7', promptSuiteVersion: 'v7-governed-roots-reusable-subtopics', resultSchemaVersion: '5' };
+async function refreshGraphContract() { graphContract = await api('/api/graph/contract'); return graphContract; }
+
 async function startKnowledgePipelineForEpisode(episode) {
-  const prepared = await api(`/api/episodes/${encodeURIComponent(episode.episodeId)}/pipeline-requests`, { method: 'POST', body: JSON.stringify({ operation: 'publication-metadata', pipelineName: 'snack-studio-graph-relationships', pipelineVersion: '7', promptSuiteVersion: 'v7-governed-roots-reusable-subtopics', resultSchemaVersion: '5', idempotencyKey: `graph-v7:${episode.episodeId}:${episode.transcriptRevisionId}`, autopilotTargetId: state.activeAutopilotTargetId || undefined }) });
+  await refreshGraphContract();
+  const prepared = await api(`/api/episodes/${encodeURIComponent(episode.episodeId)}/pipeline-requests`, { method: 'POST', body: JSON.stringify({ operation: 'publication-metadata', pipelineName: 'snack-studio-graph-relationships', pipelineVersion: graphContract.pipelineVersion, promptSuiteVersion: graphContract.promptSuiteVersion, resultSchemaVersion: graphContract.resultSchemaVersion, idempotencyKey: `graph-v${graphContract.pipelineVersion}:${episode.episodeId}:${episode.transcriptRevisionId}`, autopilotTargetId: state.activeAutopilotTargetId || undefined }) });
   const triggerRequest = structuredClone(prepared.triggerRequest);
   for (const reference of triggerRequest.body?.input?.localContext?.references || []) reference.authorization = await signNip98Request({ url: reference.url, method: 'GET' });
   const autopilotAuthorization = await signNip98Request(triggerRequest);
@@ -2598,7 +2602,7 @@ function renderPipelineRequestsSection(episode, requests) {
       const targetPipeline = currentTarget()?.defaultPipeline || "snack-studio-transcript-to-snacks";
       const obsoleteSnackPipeline = request.operation === "transcript-to-snacks" && request.pipelineName !== targetPipeline;
       const obsoleteGraphPipeline = request.pipelineName === 'snack-studio-graph-relationships'
-        && (request.pipelineVersion !== '7' || request.promptSuiteVersion !== 'v7-governed-roots-reusable-subtopics' || request.resultSchemaVersion !== '5');
+        && (request.pipelineVersion !== graphContract.pipelineVersion || request.promptSuiteVersion !== graphContract.promptSuiteVersion || request.resultSchemaVersion !== graphContract.resultSchemaVersion);
       const obsoletePipeline = obsoleteSnackPipeline || obsoleteGraphPipeline;
       retry.textContent = obsoleteGraphPipeline ? "Superseded" : obsoletePipeline ? "Return to Setup" : request.status === "awaiting-authorization" ? "Resume" : "Retry";
       retry.disabled = obsoleteGraphPipeline || !state.me?.access?.edit;
@@ -3276,7 +3280,8 @@ async function approveFinalCandidateBatch() {
 const THEME_CLASSIFIER_PIPELINE = 'snack-studio-publication-metadata';
 
 async function ensureActiveEpisodeKnowledgeGraph() {
-  const existing = state.pipelineRequests.some((request) => request.pipelineName === 'snack-studio-graph-relationships' && request.pipelineVersion === '7' && request.promptSuiteVersion === 'v7-governed-roots-reusable-subtopics' && request.resultSchemaVersion === '5' && request.inputTranscriptRevisionId === state.activeEpisode?.activeTranscriptRevisionId && !['failed','timed-out','cancelled','needs-review'].includes(request.status));
+  await refreshGraphContract();
+  const existing = state.pipelineRequests.some((request) => request.pipelineName === 'snack-studio-graph-relationships' && request.pipelineVersion === graphContract.pipelineVersion && request.promptSuiteVersion === graphContract.promptSuiteVersion && request.resultSchemaVersion === graphContract.resultSchemaVersion && request.inputTranscriptRevisionId === state.activeEpisode?.activeTranscriptRevisionId && !['failed','timed-out','cancelled','needs-review'].includes(request.status));
   if (existing || !state.activeEpisode?.activeTranscriptRevisionId) return;
   const request = await startKnowledgePipelineForEpisode({ episodeId: state.activeEpisode.id, transcriptRevisionId: state.activeEpisode.activeTranscriptRevisionId });
   state.pipelineRequests = [request, ...state.pipelineRequests.filter((item) => item.id !== request.id)];

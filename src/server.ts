@@ -1,5 +1,6 @@
 import { listGraphParticipants, setGraphParticipants } from './graph-participants.ts';
 import { listCanonicalConcepts, saveCanonicalConcept, type ConceptInput } from './canonical-concepts.ts';
+import { CURRENT_KNOWLEDGE_GRAPH_CONTRACT } from './pipeline-requests.ts';
 import { loadReconciliationContext, prepareEpisodeReconciliation, reconciliationCoverage } from './graph-reconciliation.ts';
 import { submitReconciliationProposals, reviewReconciliationProposal, finishReconciliationBatch, contextSnapshot, type ReconciliationProposal } from './graph-reconciliation-store.ts';
 import { join } from "node:path";
@@ -326,6 +327,10 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     }
     return json({error:'method not allowed'},405);
   }
+  if(pathname==='/api/graph/contract'&&req.method==='GET'){
+    const session=requireSession(req);if(!session||!hasAccess(session.pubkey,'read'))return json({error:'read access required'},403);
+    return json(CURRENT_KNOWLEDGE_GRAPH_CONTRACT);
+  }
   if (pathname === '/api/graph/reconciliation') {
     const session=requireSession(req);if(!session)return json({error:'unauthorized'},401);
     if(!hasAccess(session.pubkey,req.method==='GET'?'read':'edit'))return json({error:'access required'},403);
@@ -342,7 +347,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
         return json({proposalIds:submitReconciliationProposals(db,String(body.batchId),body.proposals as ReconciliationProposal[])});
       }
       if(body.action==='review')return json(reviewReconciliationProposal(db,String(body.proposalId),body.decision as 'accepted'|'rejected',session.pubkey,String(body.rationale||''),loadReconciliationContext(db)));
-      if(body.action==='finish'){finishReconciliationBatch(db,String(body.batchId),loadReconciliationContext(db));return json({ok:true});}
+      if(body.action==='finish'){finishReconciliationBatch(db,String(body.batchId),loadReconciliationContext(db),session.pubkey,String(body.rationale||''));return json({ok:true});}
       return json({error:'Unknown reconciliation action'},400);
     }catch(error){return json({error:error instanceof Error?error.message:String(error)},409);}
   }
