@@ -1,7 +1,7 @@
 {
   "name": "snack-studio-archive-reconciliation",
-  "version": 1,
-  "description": "Grounded cross-episode concept and relationship proposals with independent critique; editorial acceptance remains explicit.",
+  "version": 2,
+  "description": "Read Studio-owned context over delegated NIP-98, propose and critique archive connections, and return a scoped webhook for editorial review.",
   "tags": [
     "snack-studio",
     "graph",
@@ -9,25 +9,38 @@
     "review"
   ],
   "input": {
+    "requestId": "",
+    "attemptId": "",
     "episodeId": "",
     "inputRevisionId": "",
-    "databasePath": "",
+    "source": "snack-studio",
+    "operation": "publication-metadata",
+    "pipelineVersion": "2",
+    "resultSchemaVersion": "6",
     "agent": "codex",
-    "repositoryPath": "/workspace/code/snack-studio"
+    "localContext": {
+      "references": []
+    },
+    "webhook": {
+      "url": "",
+      "token": "",
+      "authHeader": "x-snack-studio-token"
+    }
   },
   "steps": [
     {
       "id": "prepare-archive-context",
       "name": "prepare-archive-context",
       "type": "code",
-      "description": "Pin current source observations and retrieve bounded archive candidates.",
-      "function": "snackStudio.prepareArchiveReconciliationV1",
+      "description": "Fetch the app-prepared archive batch through its signed, attempt-bound API reference.",
+      "function": "snackStudio.fetchArchiveReconciliationV2",
       "input": {
         "pick": {
+          "requestId": "$.requestId",
+          "attemptId": "$.attemptId",
           "episodeId": "$.episodeId",
-          "revisionId": "$.inputRevisionId",
-          "databasePath": "$.databasePath",
-          "repositoryPath": "$.repositoryPath"
+          "inputRevisionId": "$.inputRevisionId",
+          "localContext": "$.localContext"
         }
       },
       "assign": "$.archive",
@@ -54,7 +67,7 @@
       "type": "agent",
       "description": "Resolve recurring concepts and propose evidence-supported reasoning links separately.",
       "agent": "$.agent",
-      "directory": "$.repositoryPath",
+      "directory": "/workspace/code/snack-studio",
       "timeoutMs": 1200000,
       "input": {
         "pick": {
@@ -91,7 +104,7 @@
       "type": "agent",
       "description": "Independently challenge identity matches and relationship explanations against exact sources.",
       "agent": "$.agent",
-      "directory": "$.repositoryPath",
+      "directory": "/workspace/code/snack-studio",
       "timeoutMs": 1200000,
       "input": {
         "pick": {
@@ -119,21 +132,23 @@
       }
     },
     {
-      "id": "stage-editorial-review",
-      "name": "stage-editorial-review",
+      "id": "return-archive-analysis",
+      "name": "return-archive-analysis",
       "type": "code",
-      "description": "Validate sources and critique coverage; stage proposals without publishing unreviewed links.",
-      "function": "snackStudio.stageArchiveReconciliationV1",
+      "description": "Build a callback envelope; Studio validates and persists proposals without accepting them.",
+      "function": "snackStudio.archiveReconciliationContractV2",
       "input": {
         "pick": {
-          "databasePath": "$.databasePath",
+          "requestId": "$.requestId",
+          "attemptId": "$.attemptId",
+          "episodeId": "$.episodeId",
+          "inputRevisionId": "$.inputRevisionId",
           "archive": "$.archive",
           "proposalResult": "$.proposalResult",
-          "critique": "$.critique",
-          "repositoryPath": "$.repositoryPath"
+          "critique": "$.critique"
         }
       },
-      "assign": "$.staged",
+      "assign": "$.final",
       "display": {
         "in": [
           {
@@ -149,14 +164,40 @@
         ],
         "out": [
           {
-            "label": "Review state",
-            "path": "$.status",
-            "format": "text"
-          },
+            "label": "Proposals",
+            "path": "$.proposalResult.proposals",
+            "format": "records"
+          }
+        ]
+      }
+    },
+    {
+      "id": "post-archive-analysis",
+      "name": "post-archive-analysis",
+      "type": "code",
+      "description": "Return the analysis through the attempt-scoped Studio webhook. Acceptance remains an editor action.",
+      "function": "shared.postWappWebhook",
+      "input": {
+        "pick": {
+          "requestId": "$.requestId",
+          "workflow": "$.operation",
+          "webhook": "$.webhook",
+          "agentResult": "$.final"
+        }
+      },
+      "assign": "$.webhookResult",
+      "display": {
+        "in": [
           {
-            "label": "Proposal IDs",
-            "path": "$.proposalIds",
-            "format": "list"
+            "label": "Proposals",
+            "path": "$.agentResult.proposalResult.proposals",
+            "format": "records"
+          }
+        ],
+        "out": [
+          {
+            "label": "Delivered",
+            "path": "$.ok"
           }
         ]
       }

@@ -4,9 +4,9 @@ This adds an evidence-pinned reconciliation layer after episode extraction. It d
 
 ## Delivery and activation status
 
-The schema, store, retrieval baseline, staging/review API, CLI, pilot importer and pipeline definitions are implemented on the feature branch. The v10 parent definition under `pipelines/` is staged source, not the active production definition. The new child can be registered separately for a signed shadow run. The running service has not been restarted, its live database has not been migrated, and archive candidate suggestions have not been accepted in bulk.
+The implementation is on the feature branch. The active candidate is archive pipeline v2, which reads app-owned context over delegated NIP-98 and returns results through the attempt-scoped Studio webhook. The earlier direct-SQL v1 and inline v10 parent draft are retired. Nothing has been activated in the running WApp.
 
-The existing extraction callback now queues reconciliation in the same transaction as extraction completion. Queueing does not mean a model run has started or finished. The v10 parent definition runs the new reconciliation child after the episode webhook; its failure policy records archive errors separately. Do not switch the service's current graph contract to v10 until both definitions/functions are registered and the shadow run below passes. Existing concurrent runtime changes use v9 while committed main still specifies v7: reconcile those changes before activating v10, rather than overwriting them.
+Extraction queues reconciliation in its own transaction. With `SNACK_STUDIO_ARCHIVE_RECONCILIATION=1`, Studio advertises a separate schema-6 archive contract, and its authenticated browser signs a fresh follow-up after extraction. It permits one archive run at a time, preserves unsigned attempts for explicit resume, and stops launching when the operator leaves the graph/episode surface. No persistent headless daemon is installed. Reconciliation does not change the existing extraction contract (runtime development currently uses v9; committed main uses v7). Existing concurrent source work must be preserved during integration.
 
 ## Invariants
 
@@ -24,6 +24,7 @@ The existing extraction callback now queues reconciliation in the same transacti
 `/api/graph/reconciliation` uses the existing Studio session and read/edit access checks.
 
 - GET: episode reconciliation coverage.
+- POST `{action:"queue-archive"}`: enqueue grounded archive episodes once using the same incremental queue. Requires the opt-in flag and editor access.
 - POST `{action:"prepare",episodeId,revisionId}`: grounded observations and bounded archive candidates, pinned batch/snapshot.
 - POST `{action:"submit",batchId,snapshot,proposals}`: validate and stage proposals against the current snapshot.
 - POST `{action:"review",proposalId,decision:"accepted"|"rejected",rationale}`: explicit decision attributed to the authenticated editor.
@@ -47,12 +48,13 @@ bun scripts/graph-reconciliation.ts evaluate --db /absolute/path/to/shadow.sqlit
 
 ## Pipeline installation and shadow verification
 
-1. Merge/reconcile the Studio feature branch with current runtime development. Preserve unrelated dirty files. Validate the full diff before applying migration 043 to a backed-up live database.
-2. Register the two versioned function files and the child pipeline v1 from this repository in the user's current pipeline root. Their absolute imports target `/workspace/code/snack-studio`; configure their databasePath explicitly. They never create a missing database or silently install migrations.
-3. Run the child against the shadow database for a complete episode. Verify all source assessments and critic recommendations, including meaningful abstentions. Review staged proposals explicitly; confirm unchanged replay, changed transcript rejection and atomic completion. Source-level tests alone do not prove a live model run.
-4. Copy the parent v10 definition as a new version, preserving v9. Once the child is verified, enable `SNACK_STUDIO_ARCHIVE_RECONCILIATION=1`. The backend selects v10, the browser fetches its contract, and the trigger carries the absolute `reconciliationDatabasePath`. The backend change requires managed service restart approval and an HTTP smoke test. No restart is implicit in deployment permission.
-5. Backfill the remaining archive in reviewed, resumable batches. Keep pending/blocked/failed episodes in the denominator. Preserve all original observations, even if they cannot yet ground new links.
-6. Import the reviewed pilot before public cutover. Export Studio concept and relationship registries together; deploy website registry support before publishing new relationship types. Verify exact source links, full node retention, distinct episode reach and partial coverage labels. Website release remains main → fast-forward deployed → push deployed → live verification.
+1. Reconcile the feature code with the runtime checkout's existing uncommitted work. Preserve extraction-version changes and unrelated editorial work. Back up the app database and use migration 043 before enabling new routes.
+2. Register `snack-studio-archive-reconciliation.v2.json` and its two v2 code functions. No pipeline function may open the Studio database or import its server modules. Studio retains database ownership.
+3. Start the archive request through Studio's normal `/api/episodes/:id/pipeline-requests` flow with operation `publication-metadata`, pipeline `snack-studio-archive-reconciliation`, version `2`, prompt suite `v2-api-archive-reconciliation`, schema `6`. Studio prepares a context URL bound to both request and attempt. Its authenticated browser signs that exact GET plus the pipeline trigger. Fetching the context happens immediately at archive launch, not before the preceding extraction run, avoiding expired signatures.
+4. The app prepares and records the batch/snapshot for that attempt. The pipeline returns only analysis and critic recommendations through its existing scoped webhook. Studio verifies callback credential, request/attempt identity, current source revision and exact prepared context before staging proposals. An expired signature, old attempt, wrong actor or changed source cannot authorize writes. Duplicate launches do not supersede an unsigned or active attempt.
+5. Run a complete model-driven shadow analysis before accepting new archive decisions. Contract tests use a disposable database and actual signed HTTP requests but are not model validation. This session currently lacks API access to launch that live test; an authenticated, authorized Studio/Autopilot context is required.
+6. Enable the flag only after review and explicit permission to restart the managed Snack Studio WApp. Do not restart Autopilot. Queue the existing archive via the editor API; future extracted episodes enter the same queue automatically. Failed/unsigned work stays visible through job and pipeline status and requires explicit recovery, rather than an unbounded retry loop.
+7. Review proposals, finish batches with an attributed rationale, and export accepted registries together. Deploy the compatible website code before new graph data. Release main → fast-forward deployed → push deployed, with live verification. Source-local observations and site styles remain intact.
 
 ## Retrieval evaluation
 

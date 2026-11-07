@@ -47,8 +47,8 @@ export type PipelineRequest = {
 
 export const CURRENT_KNOWLEDGE_GRAPH_CONTRACT = {
   pipelineName: 'snack-studio-graph-relationships',
-  pipelineVersion: process.env.SNACK_STUDIO_ARCHIVE_RECONCILIATION === '1' ? '10' : '7',
-  promptSuiteVersion: process.env.SNACK_STUDIO_ARCHIVE_RECONCILIATION === '1' ? 'v10-archive-reconciliation' : 'v7-governed-roots-reusable-subtopics',
+  pipelineVersion: '7',
+  promptSuiteVersion: 'v7-governed-roots-reusable-subtopics',
   resultSchemaVersion: '5',
 } as const;
 

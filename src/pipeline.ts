@@ -1,5 +1,4 @@
-import { ALLOW_MOCK, HTTP_TRIGGER_TOKEN, PIPELINE_NAME, WEBHOOK_SECRET, WINGMAN_URL, DB_PATH } from "./config.ts";
-import { resolve } from 'node:path';
+import { ALLOW_MOCK, HTTP_TRIGGER_TOKEN, PIPELINE_NAME, WEBHOOK_SECRET, WINGMAN_URL } from "./config.ts";
 import type { Message } from "./db.ts";
 
 export type PipelineStartInput = {
@@ -62,7 +61,6 @@ export type EpisodePipelineTriggerRequest = {
       pipelineVersion: string | null;
       promptSuiteVersion: string;
       resultSchemaVersion: string;
-      reconciliationDatabasePath?: string;
       localContext: {
         references: Array<{
           type: "pipeline-context" | "transcript";
@@ -150,7 +148,7 @@ export function buildEpisodePipelineTriggerRequest(input: {
   // The version is also retained in the payload for provenance, but Autopilot
   // resolves the definition from the route rather than from input metadata.
   const pipelineName = input.pipelineVersion
-    && ["snack-studio-transcript-to-snacks", "snack-studio-regenerate-snack", "snack-studio-publication-metadata", "snack-studio-graph-relationships"].includes(input.pipelineName)
+    && ["snack-studio-transcript-to-snacks", "snack-studio-regenerate-snack", "snack-studio-publication-metadata", "snack-studio-graph-relationships", "snack-studio-archive-reconciliation"].includes(input.pipelineName)
     ? `${input.pipelineName}.v${input.pipelineVersion}`
     : input.pipelineName;
   return {
@@ -170,7 +168,6 @@ export function buildEpisodePipelineTriggerRequest(input: {
         pipelineVersion: input.pipelineVersion,
         promptSuiteVersion: input.promptSuiteVersion,
         resultSchemaVersion: input.resultSchemaVersion,
-        ...(input.pipelineName==='snack-studio-graph-relationships'&&input.pipelineVersion==='10'?{reconciliationDatabasePath:resolve(DB_PATH)}:{}),
         localContext: {
           references: [
             { type: "pipeline-context", url: input.contextUrl, authorization: "" },
