@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, wr
 import { dirname, join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { DB_BACKUP_DIR, DB_IMPORT_DIR, DB_PATH, PIPELINE_NAME, WINGMAN_URL } from "./config.ts";
+import { installReconciliationSchema } from './graph-reconciliation-store.ts';
 
 type Migration = {
   id: string;
@@ -1454,6 +1455,11 @@ const migrations: Migration[] = [
         SELECT j.episode_id, CAST(person.value AS TEXT), 'legacy-thumbnail-selection', j.updated_at
         FROM thumbnail_jobs j, json_each(j.contributor_ids_json) person JOIN contributors c ON c.id=person.value;`);
     },
+  },
+  {
+    id: '043_archive_graph_reconciliation',
+    description: 'Immutable idea identities, archive reconciliation proposals and attributed decisions',
+    up: installReconciliationSchema,
   },
 ];
 

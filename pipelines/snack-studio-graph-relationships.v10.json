@@ -1,0 +1,279 @@
+{
+  "name": "snack-studio-graph-relationships",
+  "description": "Build a dense speaker-attributed transcript knowledge graph and governed topic index. Then stage archive reconciliation for explicit editorial review.",
+  "version": 10,
+  "tags": [
+    "snack-studio",
+    "graph",
+    "transcript",
+    "knowledge",
+    "speaker-attributed"
+  ],
+  "input": {
+    "source": "snack-studio",
+    "requestId": "",
+    "attemptId": "",
+    "episodeId": "",
+    "operation": "publication-metadata",
+    "userNpub": "",
+    "inputRevisionId": "",
+    "promptSuiteVersion": "v10-archive-reconciliation",
+    "resultSchemaVersion": "5",
+    "pipelineVersion": "10",
+    "localContext": {
+      "references": []
+    },
+    "webhook": {
+      "url": "",
+      "token": "",
+      "authHeader": "x-snack-studio-token"
+    },
+    "agent": "codex",
+    "reconciliationDatabasePath": ""
+  },
+  "steps": [
+    {
+      "id": "load-transcript-context",
+      "name": "load-transcript-context",
+      "description": "Fetch the immutable transcript, accepted Snacks, existing graph and governed topic registry.",
+      "type": "code",
+      "function": "snackStudio.fetchContextV5",
+      "input": {
+        "pick": {
+          "requestId": "$.requestId",
+          "inputRevisionId": "$.inputRevisionId",
+          "localContext": "$.localContext"
+        }
+      },
+      "assign": "$.studioContext",
+      "display": {
+        "in": [
+          {
+            "label": "Request",
+            "path": "$.requestId",
+            "format": "text"
+          }
+        ],
+        "out": [
+          {
+            "label": "Transcript",
+            "path": "$.transcript.transcriptText",
+            "format": "text"
+          },
+          {
+            "label": "Accepted Snacks",
+            "path": "$.approvedCandidates",
+            "format": "records",
+            "limit": 7
+          }
+        ]
+      }
+    },
+    {
+      "id": "catalog-speaker-evidence",
+      "name": "catalog-speaker-evidence",
+      "description": "Split the transcript into byte-exact evidence records attributed to each host or guest.",
+      "type": "code",
+      "function": "snackStudio.graphEvidenceCatalogV4",
+      "input": {
+        "pick": {
+          "transcript": "$.studioContext.transcript.transcriptText"
+        }
+      },
+      "assign": "$.evidenceCatalog",
+      "display": {
+        "in": [
+          {
+            "label": "Transcript",
+            "path": "$.transcript",
+            "format": "text"
+          }
+        ],
+        "out": [
+          {
+            "label": "Attributed Evidence",
+            "path": "$.records",
+            "format": "records",
+            "limit": 20
+          },
+          {
+            "label": "Evidence Count",
+            "path": "$.count",
+            "format": "count"
+          }
+        ]
+      }
+    },
+    {
+      "id": "extract-dense-knowledge-and-topics",
+      "name": "extract-dense-knowledge-and-topics",
+      "description": "Extract a detailed transcript-native graph and a governed topic passage index.",
+      "type": "agent",
+      "agent": "$.agent",
+      "directory": "/workspace/code/snack-studio",
+      "timeoutMs": 1200000,
+      "input": {
+        "pick": {
+          "requestId": "$.requestId",
+          "attemptId": "$.attemptId",
+          "episodeId": "$.episodeId",
+          "approvedCandidates": "$.studioContext.approvedCandidates",
+          "evidenceRecords": "$.evidenceCatalog.records",
+          "canonicalDiscussionTopics": "$.studioContext.canonicalDiscussionTopics"
+        }
+      },
+      "prompt": "Build a detailed private knowledge graph and governed topic index from the complete speaker-attributed evidence catalogue. Return 10-30 distinct knowledge nodes for a normal episode; use fewer than 10 only when the source is genuinely thin and explain that in no node. Extract transcript-native concepts, claims, concrete examples and useful questions, not merely one node per published Snack. Separate ideas that can be independently retrieved or meaningfully connected, but avoid synonyms and trivial fragments. Every node must cite one to four supplied evidence IDs as {\"evidenceId\":\"ev-0001\"}; never return excerpt or speaker fields and never invent an ID. Build meaningful directed edges among nodes using related-to, develops, supports, contradicts, exemplifies, enables, or caused-by. Link every accepted Snack to all materially relevant nodes using developed-into, supports, summarised-by, or related-to. For topics, preserve governed roots exactly, reuse accurate existing child subtopics, and create only durable reusable children when necessary. Every topic passage must use a child subtopic as primaryTopicKey and cite adjacent, non-overlapping evidence IDs; cover every substantive evidence record exactly once and omit only housekeeping, sponsorship, and closing material. Return JSON only with nodes, edges, snackLinks, topics and topicPassages matching the supplied identifiers.",
+      "assign": "$.extraction",
+      "display": {
+        "in": [
+          {
+            "label": "Attributed Evidence",
+            "path": "$.evidenceRecords",
+            "format": "records",
+            "limit": 20
+          },
+          {
+            "label": "Snacks",
+            "path": "$.approvedCandidates",
+            "format": "records",
+            "limit": 7
+          }
+        ],
+        "out": [
+          {
+            "label": "Knowledge",
+            "path": "$.nodes",
+            "format": "records",
+            "limit": 30
+          },
+          {
+            "label": "Connections",
+            "path": "$.edges",
+            "format": "records",
+            "limit": 40
+          },
+          {
+            "label": "Snack Links",
+            "path": "$.snackLinks",
+            "format": "records",
+            "limit": 30
+          }
+        ]
+      }
+    },
+    {
+      "id": "hydrate-verified-evidence",
+      "name": "hydrate-verified-evidence",
+      "description": "Hydrate cited evidence with its exact transcript text and speaker and validate the dense graph and topic coverage.",
+      "type": "code",
+      "function": "snackStudio.graphContractV6",
+      "input": {
+        "pick": {
+          "requestId": "$.requestId",
+          "attemptId": "$.attemptId",
+          "episodeId": "$.episodeId",
+          "inputRevisionId": "$.inputRevisionId",
+          "resultSchemaVersion": "$.resultSchemaVersion",
+          "pipelineVersion": "$.pipelineVersion",
+          "transcript": "$.studioContext.transcript.transcriptText",
+          "extraction": "$.extraction",
+          "evidenceRecords": "$.evidenceCatalog.records",
+          "approvedCandidates": "$.studioContext.approvedCandidates",
+          "canonicalDiscussionTopics": "$.studioContext.canonicalDiscussionTopics",
+          "existingKnowledgeNodeCount": "$.studioContext.existingKnowledgeNodeCount"
+        }
+      },
+      "assign": "$.final",
+      "display": {
+        "in": [
+          {
+            "label": "Extracted Knowledge",
+            "path": "$.extraction.nodes",
+            "format": "records",
+            "limit": 30
+          }
+        ],
+        "out": [
+          {
+            "label": "Verified Knowledge",
+            "path": "$.nodes",
+            "format": "records",
+            "limit": 30
+          },
+          {
+            "label": "Topic Passages",
+            "path": "$.topicPassages",
+            "format": "records",
+            "limit": 30
+          }
+        ]
+      }
+    },
+    {
+      "id": "post-transcript-knowledge",
+      "name": "post-transcript-knowledge",
+      "description": "Atomically replace the pipeline graph and return the attributed result to Snack Studio.",
+      "type": "code",
+      "function": "shared.postWappWebhook",
+      "input": {
+        "pick": {
+          "requestId": "$.requestId",
+          "workflow": "$.operation",
+          "webhook": "$.webhook",
+          "agentResult": "$.final"
+        }
+      },
+      "assign": "$.webhookResult",
+      "display": {
+        "in": [
+          {
+            "label": "Verified Knowledge",
+            "path": "$.agentResult.nodes",
+            "format": "records",
+            "limit": 30
+          }
+        ],
+        "out": [
+          {
+            "label": "Delivered",
+            "path": "$.ok"
+          }
+        ]
+      }
+    },
+    {
+      "id": "reconcile-archive",
+      "name": "reconcile-archive",
+      "type": "pipeline",
+      "description": "Build archive proposals after the episode result has been persisted; surface reconciliation failures separately.",
+      "pipeline": "snack-studio-archive-reconciliation",
+      "version": 1,
+      "input": {
+        "pick": {
+          "episodeId": "$.episodeId",
+          "inputRevisionId": "$.inputRevisionId",
+          "databasePath": "$.reconciliationDatabasePath",
+          "agent": "$.agent"
+        }
+      },
+      "assign": "$.archiveReconciliation",
+      "failurePolicy": "record_error",
+      "display": {
+        "in": [
+          {
+            "label": "Episode",
+            "path": "$.episodeId",
+            "format": "text"
+          }
+        ],
+        "out": [
+          {
+            "label": "Archive review",
+            "path": "$.staged.status",
+            "format": "text"
+          }
+        ]
+      }
+    }
+  ]
+}

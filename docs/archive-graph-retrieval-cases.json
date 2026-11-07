@@ -1,0 +1,47 @@
+[
+  {
+    "sourceNodeId": "ddaaea0d-bf59-4066-8520-35f113d2ccbb",
+    "positiveTargetIds": [
+      "57b4dcfd-8db6-4697-b3c3-c1a5994d8d81"
+    ],
+    "negativeTargetIds": [
+      "97daa368-1833-464e-8b1c-cd054a36cb60"
+    ]
+  },
+  {
+    "sourceNodeId": "eecd917c-27a5-4fc9-8550-ae017cae8006",
+    "positiveTargetIds": [
+      "57b4dcfd-8db6-4697-b3c3-c1a5994d8d81"
+    ],
+    "negativeTargetIds": [
+      "97daa368-1833-464e-8b1c-cd054a36cb60"
+    ]
+  },
+  {
+    "sourceNodeId": "3a8fa89c-92c7-4df4-8a6c-02923d7449df",
+    "positiveTargetIds": [
+      "97daa368-1833-464e-8b1c-cd054a36cb60"
+    ],
+    "negativeTargetIds": [
+      "57b4dcfd-8db6-4697-b3c3-c1a5994d8d81"
+    ]
+  },
+  {
+    "sourceNodeId": "40a5f486-e57b-4adc-a68c-de4171a4f52d",
+    "positiveTargetIds": [
+      "7a485d09-8cf0-4b44-9d74-9f3aa18be05c"
+    ],
+    "negativeTargetIds": [
+      "bbd9fa3a-1e1e-45f4-9996-171c6d491eda"
+    ]
+  },
+  {
+    "sourceNodeId": "cd3c07d0-a08e-4e91-a3d5-eb79384488dd",
+    "positiveTargetIds": [
+      "faa211e7-c304-4d88-be69-1dc853935520"
+    ],
+    "negativeTargetIds": [
+      "bbd9fa3a-1e1e-45f4-9996-171c6d491eda"
+    ]
+  }
+]

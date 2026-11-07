@@ -1,0 +1,162 @@
+{
+  "name": "snack-studio-archive-reconciliation",
+  "version": 1,
+  "description": "Grounded cross-episode concept and relationship proposals with independent critique; editorial acceptance remains explicit.",
+  "tags": [
+    "snack-studio",
+    "graph",
+    "archive",
+    "review"
+  ],
+  "input": {
+    "episodeId": "",
+    "inputRevisionId": "",
+    "databasePath": "",
+    "agent": "codex"
+  },
+  "steps": [
+    {
+      "id": "prepare-archive-context",
+      "name": "prepare-archive-context",
+      "type": "code",
+      "description": "Pin current source observations and retrieve bounded archive candidates.",
+      "function": "snackStudio.prepareArchiveReconciliationV1",
+      "input": {
+        "pick": {
+          "episodeId": "$.episodeId",
+          "revisionId": "$.inputRevisionId",
+          "databasePath": "$.databasePath"
+        }
+      },
+      "assign": "$.archive",
+      "display": {
+        "in": [
+          {
+            "label": "Episode",
+            "path": "$.episodeId",
+            "format": "text"
+          }
+        ],
+        "out": [
+          {
+            "label": "Source ideas and candidates",
+            "path": "$.sources",
+            "format": "records"
+          }
+        ]
+      }
+    },
+    {
+      "id": "propose-archive-connections",
+      "name": "propose-archive-connections",
+      "type": "agent",
+      "description": "Resolve recurring concepts and propose evidence-supported reasoning links separately.",
+      "agent": "$.agent",
+      "directory": "/workspace/code/snack-studio",
+      "timeoutMs": 1200000,
+      "input": {
+        "pick": {
+          "archive": "$.archive"
+        }
+      },
+      "assign": "$.proposalResult",
+      "prompt": "Use only the supplied immutable observations and evidence IDs. Inspect each source and its candidate passages. A shared subject does not make two claims equivalent. Preserve speaker, scope, negation and disagreement. Propose stable canonical concept assignments and meaningful directed cross-episode relationships separately. Reuse supplied existing concept definitions verbatim; do not invent archive IDs. No link is a valid result. Return JSON {batchId,snapshot,proposals,sourceAssessments}. Every sourceAssessments entry must contain sourceId and rationale, covering every supplied source exactly once. proposals: [{key,kind:\"concept\"|\"relationship\",sourceId,targetId?,concept?:{id,title,summary,aliases:[]},relationshipType?:\"supports\"|\"develops\"|\"contradicts\"|\"exemplifies\"|\"enables\"|\"caused-by\"|\"related-to\"|\"extends\"|\"parallels\"|\"complements\",explanation,evidence:[{observationId,evidenceIds:[]}]}]. Each relationship must cite evidence at both ends. Each concept assignment must cite its source. These are suggestions, not acceptance decisions.",
+      "display": {
+        "in": [
+          {
+            "label": "Grounded archive candidates",
+            "path": "$.archive.sources",
+            "format": "records"
+          }
+        ],
+        "out": [
+          {
+            "label": "Proposals",
+            "path": "$.proposals",
+            "format": "records"
+          },
+          {
+            "label": "Source assessments",
+            "path": "$.sourceAssessments",
+            "format": "records"
+          }
+        ]
+      }
+    },
+    {
+      "id": "critique-archive-connections",
+      "name": "critique-archive-connections",
+      "type": "agent",
+      "description": "Independently challenge identity matches and relationship explanations against exact sources.",
+      "agent": "$.agent",
+      "directory": "/workspace/code/snack-studio",
+      "timeoutMs": 1200000,
+      "input": {
+        "pick": {
+          "archive": "$.archive",
+          "proposalResult": "$.proposalResult"
+        }
+      },
+      "assign": "$.critique",
+      "prompt": "Independently inspect every proposal and source assessment against the supplied source evidence. Check equivalent concept versus merely related subject; preserve different claims, scope, attribution and polarity. For every proposal return {key,recommendation:\"accept\"|\"reject\"|\"needs-review\",rationale}. Return JSON {reviews:[...]}. Recommend needs-review for ambiguous evidence or identity, and reject unsupported or redundant interpretations. You do not have authority to publish or accept proposals. Do not call the Studio review endpoint or modify files/databases.",
+      "display": {
+        "in": [
+          {
+            "label": "Proposals",
+            "path": "$.proposalResult.proposals",
+            "format": "records"
+          }
+        ],
+        "out": [
+          {
+            "label": "Independent critique",
+            "path": "$.reviews",
+            "format": "records"
+          }
+        ]
+      }
+    },
+    {
+      "id": "stage-editorial-review",
+      "name": "stage-editorial-review",
+      "type": "code",
+      "description": "Validate sources and critique coverage; stage proposals without publishing unreviewed links.",
+      "function": "snackStudio.stageArchiveReconciliationV1",
+      "input": {
+        "pick": {
+          "databasePath": "$.databasePath",
+          "archive": "$.archive",
+          "proposalResult": "$.proposalResult",
+          "critique": "$.critique"
+        }
+      },
+      "assign": "$.staged",
+      "display": {
+        "in": [
+          {
+            "label": "Proposals",
+            "path": "$.proposalResult.proposals",
+            "format": "records"
+          },
+          {
+            "label": "Critique",
+            "path": "$.critique.reviews",
+            "format": "records"
+          }
+        ],
+        "out": [
+          {
+            "label": "Review state",
+            "path": "$.status",
+            "format": "text"
+          },
+          {
+            "label": "Proposal IDs",
+            "path": "$.proposalIds",
+            "format": "list"
+          }
+        ]
+      }
+    }
+  ]
+}

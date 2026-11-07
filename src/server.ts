@@ -1,5 +1,7 @@
 import { listGraphParticipants, setGraphParticipants } from './graph-participants.ts';
 import { listCanonicalConcepts, saveCanonicalConcept, type ConceptInput } from './canonical-concepts.ts';
+import { loadReconciliationContext, prepareEpisodeReconciliation, reconciliationCoverage } from './graph-reconciliation.ts';
+import { submitReconciliationProposals, reviewReconciliationProposal, finishReconciliationBatch, contextSnapshot, type ReconciliationProposal } from './graph-reconciliation-store.ts';
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import type { Event as NostrEvent } from "nostr-tools";
@@ -323,6 +325,26 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       catch(error) { return json({error:error instanceof Error ? error.message : String(error)},400); }
     }
     return json({error:'method not allowed'},405);
+  }
+  if (pathname === '/api/graph/reconciliation') {
+    const session=requireSession(req);if(!session)return json({error:'unauthorized'},401);
+    if(!hasAccess(session.pubkey,req.method==='GET'?'read':'edit'))return json({error:'access required'},403);
+    try {
+      if(req.method==='GET'){const context=loadReconciliationContext(db);return json({coverage:reconciliationCoverage(db,context)});}
+      if(req.method!=='POST')return json({error:'method not allowed'},405);
+      const body=await readJson(req);
+      if(body.action==='prepare')return json(prepareEpisodeReconciliation(db,String(body.episodeId||''),String(body.revisionId||'')));
+      if(body.action==='submit'){
+        const current=loadReconciliationContext(db);
+        if(body.snapshot!==contextSnapshot(current))throw new Error('Archive changed; prepare a fresh batch');
+        const batch=db.query('SELECT snapshot FROM graph_reconciliation_batches WHERE id=?1').get(String(body.batchId)) as {snapshot:string}|null;
+        if(!batch||batch.snapshot!==body.snapshot)throw new Error('Batch snapshot mismatch');
+        return json({proposalIds:submitReconciliationProposals(db,String(body.batchId),body.proposals as ReconciliationProposal[])});
+      }
+      if(body.action==='review')return json(reviewReconciliationProposal(db,String(body.proposalId),body.decision as 'accepted'|'rejected',session.pubkey,String(body.rationale||''),loadReconciliationContext(db)));
+      if(body.action==='finish'){finishReconciliationBatch(db,String(body.batchId),loadReconciliationContext(db));return json({ok:true});}
+      return json({error:'Unknown reconciliation action'},400);
+    }catch(error){return json({error:error instanceof Error?error.message:String(error)},409);}
   }
   if (pathname === '/api/graph/concepts') {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
