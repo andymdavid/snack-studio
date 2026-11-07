@@ -5,6 +5,8 @@ import { normalizeThemeEvidence } from './theme-results.ts';
 import type { SuccessfulKnowledgeResult } from './knowledge-result-input.ts';
 import type { SuccessfulKnowledgeTopicResult } from './knowledge-topic-result-input.ts';
 import { discussionTopicSlug } from './discussion-topics.ts';
+import { enqueueReconciliation } from './graph-reconciliation-store.ts';
+import { planKnowledgeIdentities } from './knowledge-identities.ts';
 
 export function shouldPreserveExistingGraph(resultSchemaVersion: string, existingGraphNodeCount: number) {
   return resultSchemaVersion === '5' && existingGraphNodeCount > 0;
@@ -32,11 +34,17 @@ export function applySuccessfulKnowledgeResult(input: { localRunId: string; resu
   // with no graph receives the graph portion of the combined callback.
   const preserveExistingGraph = shouldPreserveExistingGraph(input.result.resultSchemaVersion, existingGraphNodeCount);
   if (topicResult && !preserveExistingGraph && !input.result.nodes.length) throw new Error('A transcript without an existing graph must return knowledge nodes');
-  const now = Date.now(); const idByKey = new Map(input.result.nodes.map((node) => [node.key, crypto.randomUUID()]));
+  const now = Date.now(); const identities=planKnowledgeIdentities(database,request.episodeId,request.inputTranscriptRevisionId,input.result.nodes),idByKey=identities.byKey;
   database.transaction(() => {
     if (!preserveExistingGraph) {
-      database.query("DELETE FROM knowledge_nodes WHERE episode_id=?1 AND source_transcript_revision_id=?2 AND origin='pipeline'").run(request.episodeId, request.inputTranscriptRevisionId);
+      const previous=database.query("SELECT id FROM knowledge_nodes WHERE episode_id=?1 AND source_transcript_revision_id=?2 AND origin='pipeline'").all(request.episodeId,request.inputTranscriptRevisionId) as Array<{id:string}>;
+      for(const node of previous)if(!identities.preserved.has(node.id))database.query('DELETE FROM knowledge_nodes WHERE id=?1').run(node.id);
+      // Retained source nodes keep their evidence IDs and editorial review state.
+      // Rebuild only pipeline-owned local edges/links to avoid duplicate output.
+      database.query("DELETE FROM knowledge_edges WHERE episode_id=?1 AND origin='pipeline'").run(request.episodeId);
+      database.query("DELETE FROM knowledge_snack_links WHERE episode_id=?1 AND origin='pipeline'").run(request.episodeId);
       for (const node of input.result.nodes) {
+        if(identities.preserved.has(idByKey.get(node.key)!))continue;
         const id = idByKey.get(node.key)!; database.query(`INSERT INTO knowledge_nodes(id,episode_id,source_transcript_revision_id,kind,title,summary,confidence,review_state,origin,pipeline_request_id,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,'accepted','pipeline',?8,?9,?9)`).run(id, request.episodeId, request.inputTranscriptRevisionId, node.kind, node.title, node.summary, node.confidence, request.id, now);
         for (const evidence of node.evidence) database.query('INSERT INTO knowledge_evidence(id,knowledge_node_id,excerpt,speaker,transcript_start,transcript_end,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7)').run(crypto.randomUUID(), id, evidence.excerpt, evidence.speaker, transcript.transcriptText.indexOf(evidence.excerpt) >= 0 ? transcript.transcriptText.indexOf(evidence.excerpt) : null, transcript.transcriptText.indexOf(evidence.excerpt) >= 0 ? transcript.transcriptText.indexOf(evidence.excerpt) + evidence.excerpt.length : null, now);
       }
@@ -74,6 +82,7 @@ export function applySuccessfulKnowledgeResult(input: { localRunId: string; resu
       }
     }
     database.query("INSERT INTO pipeline_artifacts(id,request_id,run_id,artifact_type,schema_version,content_json,created_at) VALUES(?1,?2,?3,'transcript-knowledge',?4,?5,?6)").run(crypto.randomUUID(), request.id, run.id, input.result.resultSchemaVersion, JSON.stringify({ nodeCount: preserveExistingGraph ? existingGraphNodeCount : input.result.nodes.length, generatedNodeCount: input.result.nodes.length, edgeCount: input.result.edges.length, snackLinkCount: input.result.snackLinks.length, graphPreserved: preserveExistingGraph, topicPassageCount: topicResult?.topicPassages.length || 0 }), now);
+    enqueueReconciliation(database,request.episodeId,request.inputTranscriptRevisionId);
     database.query("UPDATE pipeline_runs SET status='complete',progress_percent=100,progress_label=?1,completed_at=?2,updated_at=?2 WHERE id=?3").run(topicResult ? 'Transcript topic index ready' : 'Knowledge graph ready', now, run.id);
     database.query("UPDATE pipeline_requests SET status='completed',pipeline_version=COALESCE(?1,pipeline_version),result_applied_at=?2,failure_summary=NULL,updated_at=?2 WHERE id=?3").run(input.result.pipelineVersion, now, request.id);
   })();

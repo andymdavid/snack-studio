@@ -1,0 +1,206 @@
+{
+  "name": "snack-studio-archive-reconciliation",
+  "version": 2,
+  "description": "Read Studio-owned context over delegated NIP-98, propose and critique archive connections, and return a scoped webhook for editorial review.",
+  "tags": [
+    "snack-studio",
+    "graph",
+    "archive",
+    "review"
+  ],
+  "input": {
+    "requestId": "",
+    "attemptId": "",
+    "episodeId": "",
+    "inputRevisionId": "",
+    "source": "snack-studio",
+    "operation": "publication-metadata",
+    "pipelineVersion": "2",
+    "resultSchemaVersion": "6",
+    "agent": "codex",
+    "localContext": {
+      "references": []
+    },
+    "webhook": {
+      "url": "",
+      "token": "",
+      "authHeader": "x-snack-studio-token"
+    }
+  },
+  "steps": [
+    {
+      "id": "prepare-archive-context",
+      "name": "prepare-archive-context",
+      "type": "code",
+      "description": "Fetch the app-prepared archive batch through its signed, attempt-bound API reference.",
+      "function": "snackStudio.fetchArchiveReconciliationV2",
+      "input": {
+        "pick": {
+          "requestId": "$.requestId",
+          "attemptId": "$.attemptId",
+          "episodeId": "$.episodeId",
+          "inputRevisionId": "$.inputRevisionId",
+          "localContext": "$.localContext"
+        }
+      },
+      "assign": "$.archive",
+      "display": {
+        "in": [
+          {
+            "label": "Episode",
+            "path": "$.episodeId",
+            "format": "text"
+          }
+        ],
+        "out": [
+          {
+            "label": "Source ideas and candidates",
+            "path": "$.sources",
+            "format": "records"
+          }
+        ]
+      }
+    },
+    {
+      "id": "propose-archive-connections",
+      "name": "propose-archive-connections",
+      "type": "agent",
+      "description": "Resolve recurring concepts and propose evidence-supported reasoning links separately.",
+      "agent": "$.agent",
+      "directory": "/workspace/code/snack-studio",
+      "timeoutMs": 1200000,
+      "input": {
+        "pick": {
+          "archive": "$.archive"
+        }
+      },
+      "assign": "$.proposalResult",
+      "prompt": "Use only the supplied immutable observations and evidence IDs. Inspect each source and its candidate passages. A shared subject does not make two claims equivalent. Preserve speaker, scope, negation and disagreement. Propose stable canonical concept assignments and meaningful directed cross-episode relationships separately. Reuse supplied existing concept definitions verbatim; do not invent archive IDs. No link is a valid result. Return JSON {batchId,snapshot,proposals,sourceAssessments}. Every sourceAssessments entry must contain sourceId and rationale, covering every supplied source exactly once. proposals: [{key,kind:\"concept\"|\"relationship\",sourceId,targetId?,concept?:{id,title,summary,aliases:[]},relationshipType?:\"supports\"|\"develops\"|\"contradicts\"|\"exemplifies\"|\"enables\"|\"caused-by\"|\"related-to\"|\"extends\"|\"parallels\"|\"complements\",explanation,evidence:[{observationId,evidenceIds:[]}]}]. Each relationship must cite evidence at both ends. Each concept assignment must cite its source. These are suggestions, not acceptance decisions. Do not modify source files or databases or call review APIs. Return the structured pipeline callback only.",
+      "display": {
+        "in": [
+          {
+            "label": "Grounded archive candidates",
+            "path": "$.archive.sources",
+            "format": "records"
+          }
+        ],
+        "out": [
+          {
+            "label": "Proposals",
+            "path": "$.proposals",
+            "format": "records"
+          },
+          {
+            "label": "Source assessments",
+            "path": "$.sourceAssessments",
+            "format": "records"
+          }
+        ]
+      }
+    },
+    {
+      "id": "critique-archive-connections",
+      "name": "critique-archive-connections",
+      "type": "agent",
+      "description": "Independently challenge identity matches and relationship explanations against exact sources.",
+      "agent": "$.agent",
+      "directory": "/workspace/code/snack-studio",
+      "timeoutMs": 1200000,
+      "input": {
+        "pick": {
+          "archive": "$.archive",
+          "proposalResult": "$.proposalResult"
+        }
+      },
+      "assign": "$.critique",
+      "prompt": "Independently inspect every proposal and source assessment against the supplied source evidence. Check equivalent concept versus merely related subject; preserve different claims, scope, attribution and polarity. For every proposal return {key,recommendation:\"accept\"|\"reject\"|\"needs-review\",rationale}. Return JSON {reviews:[...]}. Recommend needs-review for ambiguous evidence or identity, and reject unsupported or redundant interpretations. You do not have authority to publish or accept proposals. Do not call the Studio review endpoint or modify files/databases. Do not modify source files or databases or call review APIs. Return the structured pipeline callback only.",
+      "display": {
+        "in": [
+          {
+            "label": "Proposals",
+            "path": "$.proposalResult.proposals",
+            "format": "records"
+          }
+        ],
+        "out": [
+          {
+            "label": "Independent critique",
+            "path": "$.reviews",
+            "format": "records"
+          }
+        ]
+      }
+    },
+    {
+      "id": "return-archive-analysis",
+      "name": "return-archive-analysis",
+      "type": "code",
+      "description": "Build a callback envelope; Studio validates and persists proposals without accepting them.",
+      "function": "snackStudio.archiveReconciliationContractV2",
+      "input": {
+        "pick": {
+          "requestId": "$.requestId",
+          "attemptId": "$.attemptId",
+          "episodeId": "$.episodeId",
+          "inputRevisionId": "$.inputRevisionId",
+          "archive": "$.archive",
+          "proposalResult": "$.proposalResult",
+          "critique": "$.critique"
+        }
+      },
+      "assign": "$.final",
+      "display": {
+        "in": [
+          {
+            "label": "Proposals",
+            "path": "$.proposalResult.proposals",
+            "format": "records"
+          },
+          {
+            "label": "Critique",
+            "path": "$.critique.reviews",
+            "format": "records"
+          }
+        ],
+        "out": [
+          {
+            "label": "Proposals",
+            "path": "$.proposalResult.proposals",
+            "format": "records"
+          }
+        ]
+      }
+    },
+    {
+      "id": "post-archive-analysis",
+      "name": "post-archive-analysis",
+      "type": "code",
+      "description": "Return the analysis through the attempt-scoped Studio webhook. Acceptance remains an editor action.",
+      "function": "shared.postWappWebhook",
+      "input": {
+        "pick": {
+          "requestId": "$.requestId",
+          "workflow": "$.operation",
+          "webhook": "$.webhook",
+          "agentResult": "$.final"
+        }
+      },
+      "assign": "$.webhookResult",
+      "display": {
+        "in": [
+          {
+            "label": "Proposals",
+            "path": "$.agentResult.proposalResult.proposals",
+            "format": "records"
+          }
+        ],
+        "out": [
+          {
+            "label": "Delivered",
+            "path": "$.ok"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import { listCanonicalConcepts } from './canonical-concepts.ts';
+import { loadReconciliationContext,reconciliationPublicData,reconciliationCoverage } from './graph-reconciliation.ts';
 import type { Database } from 'bun:sqlite';
 import { db as appDb } from './db.ts';
 import { existsSync } from 'node:fs';
@@ -40,8 +41,13 @@ export function buildPublicGraphDataset(currentEpisodeId: string, database: Data
   for (const id of [...usedTopicIds]) { const parentId = topicById.get(id)?.parentTopicId; if (parentId) usedTopicIds.add(parentId); }
   const registry = listCanonicalConcepts(database);
   const conceptRegistry = { ...registry, concepts: registry.concepts.filter(concept => concept.reviewState === 'accepted').map(concept => ({...concept, mentions: concept.mentions.filter(id => publicNodeIds.has(id))})).filter(concept => concept.mentions.length) };
+  const reconciliationContext=loadReconciliationContext(database);
+  const reconciled=reconciliationPublicData(database,reconciliationContext,publicNodeIds);
+  const hasReconciliation=Boolean((database.query("SELECT COUNT(*) count FROM graph_reconciliation_batches WHERE status='complete'").get() as {count:number}).count);
   return {
-    ...(conceptRegistry.concepts.length ? { conceptRegistry } : {}),
+    ...(conceptRegistry.concepts.length||hasReconciliation ? { conceptRegistry } : {}),
+    ...(hasReconciliation ? {relationshipRegistry:reconciled.relationshipRegistry}:{}),
+    reconciliationCoverage:reconciliationCoverage(database,reconciliationContext).filter(item=>publicEpisodeIds.has(item.episodeId)),
     schemaVersion: 1,
     publicationPolicy: { version: 2, knowledgeAcceptance: 'automated-exact-evidence-validation', humanReviewImplied: false },
     episodes: episodeRows.filter((episode) => publicEpisodeIds.has(episode.id)).map((episode) => ({ episodeId: episode.id, episodeNumber: episode.episode_number, href: `/episodes/${episodePublicationSlug(episode.episode_number!)}/` })),

@@ -1,5 +1,9 @@
 import { listGraphParticipants, setGraphParticipants } from './graph-participants.ts';
 import { listCanonicalConcepts, saveCanonicalConcept, type ConceptInput } from './canonical-concepts.ts';
+import { CURRENT_KNOWLEDGE_GRAPH_CONTRACT } from './pipeline-requests.ts';
+import { ARCHIVE_RECONCILIATION_CONTRACT,listReconciliationJobs,prepareReconciliationRequest,validateReconciliationResult,applyReconciliationResult,type ReconciliationResult } from './graph-reconciliation-results.ts';
+import { loadReconciliationContext, prepareEpisodeReconciliation, reconciliationCoverage } from './graph-reconciliation.ts';
+import { submitReconciliationProposals, reviewReconciliationProposal, finishReconciliationBatch, contextSnapshot, enqueueReconciliation, type ReconciliationProposal } from './graph-reconciliation-store.ts';
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import type { Event as NostrEvent } from "nostr-tools";
@@ -276,7 +280,7 @@ function prepareEpisodePipelineRun(req: Request, pipelineRequest: NonNullable<Re
       pipelineVersion: pipelineRequest.pipelineVersion,
       promptSuiteVersion: pipelineRequest.promptSuiteVersion,
       resultSchemaVersion: pipelineRequest.resultSchemaVersion,
-      contextUrl,
+      contextUrl: pipelineRequest.pipelineName===ARCHIVE_RECONCILIATION_CONTRACT.pipelineName?`${contextUrl}?attemptId=${encodeURIComponent(attemptId)}`:contextUrl,
       transcriptUrl,
       webhookUrl: callbackUrl,
       webhookToken: callbackToken,
@@ -324,6 +328,36 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     }
     return json({error:'method not allowed'},405);
   }
+  if(pathname==='/api/graph/contract'&&req.method==='GET'){
+    const session=requireSession(req);if(!session||!hasAccess(session.pubkey,'read'))return json({error:'read access required'},403);
+    return json({...CURRENT_KNOWLEDGE_GRAPH_CONTRACT,...(process.env.SNACK_STUDIO_ARCHIVE_RECONCILIATION==='1'?{reconciliation:ARCHIVE_RECONCILIATION_CONTRACT}:{})});
+  }
+  if (pathname === '/api/graph/reconciliation') {
+    const session=requireSession(req);if(!session)return json({error:'unauthorized'},401);
+    if(!hasAccess(session.pubkey,req.method==='GET'?'read':'edit'))return json({error:'access required'},403);
+    try {
+      if(req.method==='GET'){const context=loadReconciliationContext(db);return json({coverage:reconciliationCoverage(db,context)});}
+      if(req.method!=='POST')return json({error:'method not allowed'},405);
+      const body=await readJson(req);
+      if(body.action==='queue-archive'){
+        if(process.env.SNACK_STUDIO_ARCHIVE_RECONCILIATION!=='1')throw new Error('Archive reconciliation is not enabled');
+        const context=loadReconciliationContext(db),coverage=reconciliationCoverage(db,context);
+        db.transaction(()=>{for(const episode of coverage)if(episode.groundedObservations>0)enqueueReconciliation(db,episode.episodeId,episode.revisionId);})();
+        return json({jobs:listReconciliationJobs(db),coverage});
+      }
+      if(body.action==='prepare')return json(prepareEpisodeReconciliation(db,String(body.episodeId||''),String(body.revisionId||'')));
+      if(body.action==='submit'){
+        const current=loadReconciliationContext(db);
+        if(body.snapshot!==contextSnapshot(current))throw new Error('Archive changed; prepare a fresh batch');
+        const batch=db.query('SELECT snapshot FROM graph_reconciliation_batches WHERE id=?1').get(String(body.batchId)) as {snapshot:string}|null;
+        if(!batch||batch.snapshot!==body.snapshot)throw new Error('Batch snapshot mismatch');
+        return json({proposalIds:submitReconciliationProposals(db,String(body.batchId),body.proposals as ReconciliationProposal[])});
+      }
+      if(body.action==='review')return json(reviewReconciliationProposal(db,String(body.proposalId),body.decision as 'accepted'|'rejected',session.pubkey,String(body.rationale||''),loadReconciliationContext(db)));
+      if(body.action==='finish'){finishReconciliationBatch(db,String(body.batchId),loadReconciliationContext(db),session.pubkey,String(body.rationale||''));return json({ok:true});}
+      return json({error:'Unknown reconciliation action'},400);
+    }catch(error){return json({error:error instanceof Error?error.message:String(error)},409);}
+  }
   if (pathname === '/api/graph/concepts') {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
     if (!hasAccess(session.pubkey, req.method === 'GET' ? 'read' : 'edit')) return json({ error: 'access required' }, 403);
@@ -338,7 +372,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
     if (!hasAccess(session.pubkey, 'read')) return json({ error: 'read access required' }, 403);
     const episodeId = url.searchParams.get('episodeId') || undefined;
-    return json({ conceptRegistry: listCanonicalConcepts(), candidates: listGraphCandidates(), contributors: listGraphContributors(), themes: listThemes(), relationships: listAllRelationships(), knowledge: listKnowledgeGraph(episodeId), topicIndex: listTranscriptTopicIndex(), backfill: listKnowledgeBackfill() });
+    return json({ conceptRegistry: listCanonicalConcepts(), candidates: listGraphCandidates(), contributors: listGraphContributors(), themes: listThemes(), relationships: listAllRelationships(), knowledge: listKnowledgeGraph(episodeId), topicIndex: listTranscriptTopicIndex(), backfill: listKnowledgeBackfill(),...(process.env.SNACK_STUDIO_ARCHIVE_RECONCILIATION==='1'?{reconciliationJobs:listReconciliationJobs(db)}:{}) });
   }
   if (pathname === '/api/graph/projection' && req.method === 'GET') {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
@@ -1056,6 +1090,13 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     }
     const target = getRequestedAutopilotTarget(body.autopilotTargetId);
     const pipelineName = normalizePipelineName(body.pipelineName) || target.defaultPipeline;
+    if(pipelineName===ARCHIVE_RECONCILIATION_CONTRACT.pipelineName){
+      if(process.env.SNACK_STUDIO_ARCHIVE_RECONCILIATION!=='1')return json({error:'Archive reconciliation is not enabled'},409);
+      if(operation!=='publication-metadata'||body.pipelineVersion!==ARCHIVE_RECONCILIATION_CONTRACT.pipelineVersion||body.promptSuiteVersion!==ARCHIVE_RECONCILIATION_CONTRACT.promptSuiteVersion||body.resultSchemaVersion!==ARCHIVE_RECONCILIATION_CONTRACT.resultSchemaVersion)return json({error:'Obsolete archive reconciliation contract; refresh Studio'},409);
+      const active=listEpisodePipelineRequests(episodeId).find(item=>item.pipelineName===ARCHIVE_RECONCILIATION_CONTRACT.pipelineName&&item.pipelineVersion==='2'&&item.inputTranscriptRevisionId===transcript.id&&item.runs.some(run=>['prepared','awaiting-authorization','triggering','queued','running'].includes(run.status)));
+      if(active)return json({error:'Archive episode already has an active or unsigned attempt; resume it from pipeline history'},409);
+    }
+    if(body.resultSchemaVersion==='6'&&pipelineName!==ARCHIVE_RECONCILIATION_CONTRACT.pipelineName)return json({error:'Schema 6 requires the archive reconciliation pipeline'},409);
     if (pipelineName === 'snack-studio-graph-relationships' && isObsoleteKnowledgeGraphRequest({
       pipelineName,
       pipelineVersion: typeof body.pipelineVersion === 'string' ? body.pipelineVersion : null,
@@ -1090,6 +1131,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
         promptSuiteVersion: pipelineRequest.promptSuiteVersion,
       },
     });
+    if(pipelineName===ARCHIVE_RECONCILIATION_CONTRACT.pipelineName&&pipelineRequest.status==='completed')return json({error:'Archive request already completed; review its existing proposals'},409);
     const prepared = prepareEpisodePipelineRun(req, pipelineRequest, pubkeyToNpub(session.pubkey));
     return json({
       pipelineRequest: { ...getPipelineRequest(pipelineRequest.id), runs: [prepared.run] },
@@ -1756,7 +1798,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
         : pipelineRequest.operation === 'transcript-normalization'
           ? validateSuccessfulPublicTranscriptResult(body)
         : pipelineRequest.operation === "publication-metadata"
-          ? pipelineRequest.resultSchemaVersion === '5' ? validateSuccessfulKnowledgeTopicResult(body) : pipelineRequest.resultSchemaVersion === '4' ? validateSuccessfulKnowledgeResult(body) : pipelineRequest.resultSchemaVersion === '3' ? validateSuccessfulGraphResult(body) : pipelineRequest.resultSchemaVersion === '2' ? validateSuccessfulThemeResult(body) : validateSuccessfulPublicationMetadataResult(body)
+          ? pipelineRequest.resultSchemaVersion === '6' ? validateReconciliationResult(body) : pipelineRequest.resultSchemaVersion === '5' ? validateSuccessfulKnowledgeTopicResult(body) : pipelineRequest.resultSchemaVersion === '4' ? validateSuccessfulKnowledgeResult(body) : pipelineRequest.resultSchemaVersion === '3' ? validateSuccessfulGraphResult(body) : pipelineRequest.resultSchemaVersion === '2' ? validateSuccessfulThemeResult(body) : validateSuccessfulPublicationMetadataResult(body)
           : validateSuccessfulPipelineResult(body);
       if (!validation.ok) {
         markPipelineResultRejected({ runId: run.id, summary: validation.error });
@@ -1786,6 +1828,11 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
           return json({ ok: true, requestId, status: 'completed', ...applied });
         }
         if (pipelineRequest.operation === "publication-metadata") {
+          if(pipelineRequest.resultSchemaVersion==='6'){
+            const applied=applyReconciliationResult(validation.value as ReconciliationResult,run.id);
+            publishPipelineUpdate('completed');
+            return json({...applied,ok:true,requestId,reviewStatus:applied.status,status:'completed'});
+          }
           if (['4','5'].includes(pipelineRequest.resultSchemaVersion)) {
             const applied = applySuccessfulKnowledgeResult({ localRunId: run.id, result: validation.value as import('./knowledge-result-input.ts').SuccessfulKnowledgeResult | import('./knowledge-topic-result-input.ts').SuccessfulKnowledgeTopicResult });
             publishPipelineUpdate('completed');
@@ -1867,6 +1914,12 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     if (!verified.ok) return json({ error: verified.error }, 401);
     if (!hasAccess(verified.pubkey, "read")) return json({ error: "read access required" }, 403);
     const requestId = decodeURIComponent(nip98PipelineContextMatch[1]!);
+    const archiveRequest=getPipelineRequest(requestId);
+    if(archiveRequest?.pipelineName===ARCHIVE_RECONCILIATION_CONTRACT.pipelineName){
+      if(!hasAccess(verified.pubkey,'edit')||verified.pubkey!==archiveRequest.actorPubkey)return json({error:'Reconciliation context requires its requesting editor'},403);
+      try{return json(prepareReconciliationRequest(requestId,url.searchParams.get('attemptId')||'',verified.pubkey));}
+      catch(error){return json({error:error instanceof Error?error.message:String(error)},409);}
+    }
     const context = getPipelineRequestContext(requestId);
     if (!context) return json({ error: "pipeline request not found" }, 404);
     const transcriptUrl = new URL(`/api/nip98/pipeline-requests/${encodeURIComponent(requestId)}/transcript`, url.origin).toString();
