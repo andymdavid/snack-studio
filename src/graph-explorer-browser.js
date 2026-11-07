@@ -16,42 +16,46 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   active?.kill(); active = null; container.replaceChildren();
   const graph = new MultiDirectedGraph(); const nodeById = new Map(model.nodes.map((node) => [node.id, node]));
   const view = selectGraphView(model, { focusId: model.explicitFocus ? model.focus?.id : null, limit: model.viewLimit || 320 });
+  const ideaMode=model.displayMode==='ideas';
   const nodes = view.nodes; const visible = new Set(nodes.map((node) => node.id));
-  const degree = new Map(); for (const connection of model.allConnections) for (const id of [connection.sourceId, connection.targetId]) degree.set(id, (degree.get(id) || 0) + 1);
-  const focusedEpisode = model.focus?.kind === 'episode' && model.explicitFocus;
+  const degree = new Map(); for (const connection of (ideaMode?view.allConnections:model.allConnections)) for (const id of [connection.sourceId, connection.targetId]) degree.set(id, (degree.get(id) || 0) + 1);
+  const focusedEpisode = !ideaMode && model.focus?.kind === 'episode' && model.explicitFocus;
+  const groupKey=node=>ideaMode?node.layoutGroup:node.episodeId;
+  const positionKey=id=>`${ideaMode?'ideas':'episodes'}:${id}`;
   const episodeNodes = nodes.filter((node) => node.kind === 'episode');
   const outerEpisodes = episodeNodes.filter(node => !focusedEpisode || node.id !== model.focus.id);
   const episodeAnchors = new Map(outerEpisodes.map((node,index) => {const angle=2*Math.PI*index/Math.max(1,outerEpisodes.length)-Math.PI/2;const radius=focusedEpisode?1800:1450;return [node.episodeId,{x:Math.cos(angle)*radius,y:Math.sin(angle)*radius}];}));
   if(focusedEpisode)episodeAnchors.set(model.focus.episodeId,{x:0,y:0});
+  if(ideaMode){episodeAnchors.clear();const visibleGroups=new Set(nodes.map(node=>node.layoutGroup));const groups=view.components.filter(group=>visibleGroups.has(group.id)).map(group=>group.id);groups.forEach((id,index)=>{const angle=index*Math.PI*(3-Math.sqrt(5)),radius=320*Math.sqrt(index);episodeAnchors.set(id,{x:Math.cos(angle)*radius*1.4,y:Math.sin(angle)*radius});});}
   const episodeOffsets = new Map();
   const simulationNodes = nodes.map((node, index) => {
-    const anchor = episodeAnchors.get(node.episodeId) || { x: 0, y: 0 }; const localIndex = episodeOffsets.get(node.episodeId) || 0; episodeOffsets.set(node.episodeId, localIndex + 1);
+    const anchor = episodeAnchors.get(groupKey(node)) || { x: 0, y: 0 }; const localIndex = episodeOffsets.get(groupKey(node)) || 0; episodeOffsets.set(groupKey(node), localIndex + 1);
     const angle = localIndex * Math.PI * (3 - Math.sqrt(5)); const radius = node.kind === 'root' ? 0 : ['host','contributor'].includes(node.kind) ? 210 + index * 12 : (focusedEpisode ? 75 : 42) * Math.sqrt(localIndex);
-    const previous = retainedPositions.get(node.id);
-    return { id: node.id, kind: node.kind, episodeId: node.episodeId, x: previous?.x ?? anchor.x + Math.cos(angle) * radius, y: previous?.y ?? anchor.y + Math.sin(angle) * radius, size: nodeSize(node), fx: node.kind === 'episode' ? anchor.x : node.kind === 'root' ? 0 : undefined, fy: node.kind === 'episode' ? anchor.y : node.kind === 'root' ? 0 : undefined };
+    const previous = retainedPositions.get(positionKey(node.id));
+    return { id: node.id, kind: node.kind, episodeId: node.episodeId, layoutGroup:node.layoutGroup, x: previous?.x ?? anchor.x + Math.cos(angle) * radius, y: previous?.y ?? anchor.y + Math.sin(angle) * radius, size: nodeSize(node), fx: node.kind === 'episode' ? anchor.x : node.kind === 'root' ? 0 : undefined, fy: node.kind === 'episode' ? anchor.y : node.kind === 'root' ? 0 : undefined };
   });
   const simulationLinks = [];
-  for (const node of nodes) { const connected = degree.has(node.id); const position = simulationNodes.find((item) => item.id === node.id); graph.addNode(node.id, { label: node.title, kind: node.kind, episodeId: node.episodeId, connected, x: position.x, y: position.y, size: connected ? nodeSize(node) : 4, color: connected ? KIND_COLOURS[node.kind] || '#9aa5a0' : MUTED_KIND_COLOURS[node.kind] || '#b8bfbb' }); }
+  for (const node of nodes) { const connected = degree.has(node.id); const position = simulationNodes.find((item) => item.id === node.id); graph.addNode(node.id, { label: node.title, kind: node.kind, episodeId: node.episodeId, connected, x: position.x, y: position.y, size: ideaMode ? node.kind==='canonical'?10:6+Math.min(node.semanticDegree||0,8)*0.35 : connected ? nodeSize(node) : 4, color: connected ? KIND_COLOURS[node.kind] || '#9aa5a0' : MUTED_KIND_COLOURS[node.kind] || '#b8bfbb' }); }
   for (const connection of model.allConnections) if (visible.has(connection.sourceId) && visible.has(connection.targetId)) { graph.addEdgeWithKey(connection.id, connection.sourceId, connection.targetId, { label: connection.relationshipType, size: 1.2, color: '#38413d' }); simulationLinks.push({ source: connection.sourceId, target: connection.targetId, relationshipType: connection.relationshipType }); }
   if (!graph.order) return () => {};
   const simulation = forceSimulation(simulationNodes)
     .force('link', forceLink(simulationLinks).id((node) => node.id).distance((link) => ['contains','features','hosted-by'].includes(link.relationshipType) ? 250 : ['publishes','contributed-to','hosted'].includes(link.relationshipType) ? 175 : link.relationshipType === 'developed-into' ? 118 : 150).strength((link) => ['contains','features','hosted-by'].includes(link.relationshipType) ? 0.035 : ['publishes','contributed-to','hosted'].includes(link.relationshipType) ? 0.05 : 0.04))
-    .force('charge', forceManyBody().strength((node) => focusedEpisode && node.episodeId===model.focus.episodeId ? -4000 : node.kind === 'root' ? -520 : node.kind === 'episode' ? -410 : -295).distanceMin(28).distanceMax(820))
-    .force('collide', forceCollide().radius((node) => node.size + (focusedEpisode && node.episodeId===model.focus.episodeId ? 65 : 25)).strength(1).iterations(4))
+    .force('charge', forceManyBody().strength((node) => ideaMode?-1000:focusedEpisode && node.episodeId===model.focus.episodeId ? -4000 : node.kind === 'root' ? -520 : node.kind === 'episode' ? -410 : -295).distanceMin(28).distanceMax(820))
+    .force('collide', forceCollide().radius((node) => node.size + (ideaMode?95:focusedEpisode && node.episodeId===model.focus.episodeId ? 65 : 25)).strength(1).iterations(4))
     .force('center', forceCenter(0, 0).strength(0.015))
-    .force('x', forceX((node) => (episodeAnchors.get(node.episodeId)?.x || 0)*(node.kind==='episode'?1:0.78)).strength((node) => node.kind === 'episode' ? 0.12 : ['host','contributor'].includes(node.kind) ? 0.005 : node.kind === 'root' ? (focusedEpisode ? 0.005 : 0.4) : (focusedEpisode && node.episodeId===model.focus.episodeId ? 0.006 : 0.055)))
-    .force('y', forceY((node) => (episodeAnchors.get(node.episodeId)?.y || 0)*(node.kind==='episode'?1:0.78)).strength((node) => node.kind === 'episode' ? 0.12 : ['host','contributor'].includes(node.kind) ? 0.005 : node.kind === 'root' ? (focusedEpisode ? 0.005 : 0.4) : (focusedEpisode && node.episodeId===model.focus.episodeId ? 0.006 : 0.055)))
+    .force('x', forceX((node) => (episodeAnchors.get(groupKey(node))?.x || 0)*(node.kind==='episode'?1:0.78)).strength((node) => node.kind === 'episode' ? 0.12 : ['host','contributor'].includes(node.kind) ? 0.005 : node.kind === 'root' ? (focusedEpisode ? 0.005 : 0.4) : (ideaMode?0.025:focusedEpisode && node.episodeId===model.focus.episodeId ? 0.006 : 0.055)))
+    .force('y', forceY((node) => (episodeAnchors.get(groupKey(node))?.y || 0)*(node.kind==='episode'?1:0.78)).strength((node) => node.kind === 'episode' ? 0.12 : ['host','contributor'].includes(node.kind) ? 0.005 : node.kind === 'root' ? (focusedEpisode ? 0.005 : 0.4) : (ideaMode?0.025:focusedEpisode && node.episodeId===model.focus.episodeId ? 0.006 : 0.055)))
     .alphaDecay(0.028).alphaMin(0.002).velocityDecay(0.58).stop();
   const simulationNodeById = new Map(simulationNodes.map((node) => [node.id, node]));
-  const retained = nodes.every(node => retainedPositions.has(node.id));
-  simulation.tick(focusedEpisode ? 180 : 120);
+  const retained = nodes.every(node => retainedPositions.has(positionKey(node.id)));
+  simulation.tick(ideaMode || focusedEpisode ? 180 : 120);
   if (retained) simulation.alpha(0.04);
   // Episode anchors retain their separation as content expands.
   for (const node of simulationNodes) graph.mergeNodeAttributes(node.id, { x: node.x, y: node.y });
   const canvas = document.createElement('div'); canvas.className = 'sigmaCanvas'; container.appendChild(canvas);
   let hovered = null; let hoveredNeighbours = new Set(); let selectedId = model.selectedNodeId && graph.hasNode(model.selectedNodeId) ? model.selectedNodeId : model.explicitFocus && model.focus?.id && graph.hasNode(model.focus.id) ? model.focus.id : null; let selectedNeighbours = new Set(selectedId ? graph.neighbors(selectedId) : []);
   const renderer = new Sigma(graph, canvas, {
-    allowInvalidContainer: true, renderLabels:false, stagePadding:container.clientWidth<600?96:64,
+    allowInvalidContainer: true, renderLabels:false, stagePadding:container.clientWidth<600?(ideaMode?28:96):64,
     defaultDrawNodeHover(context,data) { context.beginPath();context.arc(data.x,data.y,data.size+4,0,Math.PI*2);context.fillStyle='#fe714133';context.fill(); },
     zoomingRatio: 1.25, zoomDuration: 220,
     defaultNodeColor: '#9aa5a0', defaultEdgeColor: '#d0d5d2', defaultEdgeType: 'line', renderEdgeLabels: false, hideEdgesOnMove: false,
@@ -59,7 +63,7 @@ export function mountKnowledgeGraph(container, model, onSelect) {
     edgeReducer(edge, data) { const focusId = hovered || selectedId; const [source, target] = graph.extremities(edge); const structural = [source,target].some(id=>['root','episode','host','contributor'].includes(graph.getNodeAttribute(id,'kind'))); if (!focusId || focusedEpisode && focusId === model.focus.id) return { ...data, color: structural ? '#dce1dd' : '#b5c0b8', size: structural ? 0.35 : 0.7 }; const activeEdge = source === focusId || target === focusId; return { ...data, color: activeEdge ? hovered ? '#87958e' : ACTIVE_COLOUR : '#eceeec', size: activeEdge ? hovered ? 1.2 : 1.6 : 0.25, zIndex: activeEdge ? 1 : 0 }; },
   });
   const ns='http://www.w3.org/2000/svg';
-  const labelLayer=document.createElementNS(ns,'svg');labelLayer.classList.add('graphTextLayer');labelLayer.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:hidden';labelLayer.setAttribute('role','group');labelLayer.setAttribute('aria-label','Episode gateways');container.appendChild(labelLayer);
+  const labelLayer=document.createElementNS(ns,'svg');labelLayer.classList.add('graphTextLayer');labelLayer.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:hidden';labelLayer.setAttribute('role','group');labelLayer.setAttribute('aria-label','Graph navigation labels');container.appendChild(labelLayer);
   const tooltip=document.createElement('div');tooltip.className='graphHoverTitle';tooltip.style.cssText='position:absolute;z-index:8;box-sizing:border-box;max-width:min(280px,calc(100% - 16px));padding:.65rem .8rem;background:#fff;border:1px solid #bbc5be;border-radius:4px;box-shadow:0 5px 20px #0001;font:12px/1.5 Arial,sans-serif;color:#202824;pointer-events:none';tooltip.hidden=true;container.appendChild(tooltip);
   const measure=document.createElement('canvas').getContext('2d');measure.font='11px Arial';
   function renderText() {
@@ -69,11 +73,11 @@ export function mountKnowledgeGraph(container, model, onSelect) {
     const labels=placeGraphLabels(screen,{width,height,zoom:renderer.getCamera().ratio,selectedId,hoveredId:hovered,focusEpisodeId:focusedEpisode?model.focus.episodeId:null,measureText:text=>measure.measureText(text).width});
     const focusedLabel=document.activeElement?.closest('.graphTextLayer g')?.getAttribute('data-node-id');
     labelLayer.replaceChildren();
-    for(const label of labels){const group=document.createElementNS(ns,'g');group.dataset.nodeId=label.id;if(label.kind==='episode'){group.style.pointerEvents='auto';group.style.cursor='pointer';group.setAttribute('role','button');group.setAttribute('tabindex','0');group.setAttribute('aria-label',`Explore ${label.text}`);group.addEventListener('click',event=>{event.stopPropagation();onSelect(label.id,nodeById.get(label.id));});group.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();onSelect(label.id,nodeById.get(label.id));}});}else group.setAttribute('aria-hidden','true');group.dataset.nodeX=String(label.nodeX);group.dataset.nodeY=String(label.nodeY);if((label.active||label.kind==='episode')&&Math.hypot(label.x+label.width/2-label.nodeX,label.y+label.height/2-label.nodeY)>35){const line=document.createElementNS(ns,'line');for(const [key,value] of Object.entries({x1:label.nodeX,y1:label.nodeY,x2:label.x+label.width/2,y2:label.y+label.height/2,stroke:'#c98768','stroke-opacity':.5,'stroke-width':.7}))line.setAttribute(key,String(value));line.style.pointerEvents='none';group.append(line);}const rect=document.createElementNS(ns,'rect');for(const [key,value] of Object.entries({x:label.x,y:label.y,width:label.width,height:label.height,rx:3,fill:label.active?'#fff7f0':'#faf9f9','fill-opacity':.92}))rect.setAttribute(key,String(value));const text=document.createElementNS(ns,'text');text.setAttribute('x',String(label.x+5));text.setAttribute('y',String(label.y+12));text.setAttribute('font-family','Arial,sans-serif');text.setAttribute('font-size','11');text.setAttribute('fill',label.active?'#a33d1a':'#4e5d53');text.textContent=label.text;group.append(rect,text);labelLayer.append(group);if(focusedLabel===label.id)group.focus({preventScroll:true});}
+    for(const label of labels){const group=document.createElementNS(ns,'g');group.dataset.nodeId=label.id;if(['episode','canonical'].includes(label.kind)){group.style.pointerEvents='auto';group.style.cursor='pointer';group.setAttribute('role','button');group.setAttribute('tabindex','0');group.setAttribute('aria-label',`Explore ${label.text}`);group.addEventListener('click',event=>{event.stopPropagation();onSelect(label.id,nodeById.get(label.id));});group.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();onSelect(label.id,nodeById.get(label.id));}});}else group.setAttribute('aria-hidden','true');group.dataset.nodeX=String(label.nodeX);group.dataset.nodeY=String(label.nodeY);if((label.active||['episode','canonical'].includes(label.kind))&&Math.hypot(label.x+label.width/2-label.nodeX,label.y+label.height/2-label.nodeY)>35){const line=document.createElementNS(ns,'line');for(const [key,value] of Object.entries({x1:label.nodeX,y1:label.nodeY,x2:label.x+label.width/2,y2:label.y+label.height/2,stroke:'#c98768','stroke-opacity':.5,'stroke-width':.7}))line.setAttribute(key,String(value));line.style.pointerEvents='none';group.append(line);}const rect=document.createElementNS(ns,'rect');for(const [key,value] of Object.entries({x:label.x,y:label.y,width:label.width,height:label.height,rx:3,fill:label.active?'#fff7f0':'#faf9f9','fill-opacity':.92}))rect.setAttribute(key,String(value));const text=document.createElementNS(ns,'text');text.setAttribute('x',String(label.x+5));text.setAttribute('y',String(label.y+12));text.setAttribute('font-family','Arial,sans-serif');text.setAttribute('font-size','11');text.setAttribute('fill',label.active?'#a33d1a':'#4e5d53');text.textContent=label.text;group.append(rect,text);labelLayer.append(group);if(focusedLabel===label.id)group.focus({preventScroll:true});}
     if(hovered){const node=screen.find(node=>node.id===hovered);if(node){tooltip.textContent=nodeById.get(hovered).title;tooltip.hidden=false;tooltip.style.left=`${Math.max(8,Math.min(width-296,node.x+16))}px`;tooltip.style.top=`${Math.max(40,Math.min(height-tooltip.offsetHeight-12,node.y+18))}px`;}}else tooltip.hidden=true;
   }
   renderer.on('afterRender',renderText);
-  const resize=()=>{const padding=container.clientWidth<600?96:64;if(renderer.getSetting('stagePadding')!==padding)renderer.setSetting('stagePadding',padding);renderer.resize();renderer.refresh();};
+  const resize=()=>{const padding=container.clientWidth<600?(ideaMode?28:96):64;if(renderer.getSetting('stagePadding')!==padding)renderer.setSetting('stagePadding',padding);renderer.resize();renderer.refresh();};
   container.addEventListener('graph-layout-change',resize);const sizeObserver=new ResizeObserver(resize);sizeObserver.observe(container);
   let frame = null; let paused = Boolean(model.freezeLayout);
   const animateLayout = () => {
@@ -87,14 +91,14 @@ export function mountKnowledgeGraph(container, model, onSelect) {
     simulation.alpha(Math.max(simulation.alpha(), alpha));
     if (!paused && !frame && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) frame = requestAnimationFrame(animateLayout);
   };
-  if (!focusedEpisode && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) reheatLayout(simulation.alpha());
+  if (!ideaMode && !focusedEpisode && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) reheatLayout(simulation.alpha());
   renderer.on('enterNode', ({ node }) => { hovered = node; hoveredNeighbours = new Set(graph.neighbors(node)); renderer.getContainer().style.cursor = 'pointer'; renderer.refresh(); });
   renderer.on('leaveNode', () => { hovered = null; hoveredNeighbours = new Set(); renderer.getContainer().style.cursor = 'grab'; renderer.refresh(); });
   let draggedId = null; let dragged = false; let suppressClick = false;
   const releaseDraggedNode = () => {
     if (!draggedId) return;
     const node = simulationNodeById.get(draggedId);
-    if (node) { const anchor=episodeAnchors.get(node.episodeId);node.fx=node.kind==='episode'?anchor?.x:node.kind==='root'?0:null;node.fy=node.kind==='episode'?anchor?.y:node.kind==='root'?0:null; }
+    if (node) { const anchor=episodeAnchors.get(groupKey(node));node.fx=node.kind==='episode'?anchor?.x:node.kind==='root'?0:null;node.fy=node.kind==='episode'?anchor?.y:node.kind==='root'?0:null; }
     draggedId = null; renderer.getCamera().enable(); renderer.getContainer().style.cursor = 'grab'; if (dragged) reheatLayout(0.12);
   };
   renderer.on('downNode', ({ node, event }) => {
@@ -129,12 +133,12 @@ export function mountKnowledgeGraph(container, model, onSelect) {
   renderer.on('clickStage', () => { selectedId = null; selectedNeighbours = new Set(); closeSpotlight(); renderer.refresh(); });
   const controls = document.createElement('div'); controls.className = 'sigmaControls';
   for (const [label, title, action] of [['+', 'Zoom in', () => renderer.getCamera().animatedZoom({ duration: 180 })], ['−', 'Zoom out', () => renderer.getCamera().animatedUnzoom({ duration: 180 })], ['⌂', 'Fit graph', () => renderer.getCamera().animatedReset({ duration: 260 })]]) { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.title = title; button.setAttribute('aria-label', title); button.addEventListener('click', action); controls.appendChild(button); }
-  const count = document.createElement('p'); count.className = 'graphVisibleCount'; count.style.cssText = 'position:absolute;top:0;left:.5rem;right:.5rem;background:white;padding:.4rem;font-size:.7rem;pointer-events:none'; count.textContent = `${nodes.length} of ${model.nodes.length} nodes shown · ${episodeNodes.length} episodes available · select an episode to expand its cluster`; count.setAttribute('role','status'); container.appendChild(count);
+  const count = document.createElement('p'); count.className = 'graphVisibleCount'; count.style.cssText = 'position:absolute;top:0;left:.5rem;right:.5rem;background:white;padding:.4rem;font-size:.7rem;pointer-events:none'; count.textContent = `${nodes.length} of ${ideaMode?view.totalNodes:model.nodes.length} ${ideaMode?'ideas':'nodes'} shown · ${ideaMode?'connections organise this map; sources stay in the details':`${episodeNodes.length} episodes available · select an episode to expand its cluster`}`; count.setAttribute('role','status'); container.appendChild(count);
   container.appendChild(controls);
   renderer.getCamera().animatedReset({ duration: 420 });
   const freeze = () => { paused = true; if (frame) cancelAnimationFrame(frame); frame = null; simulation.stop(); };
   container.addEventListener('graph-freeze', freeze);
-  active = { kill() { for (const node of simulationNodes) retainedPositions.set(node.id,{x:node.x,y:node.y}); container.removeEventListener('graph-freeze', freeze); container.removeEventListener('graph-layout-change',resize);sizeObserver.disconnect(); if (frame) cancelAnimationFrame(frame); simulation.stop(); renderer.kill(); container.replaceChildren(); } };
+  active = { kill() { for (const node of simulationNodes) retainedPositions.set(positionKey(node.id),{x:node.x,y:node.y}); container.removeEventListener('graph-freeze', freeze); container.removeEventListener('graph-layout-change',resize);sizeObserver.disconnect(); if (frame) cancelAnimationFrame(frame); simulation.stop(); renderer.kill(); container.replaceChildren(); } };
   renderer.refresh();
   const instance = active;
   const cleanup = () => { if (active===instance) { active.kill(); active=null; } };
