@@ -34,10 +34,14 @@ export function getEpisodeGraphReadiness(episodeId: string, database: Database =
   const transcriptRevisionId = episode?.active_transcript_revision_id || null;
   if (!transcriptRevisionId) return { state: 'blocked', ready: false, transcriptRevisionId: null, request: null, nodeCount: 0, edgeCount: 0, passageCount: 0, reason: 'Save an active transcript before building the graph.' };
   const row = database.query(`SELECT * FROM pipeline_requests WHERE episode_id=?1 AND input_transcript_revision_id=?2
-    AND pipeline_name=?3 AND pipeline_version=?4 AND prompt_suite_version=?5 AND result_schema_version=?6
-    ORDER BY created_at DESC LIMIT 1`).get(episodeId, transcriptRevisionId, CURRENT_KNOWLEDGE_GRAPH_CONTRACT.pipelineName,
-      CURRENT_KNOWLEDGE_GRAPH_CONTRACT.pipelineVersion, CURRENT_KNOWLEDGE_GRAPH_CONTRACT.promptSuiteVersion,
-      CURRENT_KNOWLEDGE_GRAPH_CONTRACT.resultSchemaVersion) as Record<string, unknown> | null;
+    AND pipeline_name=?3 AND result_schema_version=?4
+    AND ((pipeline_version=?5 AND prompt_suite_version=?6)
+      OR (pipeline_version='8' AND prompt_suite_version='v8-dense-speaker-attributed-graph' AND status='completed'))
+    ORDER BY CASE WHEN pipeline_version=?5 THEN 0 ELSE 1 END, created_at DESC LIMIT 1`).get(
+      episodeId, transcriptRevisionId, CURRENT_KNOWLEDGE_GRAPH_CONTRACT.pipelineName,
+      CURRENT_KNOWLEDGE_GRAPH_CONTRACT.resultSchemaVersion, CURRENT_KNOWLEDGE_GRAPH_CONTRACT.pipelineVersion,
+      CURRENT_KNOWLEDGE_GRAPH_CONTRACT.promptSuiteVersion,
+    ) as Record<string, unknown> | null;
   const counts = database.query(`SELECT
     (SELECT COUNT(*) FROM knowledge_nodes WHERE episode_id=?1 AND source_transcript_revision_id=?2) node_count,
     (SELECT COUNT(*) FROM knowledge_edges WHERE episode_id=?1) edge_count,
@@ -119,10 +123,10 @@ export function listKnowledgeBackfill(database: Database = db) {
   const rows = database.query(`
     SELECT e.id,e.episode_number,e.working_title,e.active_transcript_revision_id,
       (SELECT pr.status FROM pipeline_requests pr
-       WHERE pr.episode_id=e.id AND pr.pipeline_name='snack-studio-graph-relationships' AND pr.pipeline_version='7' AND pr.result_schema_version='5'
+       WHERE pr.episode_id=e.id AND pr.pipeline_name='snack-studio-graph-relationships' AND pr.pipeline_version IN ('8','9') AND pr.result_schema_version='5'
        ORDER BY pr.created_at DESC LIMIT 1) AS latest_status,
       (SELECT pr.attempt_count FROM pipeline_requests pr
-       WHERE pr.episode_id=e.id AND pr.pipeline_name='snack-studio-graph-relationships' AND pr.pipeline_version='7' AND pr.result_schema_version='5'
+       WHERE pr.episode_id=e.id AND pr.pipeline_name='snack-studio-graph-relationships' AND pr.pipeline_version IN ('8','9') AND pr.result_schema_version='5'
        ORDER BY pr.created_at DESC LIMIT 1) AS latest_attempt_count
       ,(SELECT COUNT(*) FROM pipeline_requests active_pr
         WHERE active_pr.episode_id=e.id AND active_pr.pipeline_name='snack-studio-graph-relationships'

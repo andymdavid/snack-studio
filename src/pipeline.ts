@@ -12,6 +12,7 @@ export type PipelineStartInput = {
   autopilotTargetId?: string;
   autopilotLabel?: string;
   autopilotUrl?: string;
+  autopilotTransportUrl?: string;
   pipelineName?: string;
 };
 
@@ -23,6 +24,7 @@ export type PipelineStartResult = {
 
 export type PipelineTriggerRequest = {
   url: string;
+  transportUrl?: string;
   method: "POST";
   body: {
     input: {
@@ -46,6 +48,7 @@ export type PipelineTriggerRequest = {
 
 export type EpisodePipelineTriggerRequest = {
   url: string;
+  transportUrl?: string;
   method: "POST";
   body: {
     input: {
@@ -83,6 +86,9 @@ export function buildPipelineTriggerRequest(input: PipelineStartInput): Pipeline
   const url = new URL(`/api/pipelines/triggers/http/${encodeURIComponent(pipelineName)}`, autopilotUrl);
   return {
     url: url.toString(),
+    transportUrl: input.autopilotTransportUrl
+      ? new URL(`/api/pipelines/triggers/http/${encodeURIComponent(pipelineName)}`, input.autopilotTransportUrl.replace(/\/$/, "")).toString()
+      : undefined,
     method: "POST",
     body: {
       input: {
@@ -129,6 +135,8 @@ export async function startPreparedChatPipeline(trigger: PipelineTriggerRequest,
 
 export function buildEpisodePipelineTriggerRequest(input: {
   autopilotUrl: string;
+  autopilotOwnerNpub?: string;
+  autopilotTransportUrl?: string;
   pipelineName: string;
   requestId: string;
   attemptId: string;
@@ -148,11 +156,18 @@ export function buildEpisodePipelineTriggerRequest(input: {
   // The version is also retained in the payload for provenance, but Autopilot
   // resolves the definition from the route rather than from input metadata.
   const pipelineName = input.pipelineVersion
-    && ["snack-studio-transcript-to-snacks", "snack-studio-regenerate-snack", "snack-studio-publication-metadata", "snack-studio-graph-relationships"].includes(input.pipelineName)
+    && ["snack-studio-transcript-to-snacks", "snack-studio-traditional-humanizer", "snack-studio-editorial-v16-pilot", "snack-studio-regenerate-snack", "snack-studio-publication-metadata", "snack-studio-graph-relationships", "snack-studio-transcript-cleanup"].includes(input.pipelineName)
     ? `${input.pipelineName}.v${input.pipelineVersion}`
     : input.pipelineName;
+  // Agent signatures retain their own identity; the owner route selects the
+  // installed definition namespace and enforces Autopilot delegation policy.
+  const ownerNpub = input.autopilotOwnerNpub?.trim();
+  const triggerPath = `${ownerNpub ? `/api/owners/${encodeURIComponent(ownerNpub)}` : '/api'}/pipelines/triggers/http/${encodeURIComponent(pipelineName)}`;
   return {
-    url: new URL(`/api/pipelines/triggers/http/${encodeURIComponent(pipelineName)}`, input.autopilotUrl.replace(/\/$/, "")).toString(),
+    url: new URL(triggerPath, input.autopilotUrl.replace(/\/$/, "")).toString(),
+    transportUrl: input.autopilotTransportUrl
+      ? new URL(triggerPath, input.autopilotTransportUrl.replace(/\/$/, "")).toString()
+      : undefined,
     method: "POST",
     body: {
       input: {
@@ -188,12 +203,12 @@ export async function startPreparedEpisodePipeline(trigger: EpisodePipelineTrigg
   return startAutopilotHttpPipeline(trigger, authorization);
 }
 
-export async function startPreparedWappPipeline(trigger: { url: string; method: "POST"; body: Record<string, unknown> }, authorization: string): Promise<PipelineStartResult> {
+export async function startPreparedWappPipeline(trigger: { url: string; transportUrl?: string; method: "POST"; body: Record<string, unknown> }, authorization: string): Promise<PipelineStartResult> {
   return startAutopilotHttpPipeline(trigger as PipelineTriggerRequest, authorization);
 }
 
 async function startAutopilotHttpPipeline(trigger: PipelineTriggerRequest | EpisodePipelineTriggerRequest, authorization?: string): Promise<PipelineStartResult> {
-  const res = await fetch(trigger.url, {
+  const res = await fetch(trigger.transportUrl || trigger.url, {
     method: trigger.method,
     headers: {
       "content-type": "application/json",

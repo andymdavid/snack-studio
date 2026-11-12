@@ -1,6 +1,11 @@
+import {agentContributorRoute, contributorForm} from './agent-contributors.ts';
 import { listGraphParticipants, setGraphParticipants } from './graph-participants.ts';
 import { listCanonicalConcepts, saveCanonicalConcept, type ConceptInput } from './canonical-concepts.ts';
 import { join } from "node:path";
+import {applyHumanizerRevisions} from "./humanizer-revisions.ts";
+import { applyGraphCopyEdits } from './graph-copy-edits.ts';
+import { speakerForTranscriptExcerpt } from './publication-metadata.ts';
+import {approveEditedCopy,useSuppliedEpisodeThumbnail,approvePreparation} from "./operator-editorial.ts";
 import { readFileSync } from "node:fs";
 import type { Event as NostrEvent } from "nostr-tools";
 import {
@@ -11,13 +16,17 @@ import {
   getAccessRules,
   getSession,
   hasAccess,
+  hasConfiguredAccessRules,
   normalizePubkey,
   pubkeyToNpub,
   removeAccessRule,
   verifyLoginEvent,
 } from "./auth.ts";
+import { agentProductionRoute, allowedProductionContract, finalSetFingerprint, PRODUCTION_CONTRACTS } from "./agent-production-policy.ts";
 import { verifyNip98Request } from "./nip98.ts";
-import { PIPELINE_NAME, PIPELINE_TIMEOUT_MS, PORT, PUBLIC_ORIGIN, WINGMAN_URL } from "./config.ts";
+import { PIPELINE_NAME, PIPELINE_TIMEOUT_MS, PORT, PUBLIC_ORIGIN, WINGMAN_URL, WAPP_OWNER_NPUB } from "./config.ts";
+import { autopilotSigningUrl, autopilotTransportUrl } from "./autopilot-url.ts";
+import { publicRequestOrigin } from "./request-origin.ts";
 import {
   db,
   deleteAutopilotTarget,
@@ -79,6 +88,7 @@ import {
   findPipelineRunForCallback,
   listEpisodePipelineRequests,
   markPipelineRunFailed,
+  markPipelineRunCancelled,
   markPipelineRunStarted,
   markPipelineResultRejected,
   markStalePipelineRunsTimedOut,
@@ -152,8 +162,10 @@ async function serveStatic(pathname: string): Promise<Response> {
   return text("public/index.html missing", 500);
 }
 
+const agentRequestSessions = new WeakMap<Request, NonNullable<ReturnType<typeof getSession>>>();
+
 function requireSession(req: Request) {
-  const session = getSession(req);
+  const session = agentRequestSessions.get(req) || getSession(req);
   if (!session) return null;
   return session;
 }
@@ -180,34 +192,8 @@ function normalizeAutopilotUrl(value: unknown): string | null {
   }
 }
 
-function configuredAutopilotPublicHosts(): Set<string> {
-  const hosts = new Set<string>(["rick.runwingman.com"]);
-  for (const value of [
-    process.env.WAPP_AUTOPILOT_PUBLIC_URL,
-    process.env.WINGMAN_PUBLIC_URL,
-    process.env.PUBLIC_WINGMAN_URL,
-  ]) {
-    if (!value?.trim()) continue;
-    try {
-      hosts.add(new URL(value.trim()).hostname);
-    } catch {
-      hosts.add(value.trim());
-    }
-  }
-  return hosts;
-}
-
 function resolveAutopilotServerUrl(value: string | null | undefined): string {
-  const normalized = normalizeAutopilotUrl(value) || WINGMAN_URL;
-  try {
-    const url = new URL(normalized);
-    if (configuredAutopilotPublicHosts().has(url.hostname)) {
-      return WINGMAN_URL;
-    }
-  } catch {
-    return WINGMAN_URL;
-  }
-  return normalized;
+  return autopilotTransportUrl(value);
 }
 
 function normalizePipelineName(value: unknown): string | null {
@@ -221,7 +207,8 @@ function getRequestedAutopilotTarget(value: unknown): AutopilotTarget {
 
 function buildAutopilotPipelinesRequest(target = getCurrentAutopilotTarget()) {
   return {
-    url: new URL("/api/pipelines/definitions", resolveAutopilotServerUrl(target.url)).toString(),
+    url: new URL("/api/pipelines/definitions", autopilotSigningUrl(target.url)).toString(),
+    transportUrl: new URL("/api/pipelines/definitions", resolveAutopilotServerUrl(target.url)).toString(),
     method: "GET" as const,
   };
 }
@@ -251,7 +238,11 @@ function updateChatTitle(chatId: string, title: string) {
 }
 
 function webhookOrigin(req: Request): string {
-  return PUBLIC_ORIGIN || new URL(req.url).origin;
+  return publicRequestOrigin(req, PUBLIC_ORIGIN);
+}
+
+function nip98VerificationUrl(req: Request, requestUrl: URL): URL {
+  return new URL(`${requestUrl.pathname}${requestUrl.search}`, webhookOrigin(req));
 }
 
 function prepareEpisodePipelineRun(req: Request, pipelineRequest: NonNullable<ReturnType<typeof getPipelineRequest>>, userNpub: string, retryOfRunId?: string | null) {
@@ -260,12 +251,15 @@ function prepareEpisodePipelineRun(req: Request, pipelineRequest: NonNullable<Re
   const contextUrl = `${webhookOrigin(req)}/api/nip98/pipeline-requests/${encodeURIComponent(pipelineRequest.id)}/context`;
   const transcriptUrl = `${webhookOrigin(req)}/api/nip98/pipeline-requests/${encodeURIComponent(pipelineRequest.id)}/transcript`;
   const callbackUrl = `${webhookOrigin(req)}/api/pipeline-webhook`;
-  const autopilotUrl = resolveAutopilotServerUrl(target.url);
+  const autopilotUrl = autopilotSigningUrl(target.url);
+  const autopilotServerUrl = resolveAutopilotServerUrl(target.url);
   return createPipelineRun({
     requestId: pipelineRequest.id,
     retryOfRunId: retryOfRunId ?? null,
     buildTriggerPayload: (callbackToken, attemptId) => buildEpisodePipelineTriggerRequest({
       autopilotUrl,
+      autopilotOwnerNpub: process.env.SNACK_STUDIO_AUTOPILOT_OWNER_NPUB,
+      autopilotTransportUrl: autopilotServerUrl,
       pipelineName: pipelineRequest.pipelineName,
       requestId: pipelineRequest.id,
       attemptId,
@@ -286,6 +280,90 @@ function prepareEpisodePipelineRun(req: Request, pipelineRequest: NonNullable<Re
 
 async function handleApi(req: Request, url: URL): Promise<Response | null> {
   const { pathname } = url;
+
+  // Verify the original signed URL before forwarding only the production allowlist.
+  const operatorEditorial = pathname.match(/^\/api\/nip98\/editorial\/episodes\/([^/]+)\/(approve-copy|episode-thumbnail|approve-preparation)$/);
+  if (operatorEditorial && req.method === 'POST') {
+    const verified = await verifyNip98Request(req, nip98VerificationUrl(req, url));
+    if (!verified.ok) return json({error:verified.error},401);
+    if (!hasConfiguredAccessRules() && normalizePubkey(WAPP_OWNER_NPUB) !== verified.pubkey) return json({error:'Explicit Studio access required'},403);
+    if (!hasAccess(verified.pubkey,'edit')) return json({error:'Edit access required'},403);
+    try {
+      const episodeId=decodeURIComponent(operatorEditorial[1]!),body=await readJson(req);
+      const result=operatorEditorial[2]==='approve-copy' ? approveEditedCopy(episodeId,body,verified.pubkey) : operatorEditorial[2]==='approve-preparation' ? approvePreparation(episodeId,body,verified.pubkey) : await useSuppliedEpisodeThumbnail(episodeId,body,verified.pubkey);
+      return json(result,201);
+    } catch(error) {return json({error:error instanceof Error?error.message:String(error)},409);}
+  }
+
+  if (pathname.startsWith('/api/nip98/studio/')) {
+    const targetUrl = new URL(req.url);
+    targetUrl.pathname = '/api/' + pathname.slice('/api/nip98/studio/'.length);
+    if (!agentProductionRoute(req.method, targetUrl.pathname)) return json({ error: 'Operation is outside preparation-only agent access' }, 403);
+    const verified = await verifyNip98Request(req, nip98VerificationUrl(req, url));
+    if (!verified.ok) return json({ error: verified.error }, 401);
+    // Bootstrap login is deliberately insufficient for unattended agent access.
+    if (!hasConfiguredAccessRules() && normalizePubkey(WAPP_OWNER_NPUB) !== verified.pubkey) return json({ error: 'Configure explicit Studio access rules before using agent production access' }, 403);
+    if (!hasAccess(verified.pubkey, req.method === 'GET' ? 'read' : 'edit')) return json({ error: 'Studio access required' }, 403);
+    // Atomic intake has no existing source revision to guard. It can only create
+    // a new numbered episode, or return the identical prior intake on retry.
+    if (req.method === 'POST' && targetUrl.pathname === '/api/intake') {
+      const body = await readJson(req);
+      const validated = validateEpisodeInput(body);
+      if (!validated.ok) return json({ error: validated.error }, 400);
+      if (validated.value.episodeNumber === null) return json({ error: 'episodeNumber is required for retry-safe intake' }, 400);
+      const normalized = normalizeTranscriptText(body.transcriptText);
+      if (!normalized.ok) return json({ error: normalized.error }, 400);
+      const result = db.transaction(() => {
+        const existing = findEpisodeByNumber(validated.value.episodeNumber!);
+        if (existing) {
+          const transcript = getActiveTranscriptRevision(existing.id);
+          if (existing.ownerPubkey !== verified.pubkey || existing.workingTitle !== validated.value.workingTitle || transcript?.transcriptText !== normalized.text) {
+            return { conflict: true } as const;
+          }
+          return { episode: existing, transcript, reused: true };
+        }
+        const episode = createEpisode({ ...validated.value, ownerPubkey: verified.pubkey });
+        const transcript = createPastedTranscriptRevision({
+          episodeId: episode.id, transcriptText: normalized.text, sizeBytes: normalized.sizeBytes,
+          changeNote: typeof body.changeNote === 'string' ? body.changeNote.trim().slice(0, 500) : null,
+          actorPubkey: verified.pubkey,
+        });
+        return { episode: getEpisode(episode.id), transcript, reused: false };
+      })();
+      if ('conflict' in result) return json({ error: 'Episode already exists with different intake; review it in Studio' }, 409);
+      return json(result, result.reused ? 200 : 201);
+    }
+    if (req.method === 'POST' && targetUrl.pathname !== '/api/graph/copy-edits' && !agentContributorRoute(req.method, targetUrl.pathname)) {
+      const body = await readJson(req.clone());
+      const parts = targetUrl.pathname.split('/');
+      let episodeId: string | null = null;
+      if (parts[2] === 'episodes') episodeId = decodeURIComponent(parts[3]!);
+      if (parts[2] === 'pipeline-requests') episodeId = getPipelineRequest(decodeURIComponent(parts[3]!))?.episodeId || null;
+      if (parts[2] === 'episode-pipeline-runs') {
+        const run = getPipelineRun(decodeURIComponent(parts[3]!));
+        episodeId = run ? getPipelineRequest(run.requestId)?.episodeId || null : null;
+      }
+      if (parts[2] === 'thumbnail-jobs') episodeId = getThumbnailJobDetail(decodeURIComponent(parts[3]!))?.episodeId || null;
+      const episode = episodeId ? getEpisode(episodeId) : null;
+      if (!episode) return json({ error: 'Episode not found' }, 404);
+      if (!body.expectedTranscriptRevisionId || body.expectedTranscriptRevisionId !== episode.activeTranscriptRevisionId) return json({ error: 'Transcript changed; reconcile before continuing' }, 409);
+      if (!body.expectedFinalSetFingerprint || body.expectedFinalSetFingerprint !== finalSetFingerprint(listCandidates(episode.id))) return json({ error: 'Snack set changed; reconcile before continuing' }, 409);
+      if (parts[4] === 'pipeline-requests' && (!allowedProductionContract(body) || typeof body.idempotencyKey !== 'string' || !body.idempotencyKey)) return json({ error: 'Pinned production contract and idempotency key required' }, 400);
+      if (parts[4] === 'pipeline-requests' && body.operation === 'transcript-to-snacks' && (episode.status === 'approved' || listCandidates(episode.id).length > 0)) return json({ error: 'Existing Snack copy requires human review; automatic full regeneration is disabled' }, 409);
+      let storedPipelineName = '';
+      if (parts[2] === 'pipeline-requests' || parts[2] === 'episode-pipeline-runs') {
+        const pipeline = parts[2] === 'pipeline-requests' ? getPipelineRequest(decodeURIComponent(parts[3]!)) : (() => { const r=getPipelineRun(decodeURIComponent(parts[3]!)); return r ? getPipelineRequest(r.requestId) : null; })();
+        if (!pipeline || !allowedProductionContract(pipeline as unknown as Record<string, unknown>) || pipeline.inputTranscriptRevisionId !== episode.activeTranscriptRevisionId) return json({ error: 'Stale or unsupported production request' }, 409);
+        storedPipelineName = pipeline.pipelineName;
+      }
+      const afterReview = parts[2] === 'thumbnail-jobs' || parts[4] === 'publication-preparation' || ['snack-studio-publication-metadata','snack-studio-graph-relationships'].includes(storedPipelineName || String(body.pipelineName));
+      if (afterReview && episode.status !== 'approved') return json({ error: 'Human final-set approval required' }, 409);
+    }
+    const forwarded = new Request(targetUrl, req);
+    agentRequestSessions.set(forwarded, { token: '', pubkey: verified.pubkey, expiresAt: Date.now() + 60_000 });
+    try { return await handleApi(forwarded, targetUrl); }
+    finally { agentRequestSessions.delete(forwarded); }
+  }
 
   if (pathname === '/api/events' && req.method === 'GET') {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
@@ -333,6 +411,11 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 409); }
     }
     return json({error:'method not allowed'},405);
+  }
+  if (pathname === '/api/graph/copy-edits' && req.method === 'POST') {
+    const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
+    try { return json(applyGraphCopyEdits(db, await req.json(), session.pubkey, speakerForTranscriptExcerpt)); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 409); }
   }
   if (pathname === '/api/graph' && req.method === 'GET') {
     const session = requireSession(req); if (!session) return json({ error: 'unauthorized' }, 401);
@@ -504,7 +587,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const session = requireEditSession(req);
     if (!session) return json({ error: "edit access required" }, 403);
     try {
-      const form = await req.formData();
+      const form = await contributorForm(req);
       const input = validateContributorProfile(form);
       const photoValue = form.get('photo');
       const photo = photoValue instanceof File && photoValue.size ? photoValue : null;
@@ -525,7 +608,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
   if (contributorMatch && req.method === 'PATCH') {
     const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
     try {
-      const id = decodeURIComponent(contributorMatch[1]!); const form = await req.formData(); form.set('id', id);
+      const id = decodeURIComponent(contributorMatch[1]!); const form = await contributorForm(req); form.set('id', id);
       const input = validateContributorProfile(form); const photoValue = form.get('photo');
       const photo = photoValue instanceof File && photoValue.size ? photoValue : null; if (photo) validateContributorPhoto(photo);
       return json({ contributor: publicContributor(await updateContributor(id, { ...input, actorPubkey: session.pubkey, photo })) });
@@ -563,7 +646,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
   if (contributorPortraitJobsMatch && req.method === 'POST') {
     const session = requireEditSession(req);
     if (!session) return json({ error: 'edit access required' }, 403);
-    try { return json(createPortraitJob(decodeURIComponent(contributorPortraitJobsMatch[1]!), session.pubkey, new URL(req.url).origin), 201); }
+    try { return json(createPortraitJob(decodeURIComponent(contributorPortraitJobsMatch[1]!), session.pubkey, webhookOrigin(req)), 201); }
     catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 400); }
   }
 
@@ -837,7 +920,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
   if (thumbnailGenerateMatch && req.method === 'POST') {
     const session = requireEditSession(req); if (!session) return json({ error: 'edit access required' }, 403);
     const body = await readJson(req);
-    try { return json(createThumbnailGeneration(decodeURIComponent(thumbnailGenerateMatch[1]!), session.pubkey, new URL(req.url).origin, String(body.reviewNote || '')), 201); }
+    try { return json(createThumbnailGeneration(decodeURIComponent(thumbnailGenerateMatch[1]!), session.pubkey, webhookOrigin(req), String(body.reviewNote || '')), 201); }
     catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 400); }
   }
   const thumbnailStartedMatch = pathname.match(/^\/api\/thumbnail-jobs\/([^/]+)\/started$/);
@@ -1028,6 +1111,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     const episodeId = decodeURIComponent(episodePipelineRequestsMatch[1]!);
     const episode = getEpisode(episodeId);
     if (!episode) return json({ error: "episode not found" }, 404);
+    markStalePipelineRunsTimedOut({ episodeId, operation: 'transcript-normalization', timeoutMs: 20 * 60 * 1000 });
     markStalePipelineRunsTimedOut({ episodeId, timeoutMs: PIPELINE_TIMEOUT_MS });
     return json({
       timeoutMs: PIPELINE_TIMEOUT_MS,
@@ -1055,6 +1139,8 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       }, 409);
     }
     const target = getRequestedAutopilotTarget(body.autopilotTargetId);
+    const defaultSnackContract = operation === 'transcript-to-snacks' && !body.pipelineName && !body.pipelineVersion && !body.promptSuiteVersion;
+    if (defaultSnackContract) Object.assign(body, PRODUCTION_CONTRACTS.snacks);
     const pipelineName = normalizePipelineName(body.pipelineName) || target.defaultPipeline;
     if (pipelineName === 'snack-studio-graph-relationships' && isObsoleteKnowledgeGraphRequest({
       pipelineName,
@@ -1090,6 +1176,11 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
         promptSuiteVersion: pipelineRequest.promptSuiteVersion,
       },
     });
+    if (agentRequestSessions.has(req)) {
+      const existing = listEpisodePipelineRequests(episodeId).find(item => item.id === pipelineRequest.id);
+      const run = existing?.runs[0];
+      if (run) return json({ pipelineRequest: existing, runId: run.id, requiresAutopilotAuth: ['prepared','awaiting-authorization'].includes(run.status), triggerRequest: ['prepared','awaiting-authorization'].includes(run.status) ? run.triggerPayload : null });
+    }
     const prepared = prepareEpisodePipelineRun(req, pipelineRequest, pubkeyToNpub(session.pubkey));
     return json({
       pipelineRequest: { ...getPipelineRequest(pipelineRequest.id), runs: [prepared.run] },
@@ -1185,6 +1276,45 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       if (pipelineRequest.operation === 'snack-regeneration' && pipelineRequest.targetCandidateId) publishLiveEvent({ type: 'regeneration.updated', episodeId: pipelineRequest.episodeId, entityType: 'snack-candidate', entityId: pipelineRequest.targetCandidateId, status: 'failed', updatedAt: Date.now() });
       return json({ error: message, pipelineRequest: { ...getPipelineRequest(pipelineRequest.id), runs: [failedRun] } }, 502);
     }
+  }
+
+  const episodePipelineCancelMatch = pathname.match(/^\/api\/episode-pipeline-runs\/([^/]+)\/cancel-local$/);
+  if (episodePipelineCancelMatch && req.method === "POST") {
+    const session = requireEditSession(req);
+    if (!session) return json({ error: "edit access required" }, 403);
+    const runId = decodeURIComponent(episodePipelineCancelMatch[1]!);
+    const run = getPipelineRun(runId);
+    if (!run) return json({ error: "pipeline run not found" }, 404);
+    const pipelineRequest = getPipelineRequest(run.requestId);
+    if (!pipelineRequest) return json({ error: "pipeline request not found" }, 404);
+    try {
+      const cancelledRun = markPipelineRunCancelled({ runId, summary: "Remote pipeline was stopped by the user" });
+      recordAuditEvent({
+        actorPubkey: session.pubkey,
+        action: "pipeline.run.cancelled-locally",
+        entityType: "episode",
+        entityId: pipelineRequest.episodeId,
+        detail: { requestId: pipelineRequest.id, runId, autopilotRunId: run.autopilotRunId },
+      });
+      return json({
+        pipelineRequest: {
+          ...getPipelineRequest(pipelineRequest.id),
+          runs: listEpisodePipelineRequests(pipelineRequest.episodeId).find((item) => item.id === pipelineRequest.id)?.runs || [cancelledRun],
+        },
+      });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
+  }
+
+  const humanizerRevisionsMatch = pathname.match(/^\/api\/episodes\/([^/]+)\/humanizer-revisions$/);
+  if (humanizerRevisionsMatch && req.method === 'POST') {
+    const session = requireEditSession(req);
+    if (!session) return json({error:'edit access required'},403);
+    try {
+      const candidates=applyHumanizerRevisions(decodeURIComponent(humanizerRevisionsMatch[1]!),await readJson(req),session.pubkey);
+      return json({candidates},201);
+    } catch(error) { return json({error:error instanceof Error?error.message:String(error)},409); }
   }
 
   const candidateMatch = pathname.match(/^\/api\/candidates\/([^/]+)$/);
@@ -1454,7 +1584,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     if (!autopilotAuthorization) {
       return json({ requiresAutopilotAuth: true, triggerRequest: request, settings: getAppSettings(), target }, 202);
     }
-    const res = await fetch(request.url, {
+    const res = await fetch(request.transportUrl, {
       method: "GET",
       headers: {
         accept: "application/json",
@@ -1602,7 +1732,8 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
       webhookToken,
       autopilotTargetId: autopilotTarget.id,
       autopilotLabel: autopilotTarget.label,
-      autopilotUrl: resolveAutopilotServerUrl(autopilotTarget.url || settings.autopilotUrl),
+      autopilotUrl: autopilotSigningUrl(autopilotTarget.url || settings.autopilotUrl),
+      autopilotTransportUrl: resolveAutopilotServerUrl(autopilotTarget.url || settings.autopilotUrl),
       pipelineName,
     });
     db.query(`
@@ -1848,7 +1979,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
   }
 
   if (pathname === "/api/nip98/me" && req.method === "GET") {
-    const verified = await verifyNip98Request(req, url);
+    const verified = await verifyNip98Request(req, nip98VerificationUrl(req, url));
     if (!verified.ok) return json({ error: verified.error }, 401);
     return json({
       pubkey: verified.pubkey,
@@ -1863,7 +1994,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
 
   const nip98PipelineContextMatch = pathname.match(/^\/api\/nip98\/pipeline-requests\/([^/]+)\/context$/);
   if (nip98PipelineContextMatch && req.method === "GET") {
-    const verified = await verifyNip98Request(req, url);
+    const verified = await verifyNip98Request(req, nip98VerificationUrl(req, url));
     if (!verified.ok) return json({ error: verified.error }, 401);
     if (!hasAccess(verified.pubkey, "read")) return json({ error: "read access required" }, 403);
     const requestId = decodeURIComponent(nip98PipelineContextMatch[1]!);
@@ -1878,7 +2009,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
 
   const nip98PipelineTranscriptMatch = pathname.match(/^\/api\/nip98\/pipeline-requests\/([^/]+)\/transcript$/);
   if (nip98PipelineTranscriptMatch && req.method === "GET") {
-    const verified = await verifyNip98Request(req, url);
+    const verified = await verifyNip98Request(req, nip98VerificationUrl(req, url));
     if (!verified.ok) return json({ error: verified.error }, 401);
     if (!hasAccess(verified.pubkey, "read")) return json({ error: "read access required" }, 403);
     const requestId = decodeURIComponent(nip98PipelineTranscriptMatch[1]!);
@@ -1888,7 +2019,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
   }
 
   if (pathname === "/api/nip98/chats" && req.method === "GET") {
-    const verified = await verifyNip98Request(req, url);
+    const verified = await verifyNip98Request(req, nip98VerificationUrl(req, url));
     if (!verified.ok) return json({ error: verified.error }, 401);
     if (!hasAccess(verified.pubkey, "read")) return json({ error: "read access required" }, 403);
     const rows = db.query(`
@@ -1905,7 +2036,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
 
   const nip98ChatMessagesMatch = pathname.match(/^\/api\/nip98\/chats\/([^/]+)\/messages$/);
   if (nip98ChatMessagesMatch && req.method === "GET") {
-    const verified = await verifyNip98Request(req, url);
+    const verified = await verifyNip98Request(req, nip98VerificationUrl(req, url));
     if (!verified.ok) return json({ error: verified.error }, 401);
     if (!hasAccess(verified.pubkey, "read")) return json({ error: "read access required" }, 403);
     const chatId = decodeURIComponent(nip98ChatMessagesMatch[1]!);
@@ -1916,7 +2047,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
   }
 
   if (nip98ChatMessagesMatch && req.method === "POST") {
-    const verified = await verifyNip98Request(req, url);
+    const verified = await verifyNip98Request(req, nip98VerificationUrl(req, url));
     if (!verified.ok) return json({ error: verified.error }, 401);
     if (!hasAccess(verified.pubkey, "edit")) return json({ error: "edit access required" }, 403);
     const chatId = decodeURIComponent(nip98ChatMessagesMatch[1]!);
@@ -1936,7 +2067,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
 
   const nip98ChatMatch = pathname.match(/^\/api\/nip98\/chats\/([^/]+)$/);
   if (nip98ChatMatch && req.method === "PATCH") {
-    const verified = await verifyNip98Request(req, url);
+    const verified = await verifyNip98Request(req, nip98VerificationUrl(req, url));
     if (!verified.ok) return json({ error: verified.error }, 401);
     if (!hasAccess(verified.pubkey, "edit")) return json({ error: "edit access required" }, 403);
     const chatId = decodeURIComponent(nip98ChatMatch[1]!);

@@ -15,7 +15,7 @@ export function applySuccessfulPublicTranscriptResult(input: { localRunId: strin
   database.transaction(() => {
     database.query(`INSERT INTO public_transcripts(id, episode_id, source_transcript_revision_id, transcript_text, cleanup_summary_json, status, pipeline_request_id, pipeline_run_id, created_at, updated_at)
       VALUES (?1, ?2, ?3, ?4, ?5, 'proposed', ?6, ?7, ?8, ?8)`).run(id, request.episodeId, request.inputTranscriptRevisionId, input.result.transcriptText, JSON.stringify(input.result.cleanupSummary), request.id, run.id, now);
-    database.query("UPDATE pipeline_runs SET status = 'complete', progress_percent = 100, progress_label = 'Public transcript ready', completed_at = ?1, updated_at = ?1 WHERE id = ?2").run(now, run.id);
+    database.query("UPDATE pipeline_runs SET status = 'complete', progress_percent = 100, progress_label = 'Public transcript ready', failure_category = NULL, failure_summary = NULL, completed_at = ?1, updated_at = ?1 WHERE id = ?2").run(now, run.id);
     database.query("UPDATE pipeline_requests SET status = 'completed', pipeline_version = ?1, result_applied_at = ?2, failure_summary = NULL, updated_at = ?2 WHERE id = ?3").run(input.result.pipelineVersion, now, request.id);
   })();
   return { replay: false, publicTranscriptId: id };

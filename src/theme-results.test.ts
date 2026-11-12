@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { normalizeThemeEvidence } from './theme-results.ts';
+import { normalizeThemeEvidence, transcriptContainsEvidence } from './theme-results.ts';
 
 describe('theme evidence normalization', () => {
+  test('accepts a byte-exact bounded excerpt ending in an abandoned word fragment', () => {
+    const transcript = 'I would sit there and go, okay, what do we-\n\nAndy\n13:11\nActually do next';
+    expect(transcriptContainsEvidence(transcript, 'I would sit there and go, okay, what do we-')).toBeTrue();
+  });
   test('tolerates abandoned ASR word starts without changing ordinary hyphenation', () => {
     expect(normalizeThemeEvidence('they would s- these bigger players spend time e-educating the market'))
       .toBe('they would these bigger players spend time educating the market');

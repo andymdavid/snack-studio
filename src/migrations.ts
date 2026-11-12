@@ -1426,6 +1426,17 @@ const migrations: Migration[] = [
     },
   },
   {
+    id: '040_pete_winn_pw21_alias',
+    description: 'Resolve the PW21 transcript speaker label to Pete Winn',
+    up(db) {
+      const row = db.query("SELECT aliases_json FROM contributors WHERE id='pete-winn'").get() as { aliases_json: string } | null;
+      if (!row) return;
+      const aliases = JSON.parse(row.aliases_json) as string[];
+      if (!aliases.some((alias) => alias.toLocaleLowerCase() === 'pw21')) aliases.push('PW21');
+      db.query("UPDATE contributors SET aliases_json=?1,updated_at=?2 WHERE id='pete-winn'").run(JSON.stringify(aliases), Date.now());
+    },
+  },
+  {
     id: '041_reviewed_canonical_concepts',
     description: 'Stable cross-episode concept groups with explicit editorial review',
     up(db) {

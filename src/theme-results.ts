@@ -19,14 +19,17 @@ export function normalizeThemeEvidence(value: string) {
     .trim();
 }
 
+export function transcriptContainsEvidence(transcript: string, evidence: string) {
+  return transcript.includes(evidence) || normalizeThemeEvidence(transcript).includes(normalizeThemeEvidence(evidence));
+}
+
 export function applySuccessfulThemeResult(input: { localRunId: string; result: SuccessfulThemeResult }, database: Database = appDb) {
   const request = getPipelineRequest(input.result.requestId, database); const run = getPipelineRun(input.localRunId, database);
   if (!request || !run || run.requestId !== request.id) throw new Error('pipeline callback target not found');
   if (request.status === 'completed' && request.resultAppliedAt) return { replay: true, assignmentCount: input.result.snackAssignments.length };
   if (request.operation !== 'publication-metadata' || request.episodeId !== input.result.episodeId || request.inputTranscriptRevisionId !== input.result.inputRevisionId || request.resultSchemaVersion !== input.result.resultSchemaVersion) throw new Error('pipeline callback provenance mismatch');
   const transcript = getPipelineRequestTranscript(request.id, database); if (!transcript) throw new Error('pipeline transcript unavailable');
-  const source = normalizeThemeEvidence(transcript.transcriptText);
-  for (const theme of input.result.episodeThemes) if (!source.includes(normalizeThemeEvidence(theme.evidenceExcerpt))) throw new Error(`Theme ${theme.key} evidence is not an exact transcript excerpt`);
+  for (const theme of input.result.episodeThemes) if (!transcriptContainsEvidence(transcript.transcriptText, theme.evidenceExcerpt)) throw new Error(`Theme ${theme.key} evidence is not an exact transcript excerpt`);
   const approved = database.query(`SELECT c.id candidate_id,c.current_revision_id FROM snack_candidates c WHERE c.episode_id=?1 AND c.review_decision='accepted' ORDER BY c.approved_position`).all(request.episodeId) as Array<{ candidate_id: string; current_revision_id: string }>;
   const expected = new Map(approved.map((row) => [row.candidate_id, row.current_revision_id]));
   if (approved.length !== input.result.snackAssignments.length) throw new Error('theme assignments must cover the complete approved Snack set');
@@ -48,7 +51,7 @@ export function applySuccessfulThemeResult(input: { localRunId: string; result: 
         .run(item.revisionId, item.candidateId, request.episodeId, theme.id, item.rationale, request.id, now);
       database.query('UPDATE thumbnail_jobs SET topic_colour=?1,updated_at=?2 WHERE snack_revision_id=?3').run(theme.colour, now, item.revisionId);
     }
-    database.query("UPDATE pipeline_runs SET status='complete',progress_percent=100,progress_label='Themes ready',completed_at=?1,updated_at=?1 WHERE id=?2").run(now, run.id);
+    database.query("UPDATE pipeline_runs SET status='complete',progress_percent=100,progress_label='Themes ready',failure_category=NULL,failure_summary=NULL,completed_at=?1,updated_at=?1 WHERE id=?2").run(now, run.id);
     database.query("UPDATE pipeline_requests SET status='completed',pipeline_version=COALESCE(?1,pipeline_version),result_applied_at=?2,failure_summary=NULL,updated_at=?2 WHERE id=?3").run(input.result.pipelineVersion, now, request.id);
   })();
   return { replay: false, assignmentCount: input.result.snackAssignments.length };

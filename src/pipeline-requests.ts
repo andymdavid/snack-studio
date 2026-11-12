@@ -47,8 +47,8 @@ export type PipelineRequest = {
 
 export const CURRENT_KNOWLEDGE_GRAPH_CONTRACT = {
   pipelineName: 'snack-studio-graph-relationships',
-  pipelineVersion: '7',
-  promptSuiteVersion: 'v7-governed-roots-reusable-subtopics',
+  pipelineVersion: '9',
+  promptSuiteVersion: 'v9-normalized-governed-topics',
   resultSchemaVersion: '5',
 } as const;
 
@@ -198,7 +198,7 @@ export function createPipelineRequest(input: {
     input.autopilotTargetId,
     input.pipelineName,
     input.pipelineVersion ?? null,
-    input.promptSuiteVersion || "v9-frozen-single-editorial-pass",
+    input.promptSuiteVersion || "v13-natural-conversational-prose",
     input.resultSchemaVersion || "1",
     input.idempotencyKey || crypto.randomUUID(),
     input.targetCandidateId || null,
@@ -307,6 +307,33 @@ export function markPipelineRunFailed(input: {
   return getPipelineRun(run.id, database)!;
 }
 
+export function markPipelineRunCancelled(input: {
+  runId: string;
+  summary?: string;
+}, database: Database = appDb): PipelineRun {
+  const run = getPipelineRun(input.runId, database);
+  if (!run) throw new Error("pipeline run not found");
+  if (!["prepared", "awaiting-authorization", "triggering", "queued", "running"].includes(run.status)) {
+    throw new Error(`pipeline run cannot be cancelled from ${run.status}`);
+  }
+  const now = Date.now();
+  const safeSummary = (input.summary || "Stopped by the user").trim().slice(0, 1000);
+  database.transaction(() => {
+    database.query(`
+      UPDATE pipeline_runs
+      SET status = 'cancelled', failure_category = 'user-cancelled', failure_summary = ?1,
+          completed_at = ?2, updated_at = ?2
+      WHERE id = ?3
+    `).run(safeSummary, now, run.id);
+    database.query(`
+      UPDATE pipeline_requests
+      SET status = 'cancelled', failure_summary = ?1, updated_at = ?2
+      WHERE id = ?3
+    `).run(safeSummary, now, run.requestId);
+  })();
+  return getPipelineRun(run.id, database)!;
+}
+
 export function updatePipelineRunProgress(input: {
   runId: string;
   percent: number;
@@ -368,6 +395,7 @@ export function markStalePipelineRunsTimedOut(input: {
   episodeId: string;
   timeoutMs: number;
   now?: number;
+  operation?: PipelineOperation;
 }, database: Database = appDb): number {
   const now = input.now ?? Date.now();
   const cutoff = now - input.timeoutMs;
@@ -376,9 +404,10 @@ export function markStalePipelineRunsTimedOut(input: {
     FROM pipeline_runs r
     JOIN pipeline_requests pr ON pr.id = r.request_id
     WHERE pr.episode_id = ?1
+      AND (?2 IS NULL OR pr.operation = ?2)
       AND r.status IN ('queued', 'running')
-      AND COALESCE(r.triggered_at, r.updated_at) < ?2
-  `).all(input.episodeId, cutoff) as Array<{ id: string; request_id: string }>;
+      AND COALESCE(r.triggered_at, r.updated_at) < ?3
+  `).all(input.episodeId, input.operation ?? null, cutoff) as Array<{ id: string; request_id: string }>;
   if (!rows.length) return 0;
   database.transaction(() => {
     for (const row of rows) {

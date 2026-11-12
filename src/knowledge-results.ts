@@ -1,13 +1,13 @@
 import type { Database } from 'bun:sqlite';
 import { db as appDb } from './db.ts';
 import { CURRENT_KNOWLEDGE_GRAPH_CONTRACT, getPipelineRequest, getPipelineRequestTranscript, getPipelineRun } from './pipeline-requests.ts';
-import { normalizeThemeEvidence } from './theme-results.ts';
+import { normalizeThemeEvidence, transcriptContainsEvidence } from './theme-results.ts';
 import type { SuccessfulKnowledgeResult } from './knowledge-result-input.ts';
 import type { SuccessfulKnowledgeTopicResult } from './knowledge-topic-result-input.ts';
 import { discussionTopicSlug } from './discussion-topics.ts';
 
-export function shouldPreserveExistingGraph(resultSchemaVersion: string, existingGraphNodeCount: number) {
-  return resultSchemaVersion === '5' && existingGraphNodeCount > 0;
+export function shouldPreserveExistingGraph(resultSchemaVersion: string, existingGraphNodeCount: number, pipelineVersion = '') {
+  return resultSchemaVersion === '5' && existingGraphNodeCount > 0 && pipelineVersion !== '8';
 }
 
 export function applySuccessfulKnowledgeResult(input: { localRunId: string; result: SuccessfulKnowledgeResult | SuccessfulKnowledgeTopicResult }, database: Database = appDb) {
@@ -17,8 +17,9 @@ export function applySuccessfulKnowledgeResult(input: { localRunId: string; resu
   if (request.operation !== 'publication-metadata' || request.episodeId !== input.result.episodeId || request.inputTranscriptRevisionId !== input.result.inputRevisionId || request.resultSchemaVersion !== input.result.resultSchemaVersion) throw new Error('knowledge callback provenance mismatch');
   if (input.result.resultSchemaVersion === '5' && request.pipelineVersion !== CURRENT_KNOWLEDGE_GRAPH_CONTRACT.pipelineVersion) throw new Error('superseded transcript topic callback');
   const transcript = getPipelineRequestTranscript(request.id, database); if (!transcript) throw new Error('pipeline transcript unavailable');
-  const source = normalizeThemeEvidence(transcript.transcriptText);
-  for (const node of input.result.nodes) for (const evidence of node.evidence) if (!source.includes(normalizeThemeEvidence(evidence.excerpt))) throw new Error(`Knowledge node ${node.key} evidence is not an exact transcript excerpt`);
+  for (const node of input.result.nodes) for (const evidence of node.evidence) {
+    if (!transcriptContainsEvidence(transcript.transcriptText, evidence.excerpt)) throw new Error(`Knowledge node ${node.key} evidence is not an exact transcript excerpt`);
+  }
   const topicResult = input.result.resultSchemaVersion === '5' ? input.result as SuccessfulKnowledgeTopicResult : null;
   if (topicResult) for (const passage of topicResult.topicPassages) {
     const exactRange = transcript.transcriptText.slice(passage.transcriptStart, passage.transcriptEnd);
@@ -30,7 +31,7 @@ export function applySuccessfulKnowledgeResult(input: { localRunId: string; resu
   // Schema 5 is a topic-index backfill for transcripts whose graph may already
   // be curated. Preserve that graph wholesale; only a genuinely new transcript
   // with no graph receives the graph portion of the combined callback.
-  const preserveExistingGraph = shouldPreserveExistingGraph(input.result.resultSchemaVersion, existingGraphNodeCount);
+  const preserveExistingGraph = shouldPreserveExistingGraph(input.result.resultSchemaVersion, existingGraphNodeCount, request.pipelineVersion || '');
   if (topicResult && !preserveExistingGraph && !input.result.nodes.length) throw new Error('A transcript without an existing graph must return knowledge nodes');
   const now = Date.now(); const idByKey = new Map(input.result.nodes.map((node) => [node.key, crypto.randomUUID()]));
   database.transaction(() => {

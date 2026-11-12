@@ -14,6 +14,8 @@ export type PipelineCandidateResult = {
   structureException: string | null;
   claimEvidenceMap: Array<{ claim: string; evidenceIds: string[] }>;
   validationWarnings: string[];
+  wordCount: number;
+  paragraphCount: number;
 };
 
 export type SuccessfulPipelineResult = {
@@ -63,8 +65,8 @@ function wordCount(paragraphs: string[]): number {
   return paragraphs.join(" ").trim().split(/\s+/).filter(Boolean).length;
 }
 
-function validatePublishableProse(value: string, field: string): void {
-  if (/[—:;]/.test(value)) throw new Error(`${field} contains prohibited punctuation`);
+function validatePublishableProse(value: string, field: string, humanizer = false): void {
+  if ((humanizer ? /[—]/ : /[—:;]/).test(value)) throw new Error(`${field} contains prohibited punctuation`);
   const lower = value.toLowerCase();
   const phrase = PROHIBITED_PHRASES.find((item) => lower.includes(item));
   if (phrase) throw new Error(`${field} contains prohibited phrase: ${phrase}`);
@@ -84,6 +86,8 @@ export function validateSuccessfulPipelineResult(body: Record<string, unknown>):
     if (body.resultSchemaVersion !== "1") throw new Error("unsupported resultSchemaVersion");
     const promptSuiteVersion = requiredString(body.promptSuiteVersion, "promptSuiteVersion", 100);
     const pipelineVersion = optionalString(body.pipelineVersion, "pipelineVersion", 100);
+    const flexibleStructure = pipelineVersion === "16";
+    const humanizer = pipelineVersion === "1" && promptSuiteVersion === "v13-humanizer-a58df065";
     const shortfallObject = body.declaredShortfall == null ? null : objectValue(body.declaredShortfall, "declaredShortfall");
     const declaredShortfall = shortfallObject ? { reason: requiredString(shortfallObject.reason, "declaredShortfall.reason", 500) } : null;
 
@@ -101,8 +105,8 @@ export function validateSuccessfulPipelineResult(body: Record<string, unknown>):
     if (evidenceIds.size !== evidence.length) throw new Error("evidence IDs must be unique");
 
     if (!Array.isArray(body.candidates)) throw new Error("candidates must be an array");
-    if (body.candidates.length > 7) throw new Error("candidate count must not exceed seven");
-    if (body.candidates.length < 6 && !declaredShortfall) throw new Error("fewer than six candidates requires declaredShortfall");
+    if (!flexibleStructure && body.candidates.length > 7) throw new Error("candidate count must not exceed seven");
+    if (!flexibleStructure && body.candidates.length < 6 && !declaredShortfall) throw new Error("fewer than six candidates requires declaredShortfall");
     if (!body.candidates.length) throw new Error("at least one candidate is required");
     const candidates = body.candidates.map((raw, index) => {
       const item = objectValue(raw, `candidates[${index}]`);
@@ -112,15 +116,17 @@ export function validateSuccessfulPipelineResult(body: Record<string, unknown>):
       const standfirst = requiredString(item.standfirst, `candidates[${index}].standfirst`, 500);
       if (!Array.isArray(item.paragraphs)) throw new Error(`candidates[${index}].paragraphs must be an array`);
       const paragraphs = item.paragraphs.map((paragraph, paragraphIndex) => requiredString(paragraph, `candidates[${index}].paragraphs[${paragraphIndex}]`, 5000));
-      if (![3, 4].includes(paragraphs.length)) throw new Error(`candidates[${index}] must contain three or four paragraphs`);
+      if (flexibleStructure && !paragraphs.length) throw new Error(`candidates[${index}] requires a nonempty body`);
+      if (!flexibleStructure && ![3, 4].includes(paragraphs.length)) throw new Error(`candidates[${index}] must contain three or four paragraphs`);
       const structureException = optionalString(item.structureException, `candidates[${index}].structureException`, 500);
-      if (paragraphs.length === 4 && !structureException) throw new Error(`candidates[${index}] requires structureException for four paragraphs`);
-      if (paragraphs.length === 3 && structureException) throw new Error(`candidates[${index}] must not declare a structureException for three paragraphs`);
-      if (wordCount(paragraphs) > 275) throw new Error(`candidates[${index}] exceeds 275 words`);
-      validatePublishableProse(editorialTitle, `candidates[${index}].editorialTitle`);
-      validatePublishableProse(publicTitle, `candidates[${index}].publicTitle`);
-      validatePublishableProse(standfirst, `candidates[${index}].standfirst`);
-      paragraphs.forEach((paragraph, paragraphIndex) => validatePublishableProse(paragraph, `candidates[${index}].paragraphs[${paragraphIndex}]`));
+      if (!flexibleStructure && paragraphs.length === 4 && !structureException) throw new Error(`candidates[${index}] requires structureException for four paragraphs`);
+      if (!flexibleStructure && paragraphs.length === 3 && structureException) throw new Error(`candidates[${index}] must not declare a structureException for three paragraphs`);
+      const bodyWordCount = wordCount(paragraphs);
+      if (!flexibleStructure && bodyWordCount > 275) throw new Error(`candidates[${index}] exceeds 275 words`);
+      validatePublishableProse(editorialTitle, `candidates[${index}].editorialTitle`, humanizer);
+      validatePublishableProse(publicTitle, `candidates[${index}].publicTitle`, humanizer);
+      validatePublishableProse(standfirst, `candidates[${index}].standfirst`, humanizer);
+      paragraphs.forEach((paragraph, paragraphIndex) => validatePublishableProse(paragraph, `candidates[${index}].paragraphs[${paragraphIndex}]`, humanizer));
       if (!Array.isArray(item.claimEvidenceMap) || !item.claimEvidenceMap.length) throw new Error(`candidates[${index}].claimEvidenceMap is required`);
       const claimEvidenceMap = item.claimEvidenceMap.map((rawMap, mapIndex) => {
         const map = objectValue(rawMap, `candidates[${index}].claimEvidenceMap[${mapIndex}]`);
@@ -131,9 +137,13 @@ export function validateSuccessfulPipelineResult(body: Record<string, unknown>):
         return { claim: requiredString(map.claim, `candidates[${index}].claimEvidenceMap[${mapIndex}].claim`, 1000), evidenceIds: mappedIds };
       });
       const validationWarnings: string[] = [];
-      if (paragraphs.length === 4) validationWarnings.push(`Four-paragraph structure: ${structureException}`);
-      if (wordCount(paragraphs) < 140) validationWarnings.push("Body contains fewer than approximately 140 words");
-      return { selectionId, editorialTitle, publicTitle, standfirst, paragraphs, structureException, claimEvidenceMap, validationWarnings };
+      if (flexibleStructure && item.reviewNotes != null) {
+        if (!Array.isArray(item.reviewNotes) || item.reviewNotes.length > 20) throw new Error(`candidates[${index}].reviewNotes must contain at most 20 notes`);
+        for (const [noteIndex, note] of item.reviewNotes.entries()) validationWarnings.push(`Editorial review: ${requiredString(note, `candidates[${index}].reviewNotes[${noteIndex}]`, 1500)}`);
+      }
+      if (!flexibleStructure && paragraphs.length === 4) validationWarnings.push(`Four-paragraph structure: ${structureException}`);
+      if (!flexibleStructure && bodyWordCount < 140) validationWarnings.push("Body contains fewer than approximately 140 words");
+      return { selectionId, editorialTitle, publicTitle, standfirst, paragraphs, structureException: flexibleStructure ? null : structureException, claimEvidenceMap, validationWarnings, wordCount: bodyWordCount, paragraphCount: paragraphs.length };
     });
     if (new Set(candidates.map((candidate) => candidate.selectionId)).size !== candidates.length) throw new Error("candidate selection IDs must be unique");
 

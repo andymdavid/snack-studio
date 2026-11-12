@@ -11,6 +11,8 @@ export type CandidateGeneration = {
   promptSuiteVersion: string | null;
   pipelineVersion: string | null;
   pipelineRunId: string | null;
+  status: string;
+  failureSummary: string | null;
 };
 
 type RequestWithRuns = PipelineRequest & { runs: PipelineRun[] };
@@ -29,7 +31,7 @@ export function buildCandidateGenerations(
     groups.set(key, [...(groups.get(key) || []), candidate]);
   }
 
-  return [...groups.entries()]
+  const generations = [...groups.entries()]
     .map(([id, generationCandidates]) => {
       const request = ["fixture", "legacy"].includes(id) ? null : requestsById.get(id) || null;
       const newestRun = request?.runs[0] || null;
@@ -43,8 +45,28 @@ export function buildCandidateGenerations(
         promptSuiteVersion: request?.promptSuiteVersion || generationCandidates[0]?.revision.promptSuiteVersion || null,
         pipelineVersion: request?.pipelineVersion || generationCandidates[0]?.revision.pipelineVersion || null,
         pipelineRunId: newestRun?.autopilotRunId || generationCandidates[0]?.revision.pipelineRunId || null,
+        status: request?.status || "completed",
+        failureSummary: request?.failureSummary || null,
       } satisfies CandidateGeneration;
     })
+  for (const request of pipelineRequests) {
+    if (request.operation !== "transcript-to-snacks" || groups.has(request.id)) continue;
+    const newestRun = request.runs[0] || null;
+    generations.push({
+      id: request.id,
+      pipelineRequestId: request.id,
+      sequence: 0,
+      createdAt: request.createdAt,
+      candidateCount: 0,
+      acceptedCount: 0,
+      promptSuiteVersion: request.promptSuiteVersion,
+      pipelineVersion: request.pipelineVersion,
+      pipelineRunId: newestRun?.autopilotRunId || null,
+      status: request.status,
+      failureSummary: request.failureSummary,
+    });
+  }
+  return generations
     .sort((a, b) => a.createdAt - b.createdAt)
     .map((generation, index) => ({ ...generation, sequence: index + 1 }));
 }

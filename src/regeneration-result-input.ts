@@ -105,7 +105,7 @@ export function validateSuccessfulRegenerationResult(body: Record<string, unknow
     return { ok: true, value: {
       requestId, attemptId, runId, status: "ok", operation: "snack-regeneration", episodeId, candidateId,
       baseRevisionId, inputRevisionId, resultSchemaVersion: "1", promptSuiteVersion, pipelineVersion,
-      evidence, candidate: { selectionId, editorialTitle, publicTitle, standfirst, paragraphs, structureException, claimEvidenceMap, validationWarnings },
+      evidence, candidate: { selectionId, editorialTitle, publicTitle, standfirst, paragraphs, structureException, claimEvidenceMap, validationWarnings, wordCount: paragraphs.join(" ").split(/\s+/).filter(Boolean).length, paragraphCount: paragraphs.length },
       rationale: optional(body.rationale, "rationale", 1000),
     } };
   } catch (error) {

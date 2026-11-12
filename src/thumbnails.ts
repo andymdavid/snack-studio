@@ -11,11 +11,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { dirname, resolve, join, normalize, extname } from 'node:path';
 import { CONTRIBUTOR_UPLOAD_DIR } from './config.ts';
 import { getCurrentAutopilotTarget } from './db.ts';
+import { autopilotSigningUrl, autopilotTransportUrl } from './autopilot-url.ts';
 
 export type ThumbnailJobStatus = "draft" | "extracting" | "grounding" | "generating" | "in-review" | "approved" | "failed";
 
 const EPISODE_THUMBNAIL_PIPELINE_VERSION = '10';
-const SNACK_THUMBNAIL_PIPELINE_VERSION = '4';
+const SNACK_THUMBNAIL_PIPELINE_VERSION = '5';
 const EPISODE_THUMBNAIL_GUEST_REFERENCE = resolve('public/images/references/episode-thumbnail-guest-canonical.png');
 const EPISODE_THUMBNAIL_TWO_HOST_REFERENCE = resolve('public/images/references/episode-thumbnail-two-host-canonical.png');
 const EPISODE_THUMBNAIL_TWO_HOST_FOREGROUND = resolve('public/images/references/episode-thumbnail-two-host-foreground-v1.png');
@@ -67,6 +68,18 @@ export type ThumbnailJob = {
   failureSummary?: string | null;
   generationRound?: number;
 };
+
+export function currentPublicationThumbnailJobs(
+  jobs: ThumbnailJob[],
+  candidates: Array<{ id: string; currentRevisionId: string }>,
+  transcriptRevisionId: string,
+) {
+  const currentSnackRevisions = new Map(candidates.map((candidate) => [candidate.id, candidate.currentRevisionId]));
+  return jobs.filter((job) => job.assetKind === "episode"
+    ? job.transcriptRevisionId === transcriptRevisionId
+    : Boolean(job.snackCandidateId && job.snackRevisionId
+      && currentSnackRevisions.get(job.snackCandidateId) === job.snackRevisionId));
+}
 
 function parseStringArray(value: unknown): string[] {
   try {
@@ -184,6 +197,8 @@ export function createThumbnailGeneration(jobId: string, actorPubkey: string, pu
   }, null, 2));
   const token = `${crypto.randomUUID().replaceAll('-', '')}${crypto.randomUUID().replaceAll('-', '')}`;
   const { pipeline, version } = thumbnailPipelineRoute(job.assetKind);
+  const owner=process.env.SNACK_STUDIO_AUTOPILOT_OWNER_NPUB?.trim();
+  const triggerPath=`${owner ? '/api/owners/'+encodeURIComponent(owner) : '/api'}/pipelines/triggers/http/${pipeline}.v${version}`;
   db.query("UPDATE thumbnail_jobs SET status=?1, callback_token_hash=?2, generation_round=?3, pipeline_name=?4, pipeline_version=?5, autopilot_run_id=NULL, failure_summary=NULL, updated_at=?6 WHERE id=?7")
     .run(job.assetKind === 'episode' ? 'generating' : 'extracting', hashToken(token), round, pipeline, version, Date.now(), job.id);
   if (targetedNote) db.query('UPDATE thumbnail_jobs SET review_notes=?1 WHERE id=?2').run(targetedNote, job.id);
@@ -192,7 +207,9 @@ export function createThumbnailGeneration(jobId: string, actorPubkey: string, pu
   return {
     job: getThumbnailJob(job.id),
     triggerRequest: {
-      url: new URL(`/api/pipelines/triggers/http/${pipeline}.v${version}`, target.url).toString(), method: 'POST',
+      url: new URL(triggerPath, autopilotSigningUrl(target.url)).toString(),
+      transportUrl: new URL(triggerPath, autopilotTransportUrl(target.url)).toString(),
+      method: 'POST',
       body: { input: { source: 'snack-studio', operation: job.assetKind === 'episode' ? 'episode-thumbnail' : 'snack-thumbnail', jobId: job.id, generationRound: round, contextPath, outputDirectory, agent: 'codex', webhook: { url: `${publicOrigin.replace(/\/$/, '')}/api/thumbnail-webhooks/${job.id}`, token, authHeader: 'x-snack-studio-token' } } },
     },
   };
@@ -213,7 +230,7 @@ export function verifyThumbnailGenerationTrigger(jobId: string, trigger: Record<
   const target = getCurrentAutopilotTarget();
   const expected = thumbnailPipelineRoute(job.assetKind).path;
   return Boolean(row?.callback_token_hash && String(trigger.method) === 'POST' && input.jobId === jobId
-    && url.origin === new URL(target.url).origin && url.pathname.endsWith(expected)
+    && url.origin === new URL(autopilotSigningUrl(target.url)).origin && url.pathname.endsWith(expected)
     && String(webhook.token || '') && hashToken(String(webhook.token)) === row.callback_token_hash);
 }
 
@@ -558,8 +575,9 @@ function publicationContext(episodeId: string) {
 }
 
 export function getPublicationPreparation(episodeId: string) {
-  const { participants } = publicationContext(episodeId);
-  const jobs = listThumbnailJobs(episodeId);
+  const { participants, approved, transcript } = publicationContext(episodeId);
+  const approvedCandidates = approved.candidateIds.map(getCandidate).filter((candidate) => candidate !== null);
+  const jobs = currentPublicationThumbnailJobs(listThumbnailJobs(episodeId), approvedCandidates, transcript.id);
   const contributors = participants.resolved.map((participant) => ({
     ...participant,
     profile: getContributor(participant.contributorId),

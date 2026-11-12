@@ -61,7 +61,7 @@ describe('listKnowledgeBackfill', () => {
       INSERT INTO pipeline_requests(
         id, episode_id, pipeline_name, pipeline_version, result_schema_version,
         status, attempt_count, created_at
-      ) VALUES (?1, 'episode-67', 'snack-studio-graph-relationships', '7', '5', ?2, ?3, ?4)
+      ) VALUES (?1, 'episode-67', 'snack-studio-graph-relationships', '8', '5', ?2, ?3, ?4)
     `);
     insert.run('request-1', 'failed', 1, 1);
     expect(listKnowledgeBackfill(database)[0]?.status).toBe('retryable');
@@ -81,7 +81,7 @@ describe('listKnowledgeBackfill', () => {
   });
 });
 
-test('graph readiness requires the current v7 result and its durable knowledge and topic records', () => {
+test('graph readiness accepts a completed v8 result when its durable knowledge and topic records exist', () => {
   const database = new Database(':memory:'); databases.push(database);
   database.exec(`
     CREATE TABLE episodes(id TEXT PRIMARY KEY, active_transcript_revision_id TEXT);
@@ -93,7 +93,7 @@ test('graph readiness requires the current v7 result and its durable knowledge a
     INSERT INTO episodes VALUES('episode-1','revision-1');
   `);
   expect(getEpisodeGraphReadiness('episode-1', database).state).toBe('not-started');
-  database.query("INSERT INTO pipeline_requests VALUES('request-1','episode-1','revision-1','snack-studio-graph-relationships','7','v7-governed-roots-reusable-subtopics','5','completed',NULL,2,1)").run();
+  database.query("INSERT INTO pipeline_requests VALUES('request-1','episode-1','revision-1','snack-studio-graph-relationships','8','v8-dense-speaker-attributed-graph','5','completed',NULL,2,1)").run();
   expect(getEpisodeGraphReadiness('episode-1', database).state).toBe('incomplete');
   database.query("INSERT INTO knowledge_nodes VALUES('node-1','episode-1','revision-1')").run();
   database.query("INSERT INTO transcript_topic_analyses VALUES('analysis-1','episode-1','revision-1')").run();

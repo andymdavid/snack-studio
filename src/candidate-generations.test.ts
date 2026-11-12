@@ -73,4 +73,25 @@ describe("buildCandidateGenerations", () => {
     const generations = buildCandidateGenerations([historical], [request("request-1", 100)]);
     expect(generations[0]).toMatchObject({ id: "request-1", pipelineRequestId: "request-1", sequence: 1 });
   });
+
+  test("includes failed transcript runs that persisted no candidates", () => {
+    const failed = request("request-2", 200);
+    failed.status = "needs-review";
+    failed.failureSummary = "evidence[0].start must be a string";
+    failed.runs[0]!.status = "error";
+
+    const generations = buildCandidateGenerations(
+      [candidate("old-1", "request-1", 110)],
+      [failed, request("request-1", 100)],
+    );
+
+    expect(generations).toHaveLength(2);
+    expect(generations[1]).toMatchObject({
+      id: "request-2",
+      sequence: 2,
+      candidateCount: 0,
+      status: "needs-review",
+      failureSummary: "evidence[0].start must be a string",
+    });
+  });
 });

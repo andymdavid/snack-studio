@@ -9,6 +9,7 @@ import {
   listEpisodePipelineRequests,
   markPipelineRunFailed,
   markPipelineRunStarted,
+  markPipelineRunCancelled,
   markStalePipelineRunsTimedOut,
   verifyPreparedPipelineTrigger,
   verifyPipelineRunCallbackToken,
@@ -77,8 +78,8 @@ describe("episode pipeline lifecycle", () => {
   test("recognizes obsolete graph contracts so failed v2 requests cannot be retried forever", () => {
     const base = {
       pipelineName: 'snack-studio-graph-relationships',
-      pipelineVersion: '7',
-      promptSuiteVersion: 'v7-governed-roots-reusable-subtopics',
+      pipelineVersion: '9',
+      promptSuiteVersion: 'v9-normalized-governed-topics',
       resultSchemaVersion: '5',
     };
     expect(isObsoleteKnowledgeGraphRequest(base)).toBeFalse();
@@ -99,7 +100,7 @@ describe("episode pipeline lifecycle", () => {
     }, database);
 
     expect(request.inputTranscriptSha256).toBe("digest-1");
-    expect(request.promptSuiteVersion).toBe("v9-frozen-single-editorial-pass");
+    expect(request.promptSuiteVersion).toBe("v13-natural-conversational-prose");
     expect(getPipelineRequestContext(request.id, database)?.transcript).toMatchObject({ id: "revision-1", sha256: "digest-1" });
     expect(getPipelineRequestTranscript(request.id, database)).toMatchObject({
       requestId: request.id,
@@ -240,5 +241,49 @@ describe("episode pipeline lifecycle", () => {
       status: "timed-out",
       runs: [{ status: "timed-out", autopilotRunId: "remote-timeout" }],
     });
+  });
+
+  test("can time out only overdue runs for one operation", () => {
+    const database = testDatabase();
+    const snackRequest = createPipelineRequest({
+      episodeId: "episode-64", actorPubkey: "editor", transcriptRevisionId: "revision-1",
+      autopilotTargetId: "rick", pipelineName: "pipeline-v2", operation: "transcript-to-snacks",
+      idempotencyKey: "snacks",
+    }, database);
+    const transcriptRequest = createPipelineRequest({
+      episodeId: "episode-64", actorPubkey: "editor", transcriptRevisionId: "revision-1",
+      autopilotTargetId: "rick", pipelineName: "transcript-cleanup", operation: "transcript-normalization",
+      idempotencyKey: "transcript",
+    }, database);
+    for (const request of [snackRequest, transcriptRequest]) {
+      const prepared = createPipelineRun({ requestId: request.id }, database);
+      markPipelineRunStarted({ runId: prepared.run.id, autopilotRunId: `remote-${request.operation}`, remoteStatus: "running" }, database);
+      database.query("UPDATE pipeline_runs SET triggered_at = 100, updated_at = 100 WHERE id = ?1").run(prepared.run.id);
+    }
+
+    expect(markStalePipelineRunsTimedOut({
+      episodeId: "episode-64", operation: "transcript-normalization", timeoutMs: 500, now: 1000,
+    }, database)).toBe(1);
+    expect(listEpisodePipelineRequests("episode-64", database).map(({ operation, status }) => ({ operation, status })))
+      .toEqual(expect.arrayContaining([
+        { operation: "transcript-normalization", status: "timed-out" },
+        { operation: "transcript-to-snacks", status: "running" },
+      ]));
+  });
+
+  test("marks a remotely stopped active run cancelled and unlocks its request", () => {
+    const database = testDatabase();
+    const request = createPipelineRequest({
+      episodeId: "episode-64", actorPubkey: "editor", transcriptRevisionId: "revision-1",
+      autopilotTargetId: "rick", pipelineName: "pipeline-v2",
+    }, database);
+    const prepared = createPipelineRun({ requestId: request.id }, database);
+    markPipelineRunStarted({ runId: prepared.run.id, autopilotRunId: "remote-cancelled", remoteStatus: "running" }, database);
+    expect(markPipelineRunCancelled({ runId: prepared.run.id }, database)).toMatchObject({ status: "cancelled" });
+    expect(listEpisodePipelineRequests("episode-64", database)[0]).toMatchObject({
+      status: "cancelled",
+      runs: [{ status: "cancelled", failureCategory: "user-cancelled" }],
+    });
+    expect(() => markPipelineRunCancelled({ runId: prepared.run.id }, database)).toThrow("cannot be cancelled from cancelled");
   });
 });

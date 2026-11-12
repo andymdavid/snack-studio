@@ -12,12 +12,18 @@ function normalizedLabel(value: string): string {
   return value.trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
+function plausibleSpeakerLabel(value: string): boolean {
+  const label = value.trim();
+  return Boolean(label && /[a-z]/i.test(label) && !/^\d{1,2}(?::\d{2}){0,2}(?:[.,]\d+)?$/.test(label));
+}
+
 type TranscriptSpeakerTurn = { speaker: string; headerStart: number; contentStart: number; contentEnd: number };
 
 export function transcriptSpeakerTurns(transcriptText: string): TranscriptSpeakerTurn[] {
   const matches = [
     ...[...transcriptText.matchAll(/^([^\n()]{1,100})\s+\((?:\d{1,2}:)?\d{2}(?:[.,]\d+)?\)\s*$/gm)],
     ...[...transcriptText.matchAll(/^([^\n:]{1,100}):[ \t]*(?:\n[ \t]*)?((?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?)[ \t]*$/gm)],
+    ...[...transcriptText.matchAll(/^([^\n:]{1,100})[ \t]*\n[ \t]*((?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?)[ \t]*$/gm)],
     ...[...transcriptText.matchAll(/^\[(?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?\][ \t]*([^\n]{1,100})[ \t]*$/gm)],
     ...[...transcriptText.matchAll(/^\[(?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?\][ \t]*\n([^\n]{1,100})[ \t]*$/gm)],
     ...listContributors().flatMap(({ aliases }) => aliases.flatMap((alias) => {
@@ -25,6 +31,7 @@ export function transcriptSpeakerTurns(transcriptText: string): TranscriptSpeake
       return [...transcriptText.matchAll(new RegExp(`^${escaped}[ \\t]*$`, "gmi"))];
     })),
   ].map((match) => ({ speaker: String(match[1] || match[0]).trim(), headerStart: match.index!, contentStart: match.index! + match[0].length }))
+    .filter((match) => plausibleSpeakerLabel(match.speaker))
     .sort((a, b) => a.headerStart - b.headerStart || b.contentStart - a.contentStart);
   const unique = matches.filter((match, index) => index === 0 || match.headerStart !== matches[index - 1]!.headerStart);
   return unique.map((match, index) => ({ ...match, contentEnd: unique[index + 1]?.headerStart ?? transcriptText.length }));
@@ -46,6 +53,7 @@ export function transcriptSpeakerLabels(transcriptText: string): string[] {
   const matches = [
     ...[...transcriptText.matchAll(/^([^\n()]{1,100})\s+\((?:\d{1,2}:)?\d{2}(?:[.,]\d+)?\)\s*$/gm)].map((match) => ({ index: match.index, label: match[1] })),
     ...[...transcriptText.matchAll(/^([^\n:]{1,100}):[ \t]*(?:\n[ \t]*)?((?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?)[ \t]*$/gm)].map((match) => ({ index: match.index, label: match[1] })),
+    ...[...transcriptText.matchAll(/^([^\n:]{1,100})[ \t]*\n[ \t]*((?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?)[ \t]*$/gm)].map((match) => ({ index: match.index, label: match[1] })),
     ...[...transcriptText.matchAll(/^\[(?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?\][ \t]*([^\n]{1,100})[ \t]*$/gm)].map((match) => ({ index: match.index, label: match[1] })),
     ...[...transcriptText.matchAll(/^\[(?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?\][ \t]*\n([^\n]{1,100})[ \t]*$/gm)].map((match) => ({ index: match.index, label: match[1] })),
     // Some edited transcripts use a known contributor alias on its own line
@@ -59,6 +67,7 @@ export function transcriptSpeakerLabels(transcriptText: string): string[] {
   ].sort((a, b) => a.index - b.index);
   for (const match of matches) {
     const label = match.label!.trim();
+    if (!plausibleSpeakerLabel(label)) continue;
     const key = normalizedLabel(label);
     if (!key || seen.has(key)) continue;
     seen.add(key);

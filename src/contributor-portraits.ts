@@ -6,6 +6,7 @@ import { db } from './db.ts';
 import { CONTRIBUTOR_UPLOAD_DIR } from './config.ts';
 import { getContributor } from './contributors.ts';
 import { getCurrentAutopilotTarget } from './db.ts';
+import { autopilotSigningUrl, autopilotTransportUrl } from './autopilot-url.ts';
 import { recordAuditEvent } from './episodes.ts';
 
 const PROMPT_VERSION = 'v3-contributor-identity-locked-voxel';
@@ -90,7 +91,11 @@ export function createPortraitJob(contributorId: string, actorPubkey: string, pu
   };
   return {
     job: listPortraitJobs(contributor.id)[0],
-    triggerRequest: { url: new URL(`/api/pipelines/triggers/http/snack-studio-contributor-portrait.v${PIPELINE_VERSION}`, target.url).toString(), method: 'POST', body: { input } },
+    triggerRequest: {
+      url: new URL(`/api/pipelines/triggers/http/snack-studio-contributor-portrait.v${PIPELINE_VERSION}`, autopilotSigningUrl(target.url)).toString(),
+      transportUrl: new URL(`/api/pipelines/triggers/http/snack-studio-contributor-portrait.v${PIPELINE_VERSION}`, autopilotTransportUrl(target.url)).toString(),
+      method: 'POST', body: { input },
+    },
   };
 }
 
@@ -125,7 +130,7 @@ export function verifyPortraitTrigger(jobId: string, trigger: Record<string, unk
   let url: URL; try { url = new URL(String(trigger.url || '')); } catch { return false; }
   const target = getCurrentAutopilotTarget();
   return Boolean(row && String(trigger.method) === 'POST' && input.jobId === jobId
-    && url.origin === new URL(target.url).origin && url.pathname.endsWith(`/snack-studio-contributor-portrait.v${PIPELINE_VERSION}`)
+    && url.origin === new URL(autopilotSigningUrl(target.url)).origin && url.pathname.endsWith(`/snack-studio-contributor-portrait.v${PIPELINE_VERSION}`)
     && tokenHash(String(webhook.token || '')) === row.callback_token_hash);
 }
 

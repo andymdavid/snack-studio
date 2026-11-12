@@ -40,6 +40,12 @@ describe("publication metadata", () => {
     expect(transcriptSpeakerLabels(colonFirst)).toEqual(["Pete", "Andy", "Jarad"]);
   });
 
+  test("does not interpret minute-second timestamps as contributor names", () => {
+    const timestampLines = `Pete\n00:03\nWelcome.\n\nAndy\n01:05\nHello.\n\nPete\n59:10\nContinue.`;
+    expect(transcriptSpeakerLabels(timestampLines)).toEqual(["Pete", "Andy"]);
+    expect(resolveTranscriptParticipants(timestampLines).unresolved).toEqual([]);
+  });
+
   test("extracts registered contributor aliases used as bare speaker headings", () => {
     const bare = `Pete\nWelcome back.\n\nAndy\nGood to be here.\n\nPete\nLet's begin.`;
     expect(transcriptSpeakerLabels(bare)).toEqual(["Pete", "Andy"]);
@@ -61,6 +67,19 @@ describe("publication metadata", () => {
     const result = resolveTranscriptParticipants(transcript);
     expect(result.resolved.map(({ contributorId }) => contributorId)).toEqual(["pete-winn", "dpc"]);
     expect(result.unresolved).toEqual(["New Guest"]);
+  });
+
+  test("resolves PW21 to Pete Winn while leaving Skyler as the guest", () => {
+    const result = resolveTranscriptParticipants(`PW21 (00:05.654)\nWelcome.\n\nSkyler (00:21.58)\nThanks for having me.`);
+    expect(result.resolved).toEqual([expect.objectContaining({ speakerLabel: "PW21", contributorId: "pete-winn", name: "Pete Winn" })]);
+    expect(result.unresolved).toEqual(["Skyler"]);
+  });
+
+  test("detects an unregistered guest above a timestamp on the next line", () => {
+    const transcript = `Pete\n00:06\nWelcome to the show.\n\nUnregistered Guest\n00:22\nGood to be here.\n\nAndy\n00:23\nHow are you doing?`;
+
+    expect(transcriptSpeakerLabels(transcript)).toEqual(["Pete", "Unregistered Guest", "Andy"]);
+    expect(resolveTranscriptParticipants(transcript).unresolved).toEqual(["Unregistered Guest"]);
   });
 
   test("resolves website topic IDs and names without classification", () => {

@@ -27,10 +27,29 @@ export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 export const PIPELINE_NAME = process.env.SNACK_STUDIO_PIPELINE_NAME || process.env.IS_STUDIO_PIPELINE_NAME || process.env.CHAT_WAPP_PIPELINE_NAME || "snack-studio-transcript-to-snacks";
 export const WINGMAN_URL = (process.env.WINGMAN_URL || "http://127.0.0.1:3021").replace(/\/$/, "");
+function externalAutopilotUrl(...values: Array<string | undefined>): string {
+  for (const value of values) {
+    if (!value?.trim()) continue;
+    try {
+      const url = new URL(value.trim());
+      if (url.protocol === "https:" && !["localhost", "127.0.0.1", "::1"].includes(url.hostname)) {
+        return url.toString().replace(/\/$/, "");
+      }
+    } catch {
+      // Ignore legacy or malformed public URL settings and use the deployment default.
+    }
+  }
+  return "https://lara.runwingman.com";
+}
+export const WINGMAN_PUBLIC_URL = externalAutopilotUrl(
+  process.env.WAPP_AUTOPILOT_PUBLIC_URL,
+  process.env.WINGMAN_PUBLIC_URL,
+  process.env.PUBLIC_WINGMAN_URL,
+);
 export const HTTP_TRIGGER_TOKEN = process.env.WINGMEN_PIPELINE_HTTP_TRIGGER_TOKEN || "";
 export const ALLOW_MOCK = (process.env.SNACK_STUDIO_ALLOW_MOCK || process.env.IS_STUDIO_ALLOW_MOCK || process.env.CHAT_WAPP_ALLOW_MOCK) !== "0";
 export const PUBLIC_ORIGIN = (process.env.SNACK_STUDIO_PUBLIC_ORIGIN || process.env.IS_STUDIO_PUBLIC_ORIGIN || process.env.CHAT_WAPP_PUBLIC_ORIGIN || "").replace(/\/$/, "");
 export const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "snack-studio-local-demo";
-export const PIPELINE_TIMEOUT_MS = Math.max(60_000, Number(process.env.SNACK_STUDIO_PIPELINE_TIMEOUT_MS || 30 * 60 * 1000));
+export const PIPELINE_TIMEOUT_MS = Math.max(60_000, Number(process.env.SNACK_STUDIO_PIPELINE_TIMEOUT_MS || 3 * 60 * 60 * 1000));
 export const WAPP_OWNER_NPUB = process.env.WAPP_OWNER_NPUB || "";
 export const WAPP_ALLOWED_NPUBS_JSON = process.env.WAPP_ALLOWED_NPUBS_JSON || "[]";
