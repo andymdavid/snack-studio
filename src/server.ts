@@ -1,3 +1,4 @@
+import {useSuppliedContributorPortrait} from './supplied-contributor-portrait.ts';
 import {agentContributorRoute, contributorForm} from './agent-contributors.ts';
 import { listGraphParticipants, setGraphParticipants } from './graph-participants.ts';
 import { listCanonicalConcepts, saveCanonicalConcept, type ConceptInput } from './canonical-concepts.ts';
@@ -281,6 +282,15 @@ function prepareEpisodePipelineRun(req: Request, pipelineRequest: NonNullable<Re
 async function handleApi(req: Request, url: URL): Promise<Response | null> {
   const { pathname } = url;
 
+  const suppliedPortrait = pathname.match(/^\/api\/nip98\/editorial\/contributors\/([^/]+)\/portrait$/);
+  if (suppliedPortrait && req.method === 'POST') {
+    const verified=await verifyNip98Request(req,nip98VerificationUrl(req,url));
+    if(!verified.ok)return json({error:verified.error},401);
+    if(!hasConfiguredAccessRules()&&normalizePubkey(WAPP_OWNER_NPUB)!==verified.pubkey)return json({error:'Explicit Studio access required'},403);
+    if(!hasAccess(verified.pubkey,'edit'))return json({error:'Edit access required'},403);
+    try{return json({contributor:publicContributor(await useSuppliedContributorPortrait(decodeURIComponent(suppliedPortrait[1]!),await readJson(req),verified.pubkey,webhookOrigin(req)))},201);}
+    catch(error){return json({error:error instanceof Error?error.message:String(error)},409);}
+  }
   // Verify the original signed URL before forwarding only the production allowlist.
   const operatorEditorial = pathname.match(/^\/api\/nip98\/editorial\/episodes\/([^/]+)\/(approve-copy|episode-thumbnail|approve-preparation)$/);
   if (operatorEditorial && req.method === 'POST') {
