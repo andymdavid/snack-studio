@@ -6,7 +6,7 @@ import { join } from "node:path";
 import {applyHumanizerRevisions} from "./humanizer-revisions.ts";
 import { applyGraphCopyEdits } from './graph-copy-edits.ts';
 import { speakerForTranscriptExcerpt } from './publication-metadata.ts';
-import {approveEditedCopy,useSuppliedEpisodeThumbnail,approvePreparation} from "./operator-editorial.ts";
+import {approveEditedCopy,useSuppliedEpisodeThumbnail,approvePreparation,prepareEpisodeInspection} from "./operator-editorial.ts";
 import { readFileSync } from "node:fs";
 import type { Event as NostrEvent } from "nostr-tools";
 import {
@@ -292,7 +292,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     catch(error){return json({error:error instanceof Error?error.message:String(error)},409);}
   }
   // Verify the original signed URL before forwarding only the production allowlist.
-  const operatorEditorial = pathname.match(/^\/api\/nip98\/editorial\/episodes\/([^/]+)\/(approve-copy|episode-thumbnail|approve-preparation)$/);
+  const operatorEditorial = pathname.match(/^\/api\/nip98\/editorial\/episodes\/([^/]+)\/(approve-copy|episode-thumbnail|approve-preparation|prepare-inspection)$/);
   if (operatorEditorial && req.method === 'POST') {
     const verified = await verifyNip98Request(req, nip98VerificationUrl(req, url));
     if (!verified.ok) return json({error:verified.error},401);
@@ -300,7 +300,7 @@ async function handleApi(req: Request, url: URL): Promise<Response | null> {
     if (!hasAccess(verified.pubkey,'edit')) return json({error:'Edit access required'},403);
     try {
       const episodeId=decodeURIComponent(operatorEditorial[1]!),body=await readJson(req);
-      const result=operatorEditorial[2]==='approve-copy' ? approveEditedCopy(episodeId,body,verified.pubkey) : operatorEditorial[2]==='approve-preparation' ? approvePreparation(episodeId,body,verified.pubkey) : await useSuppliedEpisodeThumbnail(episodeId,body,verified.pubkey);
+      const result=operatorEditorial[2]==='approve-copy' ? approveEditedCopy(episodeId,body,verified.pubkey) : operatorEditorial[2]==='approve-preparation' ? approvePreparation(episodeId,body,verified.pubkey) : operatorEditorial[2]==='prepare-inspection' ? prepareEpisodeInspection(episodeId,body,verified.pubkey) : await useSuppliedEpisodeThumbnail(episodeId,body,verified.pubkey);
       return json(result,201);
     } catch(error) {return json({error:error instanceof Error?error.message:String(error)},409);}
   }

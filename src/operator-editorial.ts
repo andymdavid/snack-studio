@@ -5,13 +5,32 @@ import {listThumbnailJobs,getThumbnailJobDetail} from './thumbnails.ts';
 import {buildPublicationPackage} from './publication-package.ts';
 /** Explicit operator-directed editorial actions; deliberately separate from preparation automation. */
 import {db} from './db.ts';
-import {getEpisode,recordAuditEvent} from './episodes.ts';
+import {getEpisode,recordAuditEvent,updateEpisodeMetadata} from './episodes.ts';
+import {planInspectionMetadata} from './inspection-input.ts';
+import {getLatestWebsiteValidation,stageAndValidateWebsitePackage} from './website-validation.ts';
 import {listCandidates,createCandidateRevision,updateCandidateDecision,setApprovedCandidateOrder,approveCandidateBatch} from './candidates.ts';
 import {validateCandidateRevision} from './candidate-input.ts';
 import {finalSetFingerprint} from './agent-production-policy.ts';
 import {preparePublicationThumbnails,uploadEpisodeThumbnail,approveThumbnailCandidate} from './thumbnails.ts';
 function authority(body:Record<string,unknown>){if(body.operatorApproved!==true||typeof body.approvalMessageId!=='string'||!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(body.approvalMessageId))throw Error('Explicit operator approval and source message reference required');}
 function guards(episodeId:string,body:Record<string,unknown>){authority(body);const ep=getEpisode(episodeId);if(!ep)throw Error('Episode not found');if(body.expectedTranscriptRevisionId!==ep.activeTranscriptRevisionId)throw Error('Transcript changed');const candidates=listCandidates(episodeId);if(body.expectedFinalSetFingerprint!==finalSetFingerprint(candidates))throw Error('Snack set changed');return {ep,candidates};}
+
+/** Finish the inspection package through the same guarded editor API; never push or deploy. */
+export function prepareEpisodeInspection(episodeId:string,body:Record<string,unknown>,actor:string){
+ const {ep}=guards(episodeId,body);
+ if(ep.status!=='approved')throw Error('Approved copy required');
+ if(body.validateWebsite!==undefined&&typeof body.validateWebsite!=='boolean')throw Error('validateWebsite must be boolean');
+ const metadata=planInspectionMetadata(ep,body.metadata??{});
+ const changed=['publicTitle','publicSummary','videoUrl'].some(key=>metadata[key as keyof typeof metadata]!==ep[key as keyof typeof ep]);
+ if(changed)updateEpisodeMetadata(episodeId,{...metadata,actorPubkey:actor});
+ const packageValue=buildPublicationPackage(episodeId);
+ if(!packageValue.ready)throw Error('Finish the inspection package before validation: '+packageValue.blockers.map(b=>b.message).join(' '));
+ let validation=getLatestWebsiteValidation(episodeId);
+ if(body.validateWebsite===true&&!(validation?.status==='passed'&&validation.packageFingerprint===packageValue.fingerprint))validation=stageAndValidateWebsitePackage(episodeId,actor);
+ recordAuditEvent({actorPubkey:actor,action:'editorial.operator-inspection.prepared',entityType:'episode',entityId:episodeId,
+   detail:{approvalMessageId:body.approvalMessageId,metadataKeys:Object.keys((body.metadata??{}) as object),validationId:validation?.id??null,validationStatus:validation?.status??null}});
+ return {episode:getEpisode(episodeId),package:packageValue,validation};
+}
 export function approveEditedCopy(episodeId:string,body:Record<string,unknown>,actor:string){return db.transaction(()=>{
  const {ep,candidates}=guards(episodeId,body);if(ep.status==='approved')throw Error('Episode already approved; reconcile before editing');
  if(!Array.isArray(body.articles)||body.articles.length!==candidates.length||![6,7].includes(candidates.length))throw Error('Complete set of six or seven Snacks required');
