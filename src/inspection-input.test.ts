@@ -1,6 +1,6 @@
 import {test,expect} from 'bun:test';
 import type {Episode} from './episodes.ts';
-import {planInspectionMetadata} from './inspection-input.ts';
+import {normalizeLegacyPublicTranscriptHeaders,planInspectionMetadata} from './inspection-input.ts';
 
 const episode = {episodeNumber:59,workingTitle:'AI Hate',publicTitle:null,publicSummary:null,
   primaryTopic:null,recordedOn:'2025-01-01',audioUrl:'https://example.com/audio',videoUrl:null,
@@ -20,4 +20,10 @@ test('inspection rejects identity, source and release controls',()=>{
 test('inspection uses existing URL and text validation',()=>{
   expect(()=>planInspectionMetadata(episode,{videoUrl:'javascript:alert(1)'})).toThrow('http(s)');
   expect(()=>planInspectionMetadata(episode,{publicSummary:'x'.repeat(501)})).toThrow('allowed length');
+});
+test('public transcript header normalization preserves words, speakers and timestamp precision',()=>{
+ const original='Pete  •  00:01.334\nA body with • in the middle.\n\nAndy  •  01:02:03.45\nThe reply.';
+ const normalized=normalizeLegacyPublicTranscriptHeaders(original);
+ expect(normalized).toBe('Pete (00:01.334)\nA body with • in the middle.\n\nAndy (01:02:03.45)\nThe reply.');
+ expect(normalizeLegacyPublicTranscriptHeaders(normalized)).toBe(normalized);
 });

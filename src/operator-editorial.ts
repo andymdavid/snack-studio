@@ -6,7 +6,7 @@ import {buildPublicationPackage} from './publication-package.ts';
 /** Explicit operator-directed editorial actions; deliberately separate from preparation automation. */
 import {db} from './db.ts';
 import {getEpisode,recordAuditEvent,updateEpisodeMetadata} from './episodes.ts';
-import {planInspectionMetadata} from './inspection-input.ts';
+import {normalizeLegacyPublicTranscriptHeaders,planInspectionMetadata} from './inspection-input.ts';
 import {getLatestWebsiteValidation,stageAndValidateWebsitePackage} from './website-validation.ts';
 import {listCandidates,createCandidateRevision,updateCandidateDecision,setApprovedCandidateOrder,approveCandidateBatch} from './candidates.ts';
 import {validateCandidateRevision} from './candidate-input.ts';
@@ -20,15 +20,23 @@ export function prepareEpisodeInspection(episodeId:string,body:Record<string,unk
  const {ep}=guards(episodeId,body);
  if(ep.status!=='approved')throw Error('Approved copy required');
  if(body.validateWebsite!==undefined&&typeof body.validateWebsite!=='boolean')throw Error('validateWebsite must be boolean');
+ if(body.normalizeTranscriptHeaders!==undefined&&typeof body.normalizeTranscriptHeaders!=='boolean')throw Error('normalizeTranscriptHeaders must be boolean');
  const metadata=planInspectionMetadata(ep,body.metadata??{});
+ const transcript=body.normalizeTranscriptHeaders===true?getLatestPublicTranscript(episodeId):null;
+ if(body.normalizeTranscriptHeaders===true&&(!transcript||transcript.status!=='approved'||transcript.id!==body.expectedPublicTranscriptId
+   ||createHash('sha256').update(transcript.transcriptText).digest('hex')!==body.expectedPublicTranscriptSha256))throw Error('Reviewed public transcript changed');
  const changed=['publicTitle','publicSummary','videoUrl'].some(key=>metadata[key as keyof typeof metadata]!==ep[key as keyof typeof ep]);
  if(changed)updateEpisodeMetadata(episodeId,{...metadata,actorPubkey:actor});
+ if(transcript){
+   const normalized=normalizeLegacyPublicTranscriptHeaders(transcript.transcriptText);
+   if(normalized!==transcript.transcriptText)reviewPublicTranscript({id:transcript.id,status:'approved',transcriptText:normalized,actorPubkey:actor});
+ }
  const packageValue=buildPublicationPackage(episodeId);
  if(!packageValue.ready)throw Error('Finish the inspection package before validation: '+packageValue.blockers.map(b=>b.message).join(' '));
  let validation=getLatestWebsiteValidation(episodeId);
  if(body.validateWebsite===true&&!(validation?.status==='passed'&&validation.packageFingerprint===packageValue.fingerprint))validation=stageAndValidateWebsitePackage(episodeId,actor);
  recordAuditEvent({actorPubkey:actor,action:'editorial.operator-inspection.prepared',entityType:'episode',entityId:episodeId,
-   detail:{approvalMessageId:body.approvalMessageId,metadataKeys:Object.keys((body.metadata??{}) as object),validationId:validation?.id??null,validationStatus:validation?.status??null}});
+   detail:{approvalMessageId:body.approvalMessageId,metadataKeys:Object.keys((body.metadata??{}) as object),normalizedPublicTranscriptId:transcript?.id??null,validationId:validation?.id??null,validationStatus:validation?.status??null}});
  return {episode:getEpisode(episodeId),package:packageValue,validation};
 }
 export function approveEditedCopy(episodeId:string,body:Record<string,unknown>,actor:string){return db.transaction(()=>{
