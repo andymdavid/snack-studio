@@ -69,7 +69,10 @@ export async function useSuppliedEpisodeThumbnail(episodeId:string,body:Record<s
  const bytes=Buffer.from(body.imageBase64,'base64');if(!bytes.length||bytes.length>15*1024*1024)throw Error('Invalid image size');
  if(body.confirmedEpisodeNumber!==ep.episodeNumber)throw Error('Confirm the episode number for the supplied image');
  const prep=preparePublicationThumbnails(episodeId,actor);const job=prep.jobs.find(j=>j.assetKind==='episode');if(!job)throw Error('Episode thumbnail job missing');
- if(job.status==='approved')throw Error('Episode thumbnail already approved; reconcile before replacing');
+ if(job.status==='approved'){
+  assertUnpublishedCopyEditable([],Boolean(db.query("SELECT 1 FROM git_publication_attempts WHERE episode_id=?1 AND (main_pushed=1 OR status='published') LIMIT 1").get(episodeId)));
+  if(!job.selectedCandidateId||body.expectedSelectedCandidateId!==job.selectedCandidateId)throw Error('Confirm the current selected thumbnail before replacing approved artwork');
+ }
  const uploaded=await uploadEpisodeThumbnail(job.id,new File([bytes],String(body.fileName||'episode-thumbnail.png'),{type:'image/png'}),actor);
  const candidate=uploaded.candidates[0];if(!candidate||candidate.modelName!=='upload')throw Error('Uploaded thumbnail candidate missing');
  const approved=approveThumbnailCandidate(candidate.id,actor);
