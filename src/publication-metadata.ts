@@ -47,8 +47,9 @@ export function speakerForTranscriptExcerpt(transcriptText: string, excerpt: str
   if (!excerpt) return null;
   const speakers = new Set<string>();
   for (const turn of transcriptSpeakerTurns(transcriptText)) {
-    const index = transcriptText.indexOf(excerpt, turn.contentStart);
-    if (index >= turn.contentStart && index < turn.contentEnd && index + excerpt.length <= turn.contentEnd) speakers.add(turn.speaker);
+    // Graph catalogues retain exact source bytes, including the speaker header.
+    const index = transcriptText.indexOf(excerpt, turn.headerStart);
+    if (index >= turn.headerStart && index < turn.contentEnd && index + excerpt.length <= turn.contentEnd) speakers.add(turn.speaker);
   }
   return speakers.size === 1 ? [...speakers][0]! : null;
 }
