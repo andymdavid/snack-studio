@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {getLatestPublicTranscript,reviewPublicTranscript} from './public-transcripts.ts';
 import {setNewsletterItems} from './curation.ts';
-import {listThumbnailJobs,getThumbnailJobDetail} from './thumbnails.ts';
+import {getPublicationPreparation,listThumbnailJobs,getThumbnailJobDetail} from './thumbnails.ts';
 import {buildPublicationPackage} from './publication-package.ts';
 /** Explicit operator-directed editorial actions; deliberately separate from preparation automation. */
 import {db} from './db.ts';
@@ -11,7 +11,7 @@ import {getLatestWebsiteValidation,stageAndValidateWebsitePackage} from './websi
 import {listCandidates,createCandidateRevision,updateCandidateDecision,setApprovedCandidateOrder,approveCandidateBatch} from './candidates.ts';
 import {validateCandidateRevision} from './candidate-input.ts';
 import {finalSetFingerprint} from './agent-production-policy.ts';
-import {preparePublicationThumbnails,uploadEpisodeThumbnail,approveThumbnailCandidate} from './thumbnails.ts';
+import {reuseReviewedSnackArtwork,preparePublicationThumbnails,uploadEpisodeThumbnail,approveThumbnailCandidate} from './thumbnails.ts';
 function authority(body:Record<string,unknown>){if(body.operatorApproved!==true||typeof body.approvalMessageId!=='string'||!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(body.approvalMessageId))throw Error('Explicit operator approval and source message reference required');}
 function guards(episodeId:string,body:Record<string,unknown>){authority(body);const ep=getEpisode(episodeId);if(!ep)throw Error('Episode not found');if(body.expectedTranscriptRevisionId!==ep.activeTranscriptRevisionId)throw Error('Transcript changed');const candidates=listCandidates(episodeId);if(body.expectedFinalSetFingerprint!==finalSetFingerprint(candidates))throw Error('Snack set changed');return {ep,candidates};}
 
@@ -94,4 +94,13 @@ export function approvePreparation(episodeId:string,body:Record<string,unknown>,
  setNewsletterItems(episodeId,body.newsletterCandidateIds.map(String),actor);
  recordAuditEvent({actorPubkey:actor,action:'editorial.operator-preparation.applied',entityType:'episode',entityId:episodeId,detail:{approvalMessageId:body.approvalMessageId,thumbnailCandidateIds:body.thumbnailCandidateIds,publicTranscriptId:transcript.id,newsletterCandidateIds:body.newsletterCandidateIds}});
  return {package:buildPublicationPackage(episodeId)};
+})();}
+
+export function reuseEpisodeArtwork(episodeId:string,body:Record<string,unknown>,actor:string){return db.transaction(()=>{
+ const {candidates}=guards(episodeId,body);
+ assertUnpublishedCopyEditable(candidates.map(c=>c.revision.publicState),Boolean(db.query("SELECT 1 FROM git_publication_attempts WHERE episode_id=?1 AND (main_pushed=1 OR status='published') LIMIT 1").get(episodeId)));
+ if(!Array.isArray(body.reuses)||!body.reuses.length||body.reuses.length>7)throw Error('Explicit artwork reuse list required');
+ const current=getPublicationPreparation(episodeId).jobs;const results=[];
+ for(const item of body.reuses){const target=current.find(j=>j.id===item.targetJobId);if(!target||target.assetKind!=='snack')throw Error('Target is not a current Snack revision');results.push(reuseReviewedSnackArtwork(item.sourceJobId,item.targetJobId,item.expectedSelectedCandidateId,actor));}
+ return {jobs:results};
 })();}

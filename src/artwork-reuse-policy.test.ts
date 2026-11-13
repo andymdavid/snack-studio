@@ -1,0 +1,5 @@
+import {test,expect} from 'bun:test';import {assertArtworkReusable} from './artwork-reuse-policy';
+const source={episodeId:'ep',assetKind:'snack',snackCandidateId:'snack',transcriptRevisionId:'transcript',status:'approved',selectedCandidateId:'image',topicColour:'#abc',contributorIds:['pete','andy']};const target={...source,status:'draft',selectedCandidateId:null};
+test('reviewed artwork can be reused for the same revised Snack',()=>expect(()=>assertArtworkReusable(source,target,'image')).not.toThrow());
+test('reuse cannot cross source, topic or contributor boundaries',()=>{for(const patch of [{episodeId:'other'},{assetKind:'episode'},{snackCandidateId:'other'},{transcriptRevisionId:'other'},{topicColour:'#def'},{contributorIds:['other']}])expect(()=>assertArtworkReusable(source,{...target,...patch},'image')).toThrow();});
+test('reuse rejects stale selection and occupied targets',()=>{expect(()=>assertArtworkReusable(source,target,'old')).toThrow();expect(()=>assertArtworkReusable(source,{...target,status:'approved',selectedCandidateId:'other'},'image')).toThrow();});

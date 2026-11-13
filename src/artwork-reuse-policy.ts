@@ -1,0 +1,5 @@
+export function assertArtworkReusable(source: {episodeId:string;assetKind:string;snackCandidateId:string|null;transcriptRevisionId:string;status:string;selectedCandidateId:string|null;topicColour:string|null;contributorIds:string[]}, target: typeof source, expectedSelectedCandidateId:string) {
+ if(source.assetKind!=='snack'||target.assetKind!=='snack'||source.episodeId!==target.episodeId||!source.snackCandidateId||source.snackCandidateId!==target.snackCandidateId||source.transcriptRevisionId!==target.transcriptRevisionId)throw Error('Artwork reuse requires the same Snack and transcript');
+ if(source.status!=='approved'||!source.selectedCandidateId||source.selectedCandidateId!==expectedSelectedCandidateId||target.status!=='draft'||target.selectedCandidateId)throw Error('Artwork changed or target already has artwork');
+ if(source.topicColour!==target.topicColour||JSON.stringify([...source.contributorIds].sort())!==JSON.stringify([...target.contributorIds].sort()))throw Error('Artwork theme or contributors changed');
+}

@@ -1,3 +1,4 @@
+import {assertArtworkReusable} from './artwork-reuse-policy';
 import { db } from "./db.ts";
 import { getCandidate, validateApprovedCandidateBatch } from "./candidates.ts";
 import { getActiveTranscriptRevision, getEpisode, recordAuditEvent } from "./episodes.ts";
@@ -628,4 +629,22 @@ export function preparePublicationThumbnails(episodeId: string, actorPubkey: str
   })();
 
   return getPublicationPreparation(episodeId);
+}
+
+/** Explicit editorial carry-forward after checking artwork against revised text. */
+export function reuseReviewedSnackArtwork(sourceJobId:string,targetJobId:string,expectedSelectedCandidateId:string,actor:string){
+ return db.transaction(()=>{
+  const source=getThumbnailJob(sourceJobId),target=getThumbnailJob(targetJobId);
+  if(!source||!target)throw Error('Thumbnail job missing');
+  assertArtworkReusable(source,target,expectedSelectedCandidateId);
+  const selected=db.query('SELECT * FROM thumbnail_candidates WHERE id=?1 AND job_id=?2').get(expectedSelectedCandidateId,source.id) as Record<string,any>|null;
+  if(!selected||!existsSync(String(selected.source_uri)))throw Error('Source artwork missing');
+  const id=crypto.randomUUID(),round=Number(target.generationRound||0)+1,now=Date.now();
+  db.query(`INSERT INTO thumbnail_candidates(id,job_id,generation_round,candidate_number,source_uri,prompt_text,model_name,width,height,mime_type,size_bytes,created_at) VALUES(?1,?2,?3,1,?4,?5,?6,?7,?8,?9,?10,?11)`)
+   .run(id,target.id,round,selected.source_uri,selected.prompt_text,'editorial-reuse:'+selected.id,selected.width,selected.height,selected.mime_type,selected.size_bytes,now);
+  db.query("UPDATE thumbnail_jobs SET status='in-review',generation_round=?1,updated_at=?2 WHERE id=?3").run(round,now,target.id);
+  const result=approveThumbnailCandidate(id,actor);
+  recordAuditEvent({actorPubkey:actor,action:'thumbnail.reviewed-artwork.reused',entityType:'thumbnail-job',entityId:target.id,detail:{sourceJobId,sourceCandidateId:selected.id,targetRevisionId:target.snackRevisionId}});
+  return result;
+ })();
 }
