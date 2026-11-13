@@ -17,3 +17,8 @@ export function planInspectionMetadata(current: Episode, patch: unknown) {
   if (!checked.ok) throw Error(checked.error);
   return checked.value;
 }
+
+/** Operator-requested corrections may revise preparation approval, never released copy. */
+export function assertUnpublishedCopyEditable(publicStates: string[], hasReleasedPublication: boolean) {
+  if (hasReleasedPublication || publicStates.includes('published')) throw Error('Published episode requires reconciliation before editing');
+}

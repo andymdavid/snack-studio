@@ -1,6 +1,6 @@
 import {test,expect} from 'bun:test';
 import type {Episode} from './episodes.ts';
-import {normalizeLegacyPublicTranscriptHeaders,planInspectionMetadata} from './inspection-input.ts';
+import {assertUnpublishedCopyEditable,normalizeLegacyPublicTranscriptHeaders,planInspectionMetadata} from './inspection-input.ts';
 
 const episode = {episodeNumber:59,workingTitle:'AI Hate',publicTitle:null,publicSummary:null,
   primaryTopic:null,recordedOn:'2025-01-01',audioUrl:'https://example.com/audio',videoUrl:null,
@@ -26,4 +26,10 @@ test('public transcript header normalization preserves words, speakers and times
  const normalized=normalizeLegacyPublicTranscriptHeaders(original);
  expect(normalized).toBe('Pete (00:01.334)\nA body with • in the middle.\n\nAndy (01:02:03.45)\nThe reply.');
  expect(normalizeLegacyPublicTranscriptHeaders(normalized)).toBe(normalized);
+});
+
+test('operator corrections can revise approved preparation but cannot overwrite released copy',()=>{
+ expect(()=>assertUnpublishedCopyEditable(['draft','approved'],false)).not.toThrow();
+ expect(()=>assertUnpublishedCopyEditable(['published','draft'],false)).toThrow('requires reconciliation');
+ expect(()=>assertUnpublishedCopyEditable(['draft'],true)).toThrow('requires reconciliation');
 });

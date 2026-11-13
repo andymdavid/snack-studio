@@ -6,7 +6,7 @@ import {buildPublicationPackage} from './publication-package.ts';
 /** Explicit operator-directed editorial actions; deliberately separate from preparation automation. */
 import {db} from './db.ts';
 import {getEpisode,recordAuditEvent,updateEpisodeMetadata} from './episodes.ts';
-import {normalizeLegacyPublicTranscriptHeaders,planInspectionMetadata} from './inspection-input.ts';
+import {assertUnpublishedCopyEditable,normalizeLegacyPublicTranscriptHeaders,planInspectionMetadata} from './inspection-input.ts';
 import {getLatestWebsiteValidation,stageAndValidateWebsitePackage} from './website-validation.ts';
 import {listCandidates,createCandidateRevision,updateCandidateDecision,setApprovedCandidateOrder,approveCandidateBatch} from './candidates.ts';
 import {validateCandidateRevision} from './candidate-input.ts';
@@ -40,7 +40,10 @@ export function prepareEpisodeInspection(episodeId:string,body:Record<string,unk
  return {episode:getEpisode(episodeId),package:packageValue,validation};
 }
 export function approveEditedCopy(episodeId:string,body:Record<string,unknown>,actor:string){return db.transaction(()=>{
- const {ep,candidates}=guards(episodeId,body);if(ep.status==='approved')throw Error('Episode already approved; reconcile before editing');
+ const {ep,candidates}=guards(episodeId,body);
+ // Preparation approval must remain editable when the operator requests revisions.
+ // Published content requires the separate publication reconciliation workflow.
+ assertUnpublishedCopyEditable(candidates.map(c=>c.revision.publicState),Boolean(db.query("SELECT 1 FROM git_publication_attempts WHERE episode_id=?1 AND (main_pushed=1 OR status='published') LIMIT 1").get(episodeId)));
  if(!Array.isArray(body.articles)||body.articles.length!==candidates.length||![6,7].includes(candidates.length))throw Error('Complete set of six or seven Snacks required');
  const seen=new Set<string>();const plan=body.articles.map((raw:any)=>{
   if(typeof raw.candidateId!=='string'||seen.has(raw.candidateId))throw Error('Duplicate or invalid candidate ID');seen.add(raw.candidateId);
