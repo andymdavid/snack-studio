@@ -21,8 +21,9 @@ type TranscriptSpeakerTurn = { speaker: string; headerStart: number; contentStar
 
 export function transcriptSpeakerTurns(transcriptText: string): TranscriptSpeakerTurn[] {
   const matches = [
+    ...[...transcriptText.matchAll(/^([^\n•]{1,100})[ \t]+•[ \t]+((?:\d{1,2}:)?\d{2}:\d{2}(?:[.,]\d+)?)[ \t]*$/gm)],
     ...[...transcriptText.matchAll(/^([^\n()]{1,100})\s+\((?:\d{1,2}:)?\d{2}(?:[.,]\d+)?\)\s*$/gm)],
-    ...[...transcriptText.matchAll(/^([^\n:]{1,100}):[ \t]*(?:\n[ \t]*)?((?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?)[ \t]*$/gm)],
+    ...[...transcriptText.matchAll(/^([^\n:•]{1,100}):[ \t]*(?:\n[ \t]*)?((?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?)[ \t]*$/gm)],
     ...[...transcriptText.matchAll(/^([^\n:]{1,100})[ \t]*\n[ \t]*((?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?)[ \t]*$/gm)],
     ...[...transcriptText.matchAll(/^\[(?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?\][ \t]*([^\n]{1,100})[ \t]*$/gm)],
     ...[...transcriptText.matchAll(/^\[(?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?\][ \t]*\n([^\n]{1,100})[ \t]*$/gm)],
@@ -51,8 +52,9 @@ export function transcriptSpeakerLabels(transcriptText: string): string[] {
   const labels: string[] = [];
   const seen = new Set<string>();
   const matches = [
+    ...[...transcriptText.matchAll(/^([^\n•]{1,100})[ \t]+•[ \t]+((?:\d{1,2}:)?\d{2}:\d{2}(?:[.,]\d+)?)[ \t]*$/gm)].map((match) => ({ index: match.index, label: match[1] })),
     ...[...transcriptText.matchAll(/^([^\n()]{1,100})\s+\((?:\d{1,2}:)?\d{2}(?:[.,]\d+)?\)\s*$/gm)].map((match) => ({ index: match.index, label: match[1] })),
-    ...[...transcriptText.matchAll(/^([^\n:]{1,100}):[ \t]*(?:\n[ \t]*)?((?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?)[ \t]*$/gm)].map((match) => ({ index: match.index, label: match[1] })),
+    ...[...transcriptText.matchAll(/^([^\n:•]{1,100}):[ \t]*(?:\n[ \t]*)?((?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?)[ \t]*$/gm)].map((match) => ({ index: match.index, label: match[1] })),
     ...[...transcriptText.matchAll(/^([^\n:]{1,100})[ \t]*\n[ \t]*((?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?)[ \t]*$/gm)].map((match) => ({ index: match.index, label: match[1] })),
     ...[...transcriptText.matchAll(/^\[(?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?\][ \t]*([^\n]{1,100})[ \t]*$/gm)].map((match) => ({ index: match.index, label: match[1] })),
     ...[...transcriptText.matchAll(/^\[(?:\d{1,2}:)?\d{2}(?::\d{2})?(?:[.,]\d+)?\][ \t]*\n([^\n]{1,100})[ \t]*$/gm)].map((match) => ({ index: match.index, label: match[1] })),

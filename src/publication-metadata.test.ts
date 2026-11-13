@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveCanonicalTopic, resolveTranscriptParticipants, speakerForTranscriptExcerpt, transcriptHasUsableSpeakerStructure, transcriptSpeakerLabels } from "./publication-metadata.ts";
+import { resolveCanonicalTopic, resolveTranscriptParticipants, speakerForTranscriptExcerpt, transcriptHasUsableSpeakerStructure, transcriptSpeakerLabels, transcriptSpeakerTurns } from "./publication-metadata.ts";
 
 const transcript = `Pete Winn (00:01)
 Welcome back.
@@ -14,6 +14,22 @@ Pete Winn (01:10)
 Let's begin.`;
 
 describe("publication metadata", () => {
+  test("resolves bullet-separated legacy speaker timestamps without inventing contributors", () => {
+    const source = 'Pete  •  00:00\nOpening claim.\n\nAndy  •  01:05\nA different claim.\n\nPete  •  01:02:03.500\nFinal claim.';
+    expect(transcriptSpeakerLabels(source)).toEqual(['Pete', 'Andy']);
+    expect(resolveTranscriptParticipants(source).unresolved).toEqual([]);
+    expect(transcriptSpeakerTurns(source).map(turn => turn.speaker)).toEqual(['Pete', 'Andy', 'Pete']);
+    expect(speakerForTranscriptExcerpt(source, 'Opening claim.')).toBe('Pete');
+    expect(speakerForTranscriptExcerpt(source, 'A different claim.')).toBe('Andy');
+    expect(speakerForTranscriptExcerpt(source, 'Final claim.')).toBe('Pete');
+  });
+
+  test("keeps unknown guests detectable in bullet-separated transcripts", () => {
+    const source = 'Pete • 00:00\nHello.\n\nNew Guest • 00:20\nGuest claim.';
+    expect(transcriptSpeakerLabels(source)).toEqual(['Pete', 'New Guest']);
+    expect(resolveTranscriptParticipants(source).unresolved).toEqual(['New Guest']);
+  });
+
   test("attributes an exact excerpt to its timestamped transcript speaker", () => {
     const source = '[00:01] Pete Winn\nA source-backed claim.\n\n[00:05] Andy David\nA different observation.';
     expect(speakerForTranscriptExcerpt(source, 'A source-backed claim.')).toBe('Pete Winn');
