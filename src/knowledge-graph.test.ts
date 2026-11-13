@@ -52,6 +52,18 @@ test('hydrates missing evidence speakers from the immutable transcript turn', ()
   expect(hydrateMissingEvidenceSpeakers(nodes, evidence, new Map([['revision-1', transcript]]))[0]?.speaker).toBe('Pete Winn');
 });
 
+test('repairs legacy bullet timestamp speaker labels while preserving explicit valid attribution', () => {
+  const nodes = [{ id: 'claim-1', source_transcript_revision_id: 'revision-1' }];
+  const evidence = [
+    { id: 'e1', knowledge_node_id: 'claim-1', excerpt: 'An exact observation.', speaker: 'Andy  •  48' },
+    { id: 'e2', knowledge_node_id: 'claim-1', excerpt: 'An exact reply.', speaker: 'Pete' },
+  ];
+  const transcript = 'Andy  •  48:53\nAn exact observation.\n\nPete  •  51:02\nAn exact reply.';
+  const result = hydrateMissingEvidenceSpeakers(nodes, evidence, new Map([['revision-1', transcript]]));
+  expect(result.map(row => row.speaker)).toEqual(['Andy', 'Pete']);
+  expect(evidence[0]!.speaker).toBe('Andy  •  48');
+});
+
 describe('listKnowledgeBackfill', () => {
   test('offers one bounded retry, then stops retrying a failed graph request', () => {
     const database = backfillDatabase();

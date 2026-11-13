@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import { db } from './db.ts';
-import { speakerForTranscriptExcerpt } from './publication-metadata.ts';
+import { isLegacyTimestampSpeakerLabel, speakerForTranscriptExcerpt } from './publication-metadata.ts';
 import { CURRENT_KNOWLEDGE_GRAPH_CONTRACT } from './pipeline-requests.ts';
 
 export const KNOWLEDGE_NODE_KINDS = ['concept', 'claim', 'example', 'question'] as const;
@@ -91,7 +91,7 @@ export function hydrateMissingEvidenceSpeakers(
 ) {
   const revisionByNode = new Map(nodeRows.map((row) => [String(row.id), String(row.source_transcript_revision_id)]));
   return evidenceRows.map((row) => {
-    if (row.speaker != null && String(row.speaker).trim()) return row;
+    if (row.speaker != null && String(row.speaker).trim() && !isLegacyTimestampSpeakerLabel(String(row.speaker))) return row;
     const revisionId = revisionByNode.get(String(row.knowledge_node_id));
     const transcript = revisionId ? transcriptByRevision.get(revisionId) : null;
     const speaker = transcript ? speakerForTranscriptExcerpt(transcript, String(row.excerpt || '')) : null;

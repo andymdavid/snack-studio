@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Database } from 'bun:sqlite';
+import {isLegacyTimestampSpeakerLabel} from './publication-metadata.ts';
 
 export const GRAPH_COPY_SKILL_COMMIT = 'a58df065367550b6ce40ff3f648335018d8e0589';
 export const graphCopyHash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -11,7 +12,7 @@ export function graphEvidenceHash(database: Database, id: string, resolveSpeaker
     FROM knowledge_evidence WHERE knowledge_node_id=?1 ORDER BY id`).all(id) as any[];
   if (!source || !rows.length) throw Error('Source transcript and evidence required');
   return graphCopyHash(rows.map(row => ({id:row.id,knowledgeNodeId:row.knowledge_node_id,excerpt:row.excerpt,
-    speaker:row.speaker && String(row.speaker).trim() ? row.speaker : resolveSpeaker(source.transcript_text, row.excerpt),
+    speaker:row.speaker && String(row.speaker).trim() && !isLegacyTimestampSpeakerLabel(String(row.speaker)) ? row.speaker : resolveSpeaker(source.transcript_text, row.excerpt) || (row.speaker && String(row.speaker).trim() ? row.speaker : null),
     transcriptStart:row.transcript_start,transcriptEnd:row.transcript_end})));
 }
 const exactKeys = (value: any, keys: string[]) => {

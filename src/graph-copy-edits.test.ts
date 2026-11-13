@@ -2,6 +2,15 @@ import {test, expect} from 'bun:test';
 import {Database} from 'bun:sqlite';
 import {applyGraphCopyEdits, graphEvidenceHash, GRAPH_COPY_SKILL_COMMIT} from './graph-copy-edits.ts';
 const resolve = () => 'Pete';
+
+test('evidence hashes match hydrated legacy speaker labels without mutating stored evidence', () => {
+ const {d}=fixture();
+ d.exec("UPDATE knowledge_evidence SET speaker='Pete  •  00' WHERE id='v'");
+ const repairedHash=graphEvidenceHash(d,'n',resolve);
+ d.exec("UPDATE knowledge_evidence SET speaker='Pete' WHERE id='v'");
+ expect(graphEvidenceHash(d,'n',resolve)).toBe(repairedHash);
+ d.close();
+});
 function fixture(){
  const d=new Database(':memory:');
  d.exec(`CREATE TABLE episodes(id TEXT PRIMARY KEY,active_transcript_revision_id TEXT);

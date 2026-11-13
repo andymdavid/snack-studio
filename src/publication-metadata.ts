@@ -38,6 +38,11 @@ export function transcriptSpeakerTurns(transcriptText: string): TranscriptSpeake
   return unique.map((match, index) => ({ ...match, contentEnd: unique[index + 1]?.headerStart ?? transcriptText.length }));
 }
 
+/** Legacy colon parsing accidentally included a bullet-separated timestamp minute in the name. */
+export function isLegacyTimestampSpeakerLabel(speaker: string): boolean {
+  return /\s[•·]\s*\d{1,2}$/.test(speaker.trim());
+}
+
 export function speakerForTranscriptExcerpt(transcriptText: string, excerpt: string): string | null {
   if (!excerpt) return null;
   const speakers = new Set<string>();
