@@ -14,6 +14,14 @@ Pete Winn (01:10)
 Let's begin.`;
 
 describe("publication metadata", () => {
+  test("keeps speaker attribution across the hour in parenthesized transcripts", () => {
+    const source = 'Pete (59:58.123)\nBefore the hour.\n\nAndy (01:00:14.255)\nLocal context matters.\n\nNew Guest (01:01:28.532)\nA guest response.';
+    expect(transcriptSpeakerTurns(source).map(turn => turn.speaker)).toEqual(['Pete', 'Andy', 'New Guest']);
+    expect(speakerForTranscriptExcerpt(source, 'Local context matters.')).toBe('Andy');
+    expect(speakerForTranscriptExcerpt(source, 'A guest response.')).toBe('New Guest');
+    expect(resolveTranscriptParticipants(source).unresolved).toEqual(['New Guest']);
+  });
+
   test("resolves bullet-separated legacy speaker timestamps without inventing contributors", () => {
     const source = 'Pete  •  00:00\nOpening claim.\n\nAndy  •  01:05\nA different claim.\n\nPete  •  01:02:03.500\nFinal claim.';
     expect(transcriptSpeakerLabels(source)).toEqual(['Pete', 'Andy']);
