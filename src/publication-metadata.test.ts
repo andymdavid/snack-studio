@@ -15,8 +15,8 @@ Let's begin.`;
 
 describe("publication metadata", () => {
   test("keeps speaker attribution across the hour in parenthesized transcripts", () => {
-    const source = 'Pete (59:58.123)\nBefore the hour.\n\nAndy (01:00:14.255)\nLocal context matters.\n\nNew Guest (01:01:28.532)\nA guest response.';
-    expect(transcriptSpeakerTurns(source).map(turn => turn.speaker)).toEqual(['Pete', 'Andy', 'New Guest']);
+    const source = 'Andy (05.12)\nOpening statement.\n\nPete (59:58.123)\nBefore the hour.\n\nAndy (01:00:14.255)\nLocal context matters.\n\nNew Guest (01:01:28.532)\nA guest response.';
+    expect(transcriptSpeakerTurns(source).map(turn => turn.speaker)).toEqual(['Andy', 'Pete', 'Andy', 'New Guest']);
     expect(speakerForTranscriptExcerpt(source, 'Local context matters.')).toBe('Andy');
     expect(speakerForTranscriptExcerpt(source, 'A guest response.')).toBe('New Guest');
     expect(resolveTranscriptParticipants(source).unresolved).toEqual(['New Guest']);
