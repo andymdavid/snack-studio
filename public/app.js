@@ -39,7 +39,7 @@ const state = {
   profiles: loadProfileCache(),
   directNsec: "",
   episodes: [],
-  episodeSort: { key: 'activity', direction: 'desc' },
+  episodeSort: { key: 'number', direction: 'desc' },
   workflows: [],
   workflowCache: {},
   workspaceOrigin: "/",

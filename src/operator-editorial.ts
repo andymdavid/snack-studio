@@ -1,3 +1,5 @@
+import {publishValidatedPackageToMain,getLatestGitPublication} from './git-publication';
+import {deployPublishedCommit} from './git-deployment';
 import {createHash} from 'node:crypto';
 import {getLatestPublicTranscript,reviewPublicTranscript} from './public-transcripts.ts';
 import {setNewsletterItems} from './curation.ts';
@@ -104,3 +106,15 @@ export function reuseEpisodeArtwork(episodeId:string,body:Record<string,unknown>
  for(const item of body.reuses){const target=current.find(j=>j.id===item.targetJobId);if(!target||target.assetKind!=='snack')throw Error('Target is not a current Snack revision');results.push(reuseReviewedSnackArtwork(item.sourceJobId,item.targetJobId,item.expectedSelectedCandidateId,actor));}
  return {jobs:results};
 })();}
+
+/** Explicit operator release; preparation-only access never reaches this operation. */
+export async function releaseEpisode(episodeId:string,body:Record<string,unknown>,actor:string,operation:'publish'|'deploy'){
+ guards(episodeId,body);
+ const validation=getLatestWebsiteValidation(episodeId);
+ const packageValue=buildPublicationPackage(episodeId);
+ if(!packageValue.ready||!validation||validation.status!=='passed'||body.expectedValidationId!==validation.id||validation.packageFingerprint!==packageValue.fingerprint)throw Error('Current passing validation required');
+ if(operation==='publish')return {publication:publishValidatedPackageToMain(episodeId,actor)};
+ const publication=getLatestGitPublication(episodeId);
+ if(!publication||body.expectedPublicationId!==publication.id||publication.packageFingerprint!==packageValue.fingerprint)throw Error('Current publication required');
+ return {deployment:await deployPublishedCommit(episodeId,actor)};
+}

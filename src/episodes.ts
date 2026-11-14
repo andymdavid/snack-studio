@@ -122,7 +122,7 @@ function mapAuditEvent(row: Record<string, unknown>): AuditEvent {
 }
 
 export function listEpisodes(): Episode[] {
-  const rows = db.query("SELECT * FROM episodes ORDER BY updated_at DESC, created_at DESC").all() as Record<string, unknown>[];
+  const rows = db.query("SELECT * FROM episodes ORDER BY episode_number DESC NULLS LAST, created_at DESC, id ASC").all() as Record<string, unknown>[];
   return rows.map(mapEpisode);
 }
 
