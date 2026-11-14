@@ -36,7 +36,7 @@ export function prepareEpisodeInspection(episodeId:string,body:Record<string,unk
  const packageValue=buildPublicationPackage(episodeId);
  if(!packageValue.ready)throw Error('Finish the inspection package before validation: '+packageValue.blockers.map(b=>b.message).join(' '));
  let validation=getLatestWebsiteValidation(episodeId);
- if(body.validateWebsite===true&&!(validation?.status==='passed'&&validation.packageFingerprint===packageValue.fingerprint))validation=stageAndValidateWebsitePackage(episodeId,actor);
+ if(body.validateWebsite===true)validation=stageAndValidateWebsitePackage(episodeId,actor);
  recordAuditEvent({actorPubkey:actor,action:'editorial.operator-inspection.prepared',entityType:'episode',entityId:episodeId,
    detail:{approvalMessageId:body.approvalMessageId,metadataKeys:Object.keys((body.metadata??{}) as object),normalizedPublicTranscriptId:transcript?.id??null,validationId:validation?.id??null,validationStatus:validation?.status??null}});
  return {episode:getEpisode(episodeId),package:packageValue,validation};
